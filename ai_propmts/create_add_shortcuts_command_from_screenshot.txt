@@ -1,0 +1,28 @@
+Can you create a JSON representation of the keyboard shortcuts in this screenshot with the following format:
+[{"app":"<Insert_App_Name>","command":"<Insert_Command_Name>","name":"<Insert_Action_Name>"},{"app":"<Insert_App_Name>","command":"<Insert_Command_Name>","name":"<Insert_Action_Name>"}]
+
+Here's an example:
+[{"app":"🔍 Finder","command":"⌘⇧A","name":"Applications Folder"},{"app":"🔨 Hammerspoon","command":"⟡K","name":"Shortcuts-KeystrokeRecorder"}]
+
+Here's a list of the apps that are already included in the database. Please match the exact formatting of one of these if it applies:
+- 🔍 Finder
+- 📝 Notes
+- 📸 TextSniper
+- 🔨 Hammerspoon
+- 🚀 Raycast
+- 📸 Cleanshot
+- 🔥 Vim
+- 🍎Mac
+- 💻iTerm
+- 👾Git
+- 🌞Chrome
+- 🦕VSCode
+- 🐧Linux
+
+Note 1: The "⟡" symbol represents my "super key", so if any commands include the combination of "⌘⌥⌃⇧", please use "⟡" instead.
+Note 2: The "Cursor" app's commands should just go under the "🦕VSCode" app category. They are the same.
+🦕VSCode
+Then, add that JSON as a string into the following shell prompt:
+notion-hotkey-cli add-multiple --json '<insert_json_here>'
+
+The result you return should be a command that is ready to run directly in my terminal, so please don't respond with any extra text.

@@ -5,6 +5,8 @@
 # 4. (<filename>.ts) Current file: Execute ts-node on the specified file with nodemon
 
 playground_dir="$HOME/Documents/Coding/Sandbox/Repl/tsRepl/index.ts"
+playground_dir_parent=$(dirname $playground_dir)
+
 
 # Help Function
 function show_help() {
@@ -27,8 +29,8 @@ elif [ -z "$1" ]; then
     ts-node
 elif [ "$1" == "open" ]; then
     # Open playground in VS Code
-    echo "Opening ts-repl playground"
-    code $playground_dir
+    echo "Opening ts-repl playground in new window"
+    code -n $playground_dir_parent
 elif [[ "$1" == "." ]]; then
     # Run ts-repl on index.ts in current directory
     if [[ ! -f "index.ts" ]]; then
@@ -42,6 +44,6 @@ elif [[ -f "$1" && "$1" == *.ts ]]; then
     nodemon -q --exec ts-node $(pwd)/$1
 else
     echo "Invalid argument"
-     exit 1
+    exit 1
 fi
 
