@@ -1,0 +1,39 @@
+on run argv
+	set targetList to ""
+	if (count of argv) ≥ 1 then set targetList to item 1 of argv
+	
+	tell application "Reminders"
+		set nowDate to current date
+		set startOfDay to nowDate
+		set time of startOfDay to 0
+		set endOfDay to startOfDay + (24 * 60 * 60)
+		
+		if targetList is not "" then
+			set listMatches to (every list whose name is targetList)
+			if (count of listMatches) = 0 then error "List not found: " & targetList
+			set listSet to listMatches
+		else
+			set listSet to lists
+		end if
+		
+		set outputLines to {}
+		repeat with l in listSet
+			set rems to (every reminder of l whose completed is false and due date is not missing value and due date ≥ startOfDay and due date < endOfDay)
+			repeat with r in rems
+				set dueText to ((due date of r) as text)
+				set bodyText to ""
+				if body of r is not missing value and body of r is not "" then set bodyText to " | " & body of r
+				set end of outputLines to ((name of r) & " | " & dueText & " | " & (name of l) & bodyText)
+			end repeat
+		end repeat
+	end tell
+	
+	if (count of outputLines) = 0 then
+		return "No reminders due today"
+	else
+		set AppleScript's text item delimiters to linefeed
+		set joinedText to outputLines as text
+		set AppleScript's text item delimiters to ""
+		return joinedText
+	end if
+end run
