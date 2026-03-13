@@ -1,0 +1,1 @@
+../.dotfiles/scripts/install-git-hooks.sh

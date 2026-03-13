@@ -1,0 +1,1 @@
+../.dotfiles/scripts/drift-check.sh

@@ -1,0 +1,1 @@
+../.dotfiles/scripts/check-brew-sync.sh
