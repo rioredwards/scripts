@@ -1,0 +1,151 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# nuke-node-modules: Find and trash all node_modules directories
+# Uses macOS native /usr/bin/trash to send to Trash (recoverable)
+
+VERSION="1.0.0"
+
+# Defaults
+DRY_RUN=false
+CONFIRM=false
+SEARCH_DIR="."
+MAX_DEPTH=""
+
+usage() {
+  cat <<'USAGE'
+Usage: nuke-node-modules [OPTIONS] [DIRECTORY]
+
+Find and trash all node_modules directories under DIRECTORY (default: current directory).
+
+Options:
+  -d, --dry-run       Show what would be trashed without doing anything
+  -c, --confirm       Ask for confirmation before trashing each directory
+  -m, --max-depth N   Limit search depth (e.g. 2 = only top-level projects)
+  -h, --help          Show this help message
+  -v, --version       Show version
+
+Examples:
+  nuke-node-modules --dry-run              # Preview what would be trashed
+  nuke-node-modules --confirm              # Confirm each removal
+  nuke-node-modules --dry-run ~/projects   # Dry run in ~/projects
+  nuke-node-modules -m 3 ~/projects        # Limit search to 3 levels deep
+USAGE
+}
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -d|--dry-run)
+      DRY_RUN=true
+      shift
+      ;;
+    -c|--confirm)
+      CONFIRM=true
+      shift
+      ;;
+    -m|--max-depth)
+      if [[ -z "${2:-}" || ! "$2" =~ ^[0-9]+$ ]]; then
+        echo "Error: --max-depth requires a positive integer." >&2
+        exit 1
+      fi
+      MAX_DEPTH="$2"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    -v|--version)
+      echo "nuke-node-modules v${VERSION}"
+      exit 0
+      ;;
+    -*)
+      echo "Error: Unknown option '$1'" >&2
+      echo "Run 'nuke-node-modules --help' for usage." >&2
+      exit 1
+      ;;
+    *)
+      SEARCH_DIR="$1"
+      shift
+      ;;
+  esac
+done
+
+# Validate search directory
+if [[ ! -d "$SEARCH_DIR" ]]; then
+  echo "Error: '$SEARCH_DIR' is not a directory." >&2
+  exit 1
+fi
+
+SEARCH_DIR="$(cd "$SEARCH_DIR" && pwd)"
+
+# Build find command args
+FIND_ARGS=("$SEARCH_DIR" -type d -name "node_modules")
+if [[ -n "$MAX_DEPTH" ]]; then
+  FIND_ARGS=("$SEARCH_DIR" -maxdepth "$MAX_DEPTH" -type d -name "node_modules")
+fi
+
+# Prune nested node_modules (don't descend into node_modules to find more node_modules)
+# We want only the top-level node_modules per project
+DIRS=()
+while IFS= read -r -d '' dir; do
+  DIRS+=("$dir")
+done < <(find "${FIND_ARGS[@]}" -prune -print0 2>/dev/null)
+
+if [[ ${#DIRS[@]} -eq 0 ]]; then
+  echo "No node_modules directories found under $SEARCH_DIR"
+  exit 0
+fi
+
+# Calculate sizes
+echo "Found ${#DIRS[@]} node_modules director$([ ${#DIRS[@]} -eq 1 ] && echo "y" || echo "ies") under $SEARCH_DIR:"
+echo ""
+
+total_size=0
+for dir in "${DIRS[@]}"; do
+  size_bytes=$(du -sk "$dir" 2>/dev/null | cut -f1)
+  size_mb=$(( size_bytes / 1024 ))
+  total_size=$(( total_size + size_bytes ))
+  printf "  %6d MB  %s\n" "$size_mb" "$dir"
+done
+
+total_mb=$(( total_size / 1024 ))
+echo ""
+echo "Total: ${total_mb} MB"
+echo ""
+
+if $DRY_RUN; then
+  echo "[DRY RUN] No directories were trashed."
+  exit 0
+fi
+
+# Trash directories
+trashed=0
+skipped=0
+
+for dir in "${DIRS[@]}"; do
+  if $CONFIRM; then
+    printf "Trash %s? [y/N] " "$dir"
+    read -r answer
+    if [[ ! "$answer" =~ ^[Yy]$ ]]; then
+      skipped=$(( skipped + 1 ))
+      echo "  Skipped."
+      continue
+    fi
+  fi
+
+  if /usr/bin/trash "$dir" 2>/dev/null; then
+    trashed=$(( trashed + 1 ))
+    echo "  Trashed: $dir"
+  else
+    echo "  Error: Failed to trash $dir" >&2
+    skipped=$(( skipped + 1 ))
+  fi
+done
+
+echo ""
+echo "Done. Trashed: $trashed, Skipped: $skipped"
+if [[ $trashed -gt 0 ]]; then
+  echo "All trashed items are recoverable from macOS Trash."
+fi
