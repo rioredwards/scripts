@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CANONICAL="$HOME/dev/agent-skills/scripts/sync-projects"
+
+if [ ! -x "$CANONICAL" ]; then
+  echo "sync-projects not available at $CANONICAL" >&2
+  exit 127
+fi
+
+exec "$CANONICAL" "$@"
