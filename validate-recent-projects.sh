@@ -1,0 +1,1 @@
+../.dotfiles/scripts/validate-recent-projects.sh
