@@ -4,11 +4,9 @@
  *
  * Run: osascript -l JavaScript /path/to/reassign-overdue-reminders.js
  *
- * Uses the EventKit helper next to this script when possible:
- *   ~/scripts/reassign-overdue-reminders/list-reminders
- *   ~/scripts/reassign-overdue-reminders/list-reminders.swift
- * or the same filenames under ~/scripts/. There is no slow Reminders.app
- * fallback; if the helper fails, the script exits after an error dialog.
+ * Quick triage: Quit (also Esc), Tomorrow, More… (1 hour and other presets are under More).
+ * chooseFromList Esc/Cancel: follow-up asks Stop run vs Skip this one (not silent skip).
+ * Uses list-reminders with --overdue --include-notes when the helper supports it.
  */
 
 // Set true to log intended updates without writing to Reminders.
@@ -24,13 +22,225 @@ function log(msg) {
   console.log("[reassign-reminders] " + msg);
 }
 
-/** Optional; fails silently if notifications are denied. */
 function notifyUser(body, title) {
   try {
     sa.displayNotification(body, {
-      withTitle: title || "Reassign overdue reminders",
+      withTitle: title || dlgTitle(),
     });
   } catch (e) {}
+}
+
+function dlgTitle() {
+  return (DRY_RUN ? "[DRY RUN] " : "") + "Overdue reminders";
+}
+
+function helperSearchPathsText() {
+  return (
+    "Helper search order:\n" +
+    "• ~/scripts/reassign-overdue-reminders/list-reminders\n" +
+    "• …/list-reminders.swift (xcrun swift)\n" +
+    "• ~/scripts/list-reminders (same pair)"
+  );
+}
+
+function truncate(s, max) {
+  if (s === null || s === undefined) return "";
+  s = String(s);
+  if (s.length <= max) return s;
+  return s.slice(0, Math.max(0, max - 1)) + "…";
+}
+
+/** Calendar-day difference: how many local midnights ago the due date was (approx for UX). */
+function formatRelativeOverdue(due, now) {
+  if (!due || isNaN(due.getTime())) return "";
+  var startDue = new Date(due.getTime());
+  startDue.setHours(0, 0, 0, 0);
+  var startNow = new Date(now.getTime());
+  startNow.setHours(0, 0, 0, 0);
+  var diffDays = Math.round((startNow - startDue) / 86400000);
+  if (diffDays <= 0) {
+    if (now.getTime() > due.getTime()) return "earlier today";
+    return "today";
+  }
+  if (diffDays === 1) return "1 day ago";
+  return diffDays + " days ago";
+}
+
+function buildReminderPromptBody(item, index1, total) {
+  var due = item.originalDueDate;
+  var now = new Date();
+  var lines = [
+    "Item " + index1 + " of " + total,
+    "List: " + (item.calendarTitle || "(default)"),
+    "Was due: " +
+      formatDateTime(due) +
+      " (" +
+      formatRelativeOverdue(due, now) +
+      ")",
+  ];
+  var note = item.notesSnippet;
+  if (note) {
+    lines.push("Notes: " + truncate(note.replace(/\s+/g, " ").trim(), 120));
+  }
+  return lines.join("\n");
+}
+
+function humanizeChoiceForBulk(choice, customDate) {
+  if (choice === "Custom" && customDate) return formatDateTime(customDate);
+  return choice || "";
+}
+
+function promptShortConsent() {
+  try {
+    sa.displayDialog(
+      "This reads and updates Apple Reminders on this Mac. Continue?",
+      {
+        withTitle: dlgTitle(),
+        buttons: ["Cancel", "Continue"],
+        defaultButton: "Continue",
+      }
+    );
+    return true;
+  } catch (e) {
+    log("Consent canceled or dismissed.");
+    return false;
+  }
+}
+
+function promptIntroContinue(count) {
+  try {
+    sa.displayDialog(
+      "You have " +
+        count +
+        " overdue (due before today), oldest first.\n\nContinue?",
+      {
+        withTitle: dlgTitle(),
+        buttons: ["Cancel", "Continue"],
+        defaultButton: "Continue",
+      }
+    );
+    return true;
+  } catch (e) {
+    log("Intro canceled.");
+    return false;
+  }
+}
+
+function promptEmptyDone() {
+  try {
+    sa.displayDialog("Nothing overdue before today.", {
+      withTitle: dlgTitle(),
+      buttons: ["OK"],
+      defaultButton: "OK",
+    });
+  } catch (e) {}
+}
+
+function promptHelperError() {
+  var msg =
+    "The reminders helper failed or was not found.\n\n" +
+    helperSearchPathsText() +
+    "\n\nRebuild or fix the helper. There is no Reminders.app UI fallback.";
+  log(msg);
+  try {
+    sa.displayDialog(msg, {
+      withTitle: dlgTitle(),
+      buttons: ["OK"],
+      defaultButton: "OK",
+    });
+  } catch (e2) {}
+}
+
+function resolveListCancel() {
+  try {
+    var r = sa.displayDialog(
+      "The list was canceled (Esc). Stop the whole run, or skip only this reminder?",
+      {
+        withTitle: dlgTitle(),
+        buttons: ["Skip this one", "Stop run"],
+        defaultButton: "Stop run",
+      }
+    );
+    if (r.buttonReturned === "Stop run") return "stop_run";
+    return "skip_item";
+  } catch (e) {
+    return "stop_run";
+  }
+}
+
+function promptFullChoiceList(itemTitle, body) {
+  var items = [
+    "10 min",
+    "30 min",
+    "1 hour",
+    "Today",
+    "Tomorrow",
+    "Monday",
+    "Custom",
+    "Skip",
+    "Stop run",
+  ];
+  var choice = sa.chooseFromList(items, {
+    withTitle: truncate(itemTitle, 80),
+    withPrompt: body + "\n\nChoose how to reschedule:",
+    defaultItems: ["Tomorrow"],
+    OKButtonName: "OK",
+    cancelButtonName: "Cancel",
+  });
+
+  if (choice === false) {
+    var r = resolveListCancel();
+    if (r === "stop_run") return { kind: "stop_run" };
+    return { kind: "skip" };
+  }
+  return { kind: "choice", value: choice[0] };
+}
+
+function promptQuickTriage(itemTitle, body) {
+  var text =
+    body +
+    "\n\nTip: 1 hour, 10 min, Today, Monday, Custom, etc. are under More…";
+  try {
+    var r = sa.displayDialog(text, {
+      withTitle: truncate(itemTitle, 120),
+      buttons: ["Quit", "More…", "Tomorrow"],
+      defaultButton: "Tomorrow",
+      cancelButton: "Quit",
+    });
+    var b = r.buttonReturned;
+    if (b === "Quit") return { kind: "stop_run" };
+    if (b === "Tomorrow") return { kind: "choice", value: "Tomorrow" };
+    if (b === "More…") return { kind: "more" };
+  } catch (e) {
+    log("Quick triage dismissed: " + e);
+    return { kind: "stop_run" };
+  }
+  return { kind: "stop_run" };
+}
+
+function promptBulkSameChoice(label, remaining) {
+  try {
+    var r = sa.displayDialog(
+      "Apply " +
+        label +
+        " to all " +
+        remaining +
+        " remaining reminder" +
+        (remaining === 1 ? "" : "s") +
+        "?",
+      {
+        withTitle: dlgTitle(),
+        buttons: ["Stop", "Each", "All"],
+        defaultButton: "Each",
+      }
+    );
+    var b = r.buttonReturned;
+    if (b === "All") return "all";
+    if (b === "Stop") return "stop";
+    return "each";
+  } catch (e) {
+    return "each";
+  }
 }
 
 function toJSDate(value) {
@@ -50,9 +260,9 @@ function startOfToday() {
 }
 
 function addMinutes(date, minutes) {
-  var d = new Date(date.getTime());
-  d.setMinutes(d.getMinutes() + minutes);
-  return d;
+  var x = new Date(date.getTime());
+  x.setMinutes(x.getMinutes() + minutes);
+  return x;
 }
 
 function combineDateWithTime(datePart, timeSourceDate) {
@@ -66,7 +276,6 @@ function combineDateWithTime(datePart, timeSourceDate) {
   return base;
 }
 
-/** Next calendar Monday strictly after today's date (if today is Mon, following Mon). */
 function nextMondayFromToday() {
   var todayStart = startOfToday();
   var d = new Date(todayStart);
@@ -106,33 +315,6 @@ function defaultTimeString(d) {
   return pad2(d.getHours()) + ":" + pad2(d.getMinutes());
 }
 
-function promptForChoice(title, dueStr) {
-  var items = [
-    "10 min",
-    "30 min",
-    "1 hour",
-    "Today",
-    "Tomorrow",
-    "Monday",
-    "Custom",
-    "Skip",
-    "Quit",
-  ];
-
-  var prompt =
-    "Due: " + (dueStr || "unknown") + "\n\nChoose how to reschedule:";
-  var choice = sa.chooseFromList(items, {
-    withTitle: title || "(Reminder)",
-    withPrompt: prompt,
-    defaultItems: ["Skip"],
-    OKButtonName: "OK",
-    cancelButtonName: "Cancel",
-  });
-
-  if (choice === false) return { canceled: true, value: null };
-  return { canceled: false, value: choice[0] };
-}
-
 function promptForCustomDate(originalDueDate) {
   var dateDefault = defaultDateString(originalDueDate);
   var timeDefault = defaultTimeString(originalDueDate);
@@ -140,7 +322,7 @@ function promptForCustomDate(originalDueDate) {
   var dr;
   try {
     dr = sa.displayDialog(
-      "Enter date (YYYY-MM-DD). Time is asked next; you can keep the reminder's original time.",
+      "Date (YYYY-MM-DD). Time is next; you can keep the original time.",
       {
         defaultAnswer: dateDefault,
         withTitle: "Custom due date",
@@ -168,7 +350,7 @@ function promptForCustomDate(originalDueDate) {
   var tr;
   try {
     tr = sa.displayDialog(
-      "Enter time (24h HH:MM) or leave as-is for original time.",
+      "Time (24h HH:MM), or leave as-is for original time.",
       {
         defaultAnswer: timeDefault,
         withTitle: "Custom due time",
@@ -245,24 +427,29 @@ function overdueFetchShellCommand() {
   var s1 = home + "/scripts/reassign-overdue-reminders/list-reminders.swift";
   var b2 = home + "/scripts/list-reminders";
   var s2 = home + "/scripts/list-reminders.swift";
+  var overdueFlags = " --overdue --include-notes";
   return (
     "if [ -x " +
     shSingleQuote(b1) +
     " ]; then " +
     shSingleQuote(b1) +
-    " --overdue; elif [ -f " +
+    overdueFlags +
+    "; elif [ -f " +
     shSingleQuote(s1) +
     " ]; then /usr/bin/xcrun swift " +
     shSingleQuote(s1) +
-    " --overdue; elif [ -x " +
+    overdueFlags +
+    "; elif [ -x " +
     shSingleQuote(b2) +
     " ]; then " +
     shSingleQuote(b2) +
-    " --overdue; elif [ -f " +
+    overdueFlags +
+    "; elif [ -f " +
     shSingleQuote(s2) +
     " ]; then /usr/bin/xcrun swift " +
     shSingleQuote(s2) +
-    " --overdue; else exit 127; fi"
+    overdueFlags +
+    "; else exit 127; fi"
   );
 }
 
@@ -316,8 +503,7 @@ function setDueShellCommand(id, unixSecsRounded, dryRun) {
 }
 
 /**
- * @returns {Array<{id:string,title:string,calendarTitle:string,originalDueDate:Date}>} on success
- * @returns {null} if the helper failed or stdout was unusable
+ * @returns {Array<{id:string,title:string,calendarTitle:string,originalDueDate:Date,notesSnippet:string}>} | null
  */
 function tryFetchOverdueViaSwift() {
   var t0 = Date.now();
@@ -340,7 +526,7 @@ function tryFetchOverdueViaSwift() {
     return null;
   }
   if (!rows || !rows.length) {
-    log("Swift helper returned 0 overdue reminder(s) in " + (Date.now() - t0) + " ms.");
+    log("Swift helper returned 0 overdue in " + (Date.now() - t0) + " ms.");
     return [];
   }
   var out = [];
@@ -349,36 +535,23 @@ function tryFetchOverdueViaSwift() {
     if (!row || !row.id) continue;
     var due = row.dueDate ? new Date(row.dueDate) : null;
     if (!due || isNaN(due.getTime())) continue;
+    var notes = row.notes != null ? String(row.notes) : "";
     out.push({
       id: row.id,
       title: row.title || "(Untitled)",
       calendarTitle: row.calendarTitle || "",
       originalDueDate: due,
+      notesSnippet: notes,
     });
   }
-  log(
-    "Swift helper parsed " +
-      out.length +
-      " overdue row(s) in " +
-      (Date.now() - t0) +
-      " ms."
-  );
+  log("Parsed " + out.length + " overdue row(s) in " + (Date.now() - t0) + " ms.");
   return out;
 }
 
 function getOverdueWorkItems() {
   var swiftRows = tryFetchOverdueViaSwift();
-  if (swiftRows === null) {
-    return null;
-  }
-  return swiftRows.map(function (r) {
-    return {
-      id: r.id,
-      title: r.title,
-      calendarTitle: r.calendarTitle,
-      originalDueDate: r.originalDueDate,
-    };
-  });
+  if (swiftRows === null) return null;
+  return swiftRows;
 }
 
 function applySwiftDueDate(id, newDueDate, dryRun) {
@@ -411,124 +584,182 @@ function updateWorkItemDueDate(item, newDueDate, dryRun) {
   );
 }
 
-function run() {
-  log("Ready. Showing start dialog (if you see nothing, check behind other windows).");
-  try {
-    sa.displayDialog(
-      "This tool needs the EventKit helper (list-reminders) to load and save reminders. It does not use the slow Reminders UI scripting path.\n\nHelper search order:\n• ~/scripts/reassign-overdue-reminders/list-reminders\n• …/list-reminders.swift (via xcrun swift)\n• ~/scripts/list-reminders (same pair)\n\nClick OK to run the helper.",
-      {
-        withTitle: "Reassign overdue reminders",
-        buttons: ["Cancel", "OK"],
-        defaultButton: "OK",
-      }
-    );
-  } catch (e) {
-    log("Canceled or closed start dialog — exiting.");
-    return;
+/**
+ * Triage one reminder: returns
+ * { result: 'stop' } | { result: 'skip' } |
+ * { result: 'ok', choice, newDue, replaySpec }
+ */
+function triageReminderOnce(item, index1, total) {
+  var body = buildReminderPromptBody(item, index1, total);
+  var title = item.title || "(Reminder)";
+
+  var step = promptQuickTriage(title, body);
+  if (step.kind === "stop_run") return { result: "stop" };
+  var choice = null;
+  if (step.kind === "choice") {
+    choice = step.value;
+  } else if (step.kind === "more") {
+    var full = promptFullChoiceList(title, body);
+    if (full.kind === "stop_run") return { result: "stop" };
+    if (full.kind === "skip") return { result: "skip" };
+    choice = full.value;
   }
+
+  if (choice === "Stop run") return { result: "stop" };
+  if (choice === "Skip") return { result: "skip" };
+
+  var newDue = null;
+  if (choice === "Custom") {
+    var custom = promptForCustomDate(item.originalDueDate);
+    if (custom.canceled) return { result: "skip" };
+    newDue = custom.date;
+  } else {
+    newDue = computeNewDueDate(choice, item.originalDueDate, new Date());
+  }
+
+  if (!newDue || isNaN(newDue.getTime())) {
+    return { result: "skip" };
+  }
+
+  var replaySpec;
+  if (choice === "Custom") {
+    replaySpec = { type: "custom", date: new Date(newDue.getTime()) };
+  } else {
+    replaySpec = { type: "preset", choice: choice };
+  }
+  return { result: "ok", choice: choice, newDue: newDue, replaySpec: replaySpec };
+}
+
+function computeReplayDue(replaySpec, workItem) {
+  var now = new Date();
+  if (replaySpec.type === "custom") {
+    return new Date(replaySpec.date.getTime());
+  }
+  return computeNewDueDate(
+    replaySpec.choice,
+    workItem.originalDueDate,
+    now
+  );
+}
+
+function run() {
+  log("Starting.");
+  if (!promptShortConsent()) return;
 
   var overdue = getOverdueWorkItems();
   if (overdue === null) {
-    var errMsg =
-      "The list-reminders helper failed or was not found. Fix the helper (see paths in the first dialog) and try again. This script will not fall back to slow Reminders.app scripting.";
-    log(errMsg);
-    try {
-      sa.displayDialog(errMsg, {
-        withTitle: "Reassign overdue reminders",
-        buttons: ["OK"],
-        defaultButton: "OK",
-      });
-    } catch (e2) {}
+    promptHelperError();
     return;
   }
+  if (overdue.length === 0) {
+    promptEmptyDone();
+    return;
+  }
+  if (!promptIntroContinue(overdue.length)) return;
+
   notifyUser(
-    "Found " +
-      overdue.length +
-      " overdue (before today). Starting menus…",
-    "Reassign overdue reminders"
+    "Found " + overdue.length + " overdue. Starting triage…",
+    dlgTitle()
   );
 
   var updatedCount = 0;
   var skippedCount = 0;
   var errorCount = 0;
+  var notReviewed = 0;
 
-  for (var idx = 0; idx < overdue.length; idx++) {
-    var item = overdue[idx];
+  var i = 0;
+  while (i < overdue.length) {
+    var item = overdue[i];
     var originalDueDate = item.originalDueDate;
     if (!originalDueDate || isNaN(originalDueDate.getTime())) {
       skippedCount++;
-      log("Skipping item with missing due date (unexpected).");
+      log("Skipping item with missing due date.");
+      i++;
       continue;
     }
 
-    var pick = promptForChoice(
-      item.title,
-      formatDateTime(originalDueDate)
-    );
-    if (pick.canceled) {
-      skippedCount++;
-      log("Menu canceled; counting as skip.");
-      continue;
-    }
-
-    var choice = pick.value;
-    if (choice === "Quit") {
-      log("User chose Quit; stopping.");
+    var index1 = i + 1;
+    var tri = triageReminderOnce(item, index1, overdue.length);
+    if (tri.result === "stop") {
+      notReviewed = overdue.length - i;
+      log("Stop run.");
       break;
     }
-    if (choice === "Skip") {
+    if (tri.result === "skip") {
       skippedCount++;
-      log("Skipped by user.");
-      continue;
-    }
-
-    var newDue = null;
-    if (choice === "Custom") {
-      var custom = promptForCustomDate(originalDueDate);
-      if (custom.canceled) {
-        skippedCount++;
-        log("Custom date canceled; counting as skip.");
-        continue;
-      }
-      newDue = custom.date;
-    } else {
-      var effectiveNow = new Date();
-      newDue = computeNewDueDate(choice, originalDueDate, effectiveNow);
-    }
-
-    if (!newDue || isNaN(newDue.getTime())) {
-      errorCount++;
-      log("Could not compute new due date for choice: " + choice);
+      i++;
       continue;
     }
 
     try {
-      updateWorkItemDueDate(item, newDue, DRY_RUN);
+      updateWorkItemDueDate(item, tri.newDue, DRY_RUN);
       updatedCount++;
     } catch (e) {
       errorCount++;
       log("Error updating \"" + (item.title || "") + "\": " + e);
+      i++;
+      continue;
     }
+
+    var remainingAfterThis = overdue.length - i - 1;
+    if (remainingAfterThis > 0) {
+      var label =
+        '"' + humanizeChoiceForBulk(tri.choice, tri.newDue) + '"';
+      var bulk = promptBulkSameChoice(label, remainingAfterThis);
+      if (bulk === "stop") {
+        notReviewed = remainingAfterThis;
+        log("Bulk: stop.");
+        break;
+      }
+      if (bulk === "all") {
+        var spec = tri.replaySpec;
+        for (var j = i + 1; j < overdue.length; j++) {
+          var it2 = overdue[j];
+          if (!it2.originalDueDate || isNaN(it2.originalDueDate.getTime())) {
+            skippedCount++;
+            continue;
+          }
+          var nd = computeReplayDue(spec, it2);
+          if (!nd || isNaN(nd.getTime())) {
+            errorCount++;
+            continue;
+          }
+          try {
+            updateWorkItemDueDate(it2, nd, DRY_RUN);
+            updatedCount++;
+          } catch (e2) {
+            errorCount++;
+            log("Bulk update error: " + e2);
+          }
+        }
+        i = overdue.length;
+        break;
+      }
+    }
+
+    i++;
   }
 
-  var summary =
-    "Done. Updated: " +
-    updatedCount +
-    ", skipped: " +
-    skippedCount +
-    ", errors: " +
-    errorCount +
-    (DRY_RUN ? " (DRY_RUN)" : "");
+  var summaryParts = [];
+  summaryParts.push("Updated " + updatedCount + ".");
+  summaryParts.push("Skipped " + skippedCount + ".");
+  if (errorCount) summaryParts.push("Errors: " + errorCount + ".");
+  if (notReviewed > 0) {
+    summaryParts.push("Closed early: " + notReviewed + " not reviewed.");
+  }
+  if (DRY_RUN) summaryParts.push("(No changes saved; DRY_RUN is on.)");
+
+  var summary = summaryParts.join(" ");
   log(summary);
 
   try {
     sa.displayDialog(summary, {
-      withTitle: "Reassign overdue reminders",
+      withTitle: dlgTitle(),
       buttons: ["OK"],
       defaultButton: "OK",
     });
   } catch (e) {
-    log("Summary dialog failed (user may have dismissed): " + e);
+    log("Summary dialog failed: " + e);
   }
 }
 

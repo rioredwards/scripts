@@ -1,7 +1,7 @@
 // Build binary (optional, faster to invoke):
 //   swiftc -parse-as-library -O -o list-reminders list-reminders.swift
 // Run interpreted:
-//   xcrun swift list-reminders.swift [--overdue | --set-due <id> <unixSeconds> [--dry-run]]
+//   xcrun swift list-reminders.swift [--overdue [--include-notes]] | --set-due <id> <unixSeconds> [--dry-run]]
 import Darwin
 import EventKit
 import Foundation
@@ -80,14 +80,33 @@ enum ListReminders {
     return json
   }
 
-  private static func reminderOutput(_ reminder: EKReminder, includeNotes: Bool) -> ReminderOutput {
-    ReminderOutput(
+  private static let overdueNotesMaxChars = 240
+
+  private static func truncatedNotes(_ raw: String?, maxChars: Int) -> String? {
+    guard let raw, !raw.isEmpty else { return nil }
+    if raw.count <= maxChars { return raw }
+    return String(raw.prefix(maxChars))
+  }
+
+  private static func reminderOutput(
+    _ reminder: EKReminder,
+    includeNotes: Bool,
+    truncateNotesTo maxChars: Int? = nil
+  ) -> ReminderOutput {
+    let rawNotes = includeNotes ? reminder.notes : nil
+    let notes: String?
+    if let rawNotes, let maxChars = maxChars {
+      notes = Self.truncatedNotes(rawNotes, maxChars: maxChars)
+    } else {
+      notes = rawNotes
+    }
+    return ReminderOutput(
       id: reminder.calendarItemIdentifier,
       title: reminder.title ?? "(Untitled)",
       isCompleted: reminder.isCompleted,
       dueDate: Self.isoString(from: reminder.dueDateComponents?.date),
       calendarTitle: reminder.calendar.title,
-      notes: includeNotes ? reminder.notes : nil
+      notes: notes
     )
   }
 
@@ -149,6 +168,7 @@ enum ListReminders {
     }
 
     let overdueOnly = argv.contains("--overdue")
+    let includeNotesForOverdue = argv.contains("--include-notes")
     let store = EKEventStore()
 
     guard await requestAccess(store: store) else {
@@ -171,8 +191,9 @@ enum ListReminders {
       fputs("Found \(reminders.count) incomplete reminders.\n", stderr)
     }
 
-    let includeNotes = !overdueOnly
-    let output = selected.map { reminderOutput($0, includeNotes: includeNotes) }
+    let includeNotes = !overdueOnly || includeNotesForOverdue
+    let noteTruncate = overdueOnly && includeNotesForOverdue ? Self.overdueNotesMaxChars : nil
+    let output = selected.map { reminderOutput($0, includeNotes: includeNotes, truncateNotesTo: noteTruncate) }
 
     if !overdueOnly {
       for (index, reminder) in selected.enumerated() {
