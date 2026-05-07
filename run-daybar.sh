@@ -13,7 +13,7 @@ set -euo pipefail
 # @raycast.author rio_edwards
 # @raycast.authorURL https://raycast.com/rio_edwards
 
-ROOT="/Users/rioredwards/dev/DayBar"
+ROOT="/Users/rioredwards/dev/DayBar-shell"
 DERIVED="/tmp/DayBar-run-$(whoami)"
 
 xcodebuild \
