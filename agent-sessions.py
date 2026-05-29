@@ -15,6 +15,7 @@ repeat runs skip re-parsing sessions that have not changed.
 from __future__ import annotations
 
 import glob
+import hashlib
 import json
 import os
 import re
@@ -123,7 +124,9 @@ def humanize(n: int) -> str:
         return str(n)
     if n < 1_000_000:
         return f"{n / 1000:.0f}k"
-    return f"{n / 1_000_000:.1f}M"
+    if n < 10_000_000:
+        return f"{n / 1_000_000:.1f}M"  # 1.2M..9.9M
+    return f"{n / 1_000_000:.0f}M"  # 10M+ drops the decimal
 
 
 # Log-ish buckets -> sparkline glyph, so heft reads at a glance.
@@ -146,14 +149,44 @@ def bucket_glyph(n: int) -> str:
     return "█"
 
 
+# Curated pastel palette (hex), ordered around the color wheel. Each repo
+# hashes to one entry deterministically.
+_REPO_PALETTE = [
+    "b85651", "c86f5a", "d68a5c", "c78d2f", "d6a247", "e9b143", "d9bd5f",
+    "b0b846", "9fbf68", "8bba7f", "80aa9e", "78aaa8", "6faeb8", "7fa7d6",
+    "879bd1", "9a8fd0", "b58ad7", "c184c8", "d3869b", "c97283", "e2cca9",
+    "a89984",
+]
+
+
+# Named picks from the same pastel palette, reused by the other columns.
+_PASTEL = {
+    "red": "b85651", "coral": "c86f5a", "amber": "d6a247", "yellow": "e9b143",
+    "green": "8bba7f", "blue": "879bd1",
+    "claude": "e27150", "codex": "82a3ff", "opencode": "b7b1b1",
+}
+
+
+def _hex_fg(hexc: str) -> str:
+    """'b85651' -> truecolor ANSI foreground escape."""
+    r, g, b = int(hexc[0:2], 16), int(hexc[2:4], 16), int(hexc[4:6], 16)
+    return f"\033[38;2;{r};{g};{b}m"
+
+
+def repo_color(repo: str) -> str:
+    """Stable pastel truecolor for a repo path (same each run)."""
+    h = int.from_bytes(hashlib.md5((repo or "?").encode()).digest()[:4], "big")
+    return _hex_fg(_REPO_PALETTE[h % len(_REPO_PALETTE)])
+
+
 def token_color(n: int) -> str:
-    """Heat by token volume: yellow=small, orange=med, red=big."""
+    """Heat by token volume: yellow=small, coral=med, red=big (palette)."""
     n = int(n or 0)
     if n < 20_000:
-        return "\033[38;5;226m"  # yellow
+        return _hex_fg(_PASTEL["yellow"])
     if n < 100_000:
-        return "\033[38;5;208m"  # orange
-    return "\033[38;5;196m"  # red
+        return _hex_fg(_PASTEL["coral"])
+    return _hex_fg(_PASTEL["red"])
 
 
 # --------------------------------------------------------------------------- #
@@ -345,7 +378,7 @@ def assign_icons(sessions: list[dict]) -> dict:
         repo = s.get("repo")
         if not repo or repo in cache:
             continue
-        icon = sesh_icons.derive(Path(repo).name or repo, used) or FOLDER_GLYPH
+        icon = sesh_icons.derive(Path(repo).name or repo, used, limit=1) or FOLDER_GLYPH
         cache[repo] = icon
         used.add(icon)
         changed = True
@@ -391,28 +424,29 @@ def main() -> None:
     RESET = "\033[0m"
     DIM = "\033[2m"
     PROV = {
-        "claude": ("🟠", "\033[38;5;208m"),  # orange
-        "codex": ("🔵", "\033[38;5;39m"),  # blue
-        "opencode": ("🟢", "\033[38;5;40m"),  # green
+        "claude": _hex_fg(_PASTEL["claude"]),  # brand orange #E27150
+        "codex": _hex_fg(_PASTEL["codex"]),  # brand blue #82A3FF
+        "opencode": _hex_fg(_PASTEL["opencode"]),  # brand gray #B7B1B1
     }
-    REPO_W = 20
+    REPO_W = 15
     for s in sessions:
         repo = (Path(s["repo"]).name or "?") if s["repo"] else "?"
         if len(repo) > REPO_W:
             repo = repo[: REPO_W - 1] + "…"
         tok = s.get("tokens", 0)
-        size = f"{humanize(tok):>5} {bucket_glyph(tok)}"
-        emoji, color = PROV.get(s["provider"], ("⚪", ""))
+        size = f"{humanize(tok):>4} {bucket_glyph(tok)}"
+        color = PROV.get(s["provider"], "")
         age = f"{DIM}{rel(s['time']):>3}{RESET}"
-        prov = f"{emoji} {color}{s['provider']:<8}{RESET}"
+        prov = f"{color}{s['provider']:<8}{RESET}"
         icon = repo_icon.get(s["repo"], FOLDER_GLYPH)
-        # Pad icon to 2 cells so 1- and 2-glyph icons keep the column aligned.
-        icon_f = icon if len(icon) >= 2 else icon + " "
-        repo_c = f"{DIM}{repo:<{REPO_W}}{RESET}"
+        # Single glyph, tinted the per-repo color.
+        rcolor = repo_color(s["repo"])
+        icon_f = f"{rcolor}{icon}{RESET}"
+        repo_c = f"{rcolor}{repo:<{REPO_W}}{RESET}"
         # Fixed-width visible column (fzf renders this as one field); the
         # resume payload rides along as a hidden tab-delimited field.
         size_c = f"{token_color(tok)}{size}{RESET}"
-        display = f"{age}  {prov}  {size_c}  {icon_f} {repo_c}  {s['title']}"
+        display = f"{age} {size_c} {prov} {icon_f} {repo_c} {s['title']}"
         print(f"{display}\t{json.dumps(s['resume'])}")
 
 
