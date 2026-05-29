@@ -137,6 +137,16 @@ def bucket_glyph(n: int) -> str:
     return "█"
 
 
+def token_color(n: int) -> str:
+    """Heat by token volume: yellow=small, orange=med, red=big."""
+    n = int(n or 0)
+    if n < 20_000:
+        return "\033[38;5;226m"  # yellow
+    if n < 100_000:
+        return "\033[38;5;208m"  # orange
+    return "\033[38;5;196m"  # red
+
+
 # --------------------------------------------------------------------------- #
 # Claude Code: ~/.claude/projects/<enc-cwd>/<sessionId>.jsonl
 # --------------------------------------------------------------------------- #
@@ -355,7 +365,8 @@ def main() -> None:
         repo_c = f"{DIM}{repo:<{REPO_W}}{RESET}"
         # Fixed-width visible column (fzf renders this as one field); the
         # resume payload rides along as a hidden tab-delimited field.
-        display = f"{age}  {prov}  {color}{size}{RESET}  {repo_c}  {s['title']}"
+        size_c = f"{token_color(tok)}{size}{RESET}"
+        display = f"{age}  {prov}  {size_c}  {repo_c}  {s['title']}"
         print(f"{display}\t{json.dumps(s['resume'])}")
 
 
