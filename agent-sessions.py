@@ -107,12 +107,42 @@ def clip(s: str, n: int = 80) -> str:
     return s[: n - 1] + "…" if len(s) > n else s
 
 
+def humanize(n: int) -> str:
+    """Compact token count: 890, 12k, 1.2M."""
+    n = int(n or 0)
+    if n < 1000:
+        return str(n)
+    if n < 1_000_000:
+        return f"{n / 1000:.0f}k"
+    return f"{n / 1_000_000:.1f}M"
+
+
+# Log-ish buckets -> sparkline glyph, so heft reads at a glance.
+_BUCKETS = [
+    (1_000, "▁"),
+    (5_000, "▂"),
+    (20_000, "▃"),
+    (50_000, "▄"),
+    (100_000, "▅"),
+    (250_000, "▆"),
+    (500_000, "▇"),
+]
+
+
+def bucket_glyph(n: int) -> str:
+    n = int(n or 0)
+    for thresh, g in _BUCKETS:
+        if n < thresh:
+            return g
+    return "█"
+
+
 # --------------------------------------------------------------------------- #
 # Claude Code: ~/.claude/projects/<enc-cwd>/<sessionId>.jsonl
 # --------------------------------------------------------------------------- #
 def claude_extract(path: str, sid: str) -> dict:
     """Read first user message (title) + real cwd. Dir-name decode is lossy."""
-    title, cwd = None, ""
+    title, cwd, tokens = None, "", 0
     try:
         with open(path, "r", errors="ignore") as fh:
             for line in fh:
@@ -122,8 +152,13 @@ def claude_extract(path: str, sid: str) -> dict:
                     continue
                 if not cwd and isinstance(o.get("cwd"), str):
                     cwd = o["cwd"]
+                msg = o.get("message")
+                if isinstance(msg, dict):
+                    us = msg.get("usage")
+                    if isinstance(us, dict):
+                        tokens += us.get("input_tokens", 0) + us.get("output_tokens", 0)
                 if title is None and o.get("type") == "user":
-                    c = o.get("message", {}).get("content")
+                    c = (msg or {}).get("content")
                     raw = ""
                     if isinstance(c, str):
                         raw = c
@@ -135,8 +170,6 @@ def claude_extract(path: str, sid: str) -> dict:
                     t = clean_title(raw)
                     if t != "(no preview)":  # skip pure-wrapper messages
                         title = t
-                if title is not None and cwd:
-                    break
     except Exception:
         pass
     cwd = cwd or str(HOME)
@@ -145,6 +178,7 @@ def claude_extract(path: str, sid: str) -> dict:
         "id": sid,
         "repo": cwd,
         "path": path,
+        "tokens": tokens,
         "title": title or "(no preview)",
         "resume": {"kind": "cli", "cwd": cwd, "cmd": ["claude", "--resume", sid]},
     }
@@ -169,7 +203,7 @@ def collect_claude() -> list[dict]:
 # Codex: ~/.codex/sessions/Y/M/D/rollout-*-<uuid>.jsonl
 # --------------------------------------------------------------------------- #
 def codex_extract(path: str) -> dict | None:
-    sid, cwd, title = None, "", None
+    sid, cwd, title, tokens = None, "", None, 0
     try:
         with open(path, "r", errors="ignore") as fh:
             for line in fh:
@@ -177,12 +211,17 @@ def codex_extract(path: str) -> dict | None:
                     o = json.loads(line)
                 except Exception:
                     continue
+                pl = o.get("payload", {})
+                if isinstance(pl, dict):
+                    info = pl.get("info")
+                    if isinstance(info, dict):
+                        tu = info.get("total_token_usage")
+                        if isinstance(tu, dict):  # cumulative; last wins
+                            tokens = tu.get("total_tokens", tokens)
                 if o.get("type") == "session_meta":
-                    pl = o.get("payload", {})
                     sid = pl.get("id")
                     cwd = pl.get("cwd", "") or ""
                 if title is None:
-                    pl = o.get("payload", {})
                     raw = ""
                     if o.get("type") == "event_msg" and pl.get("type") == "user_message":
                         raw = pl.get("message", "")
@@ -197,8 +236,6 @@ def codex_extract(path: str) -> dict | None:
                         t = clean_title(raw)
                         if t != "(no preview)":
                             title = t
-                if sid and title is not None:
-                    break
     except Exception:
         pass
     if not sid:
@@ -209,6 +246,7 @@ def codex_extract(path: str) -> dict | None:
         "id": sid,
         "repo": cwd,
         "path": path,
+        "tokens": tokens,
         "title": title or "(no preview)",
         "resume": {"kind": "cli", "cwd": cwd, "cmd": ["codex", "resume", sid]},
     }
@@ -244,8 +282,9 @@ def collect_opencode() -> list[dict]:
     out = []
     try:
         con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
-        for sid, directory, title, t_updated in con.execute(
-            "SELECT id, directory, title, time_updated FROM session"
+        for sid, directory, title, t_updated, t_in, t_out, t_reason in con.execute(
+            "SELECT id, directory, title, time_updated, "
+            "tokens_input, tokens_output, tokens_reasoning FROM session"
         ):
             out.append(
                 {
@@ -253,6 +292,7 @@ def collect_opencode() -> list[dict]:
                     "id": sid,
                     "repo": directory or str(HOME),
                     "time": (t_updated or 0) / 1000.0,
+                    "tokens": (t_in or 0) + (t_out or 0) + (t_reason or 0),
                     "title": clip(title or "(untitled)"),
                     "resume": {
                         "kind": "cli",
@@ -297,9 +337,11 @@ def main() -> None:
         repo = (Path(s["repo"]).name or "?") if s["repo"] else "?"
         if len(repo) > REPO_W:
             repo = repo[: REPO_W - 1] + "…"
+        tok = s.get("tokens", 0)
+        size = f"{humanize(tok):>5} {bucket_glyph(tok)}"
         # Fixed-width visible column (fzf renders this as one field); the
         # resume payload rides along as a hidden tab-delimited field.
-        display = f"{rel(s['time']):>3}  {s['provider']:<8}  {repo:<{REPO_W}}  {s['title']}"
+        display = f"{rel(s['time']):>3}  {s['provider']:<8}  {size}  {repo:<{REPO_W}}  {s['title']}"
         print(f"{display}\t{json.dumps(s['resume'])}")
 
 
