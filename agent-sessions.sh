@@ -8,6 +8,13 @@ PY="${HERE}/agent-sessions.py"
 
 command -v fzf >/dev/null || { echo "needs fzf"; exit 1; }
 
+# Fire the summarizer in the background (detached) so missing titles get
+# generated for the next run. No-ops if ollama is absent. Picker stays instant.
+if command -v ollama >/dev/null 2>&1; then
+  nohup python3 "${HERE}/agent-sessions-summarize.py" >/dev/null 2>&1 &
+  disown 2>/dev/null || true
+fi
+
 # Line layout: <fixed-width display>\t<resume-json>
 # Show field 1 to the user; keep the JSON payload (field 2) hidden.
 choice="$(python3 "$PY" \

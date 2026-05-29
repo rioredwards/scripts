@@ -25,9 +25,10 @@ from pathlib import Path
 
 HOME = Path.home()
 LIMIT = int(os.environ.get("AGENT_SESSIONS_LIMIT", "300"))
-CACHE_PATH = Path(
-    os.environ.get("XDG_CACHE_HOME", str(HOME / ".cache"))
-) / "agent-sessions" / "cache.json"
+CACHE_DIR = Path(os.environ.get("XDG_CACHE_HOME", str(HOME / ".cache"))) / "agent-sessions"
+CACHE_PATH = CACHE_DIR / "cache.json"
+# Generated titles (id -> {"summary", ...}), filled by agent-sessions-summarize.py.
+SUMMARY_PATH = CACHE_DIR / "summaries.json"
 
 # Loaded cache (path -> {"mtime": float, "rec": {...}}) and the cache rebuilt
 # this run (drops entries whose files have vanished).
@@ -143,6 +144,7 @@ def claude_extract(path: str, sid: str) -> dict:
         "provider": "claude",
         "id": sid,
         "repo": cwd,
+        "path": path,
         "title": title or "(no preview)",
         "resume": {"kind": "cli", "cwd": cwd, "cmd": ["claude", "--resume", sid]},
     }
@@ -158,6 +160,7 @@ def collect_claude() -> list[dict]:
             continue
         rec = cached(f, mtime, lambda f=f, p=p: claude_extract(f, p.stem))
         rec["time"] = mtime
+        rec["path"] = f  # always set: stale cache entries may predate this field
         out.append(rec)
     return out
 
@@ -205,6 +208,7 @@ def codex_extract(path: str) -> dict | None:
         "provider": "codex",
         "id": sid,
         "repo": cwd,
+        "path": path,
         "title": title or "(no preview)",
         "resume": {"kind": "cli", "cwd": cwd, "cmd": ["codex", "resume", sid]},
     }
@@ -224,6 +228,7 @@ def collect_codex() -> list[dict]:
             _NEW_CACHE.pop(f, None)
             continue
         rec["time"] = mtime
+        rec["path"] = f  # always set: stale cache entries may predate this field
         out.append(rec)
     return out
 
@@ -274,6 +279,18 @@ def main() -> None:
 
     sessions.sort(key=lambda s: s["time"], reverse=True)
     sessions = sessions[:LIMIT]
+
+    # Prefer a generated summary when available (claude/codex first-message
+    # titles are noisy; opencode already has a clean db title).
+    try:
+        sums = json.loads(SUMMARY_PATH.read_text())
+    except Exception:
+        sums = {}
+    for s in sessions:
+        if s["provider"] in ("claude", "codex"):
+            ent = sums.get(s["id"])
+            if ent and ent.get("summary"):
+                s["title"] = ent["summary"]
 
     REPO_W = 20
     for s in sessions:
