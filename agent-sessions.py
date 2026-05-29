@@ -332,6 +332,7 @@ def main() -> None:
             if ent and ent.get("summary"):
                 s["title"] = ent["summary"]
 
+    PROV_EMOJI = {"claude": "🟠", "codex": "🔵", "opencode": "🟢"}
     REPO_W = 20
     for s in sessions:
         repo = (Path(s["repo"]).name or "?") if s["repo"] else "?"
@@ -341,7 +342,8 @@ def main() -> None:
         size = f"{humanize(tok):>5} {bucket_glyph(tok)}"
         # Fixed-width visible column (fzf renders this as one field); the
         # resume payload rides along as a hidden tab-delimited field.
-        display = f"{rel(s['time']):>3}  {s['provider']:<8}  {size}  {repo:<{REPO_W}}  {s['title']}"
+        prov = f"{PROV_EMOJI.get(s['provider'], '⚪')} {s['provider']:<8}"
+        display = f"{rel(s['time']):>3}  {prov}  {size}  {repo:<{REPO_W}}  {s['title']}"
         print(f"{display}\t{json.dumps(s['resume'])}")
 
 
