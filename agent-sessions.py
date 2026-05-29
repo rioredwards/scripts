@@ -29,6 +29,8 @@ CACHE_DIR = Path(os.environ.get("XDG_CACHE_HOME", str(HOME / ".cache"))) / "agen
 CACHE_PATH = CACHE_DIR / "cache.json"
 # Generated titles (id -> {"summary", ...}), filled by agent-sessions-summarize.py.
 SUMMARY_PATH = CACHE_DIR / "summaries.json"
+# Generated per-repo emoji (full dir path -> emoji), same summarizer.
+REPO_EMOJI_PATH = CACHE_DIR / "repo-emojis.json"
 
 # Loaded cache (path -> {"mtime": float, "rec": {...}}) and the cache rebuilt
 # this run (drops entries whose files have vanished).
@@ -342,6 +344,11 @@ def main() -> None:
             if ent and ent.get("summary"):
                 s["title"] = ent["summary"]
 
+    try:
+        repo_emoji = json.loads(REPO_EMOJI_PATH.read_text())
+    except Exception:
+        repo_emoji = {}
+
     # ANSI 256-color codes matched to the provider emoji hues. fzf needs
     # --ansi to render these. Pad raw strings *before* wrapping in color so
     # escape bytes never throw off column widths.
@@ -362,7 +369,8 @@ def main() -> None:
         emoji, color = PROV.get(s["provider"], ("⚪", ""))
         age = f"{DIM}{rel(s['time']):>3}{RESET}"
         prov = f"{emoji} {color}{s['provider']:<8}{RESET}"
-        repo_c = f"{DIM}{repo:<{REPO_W}}{RESET}"
+        remoji = repo_emoji.get(s["repo"], "📁")  # placeholder until generated
+        repo_c = f"{remoji} {DIM}{repo:<{REPO_W}}{RESET}"
         # Fixed-width visible column (fzf renders this as one field); the
         # resume payload rides along as a hidden tab-delimited field.
         size_c = f"{token_color(tok)}{size}{RESET}"
