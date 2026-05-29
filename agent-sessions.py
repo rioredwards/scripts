@@ -332,7 +332,16 @@ def main() -> None:
             if ent and ent.get("summary"):
                 s["title"] = ent["summary"]
 
-    PROV_EMOJI = {"claude": "🟠", "codex": "🔵", "opencode": "🟢"}
+    # ANSI 256-color codes matched to the provider emoji hues. fzf needs
+    # --ansi to render these. Pad raw strings *before* wrapping in color so
+    # escape bytes never throw off column widths.
+    RESET = "\033[0m"
+    DIM = "\033[2m"
+    PROV = {
+        "claude": ("🟠", "\033[38;5;208m"),  # orange
+        "codex": ("🔵", "\033[38;5;39m"),  # blue
+        "opencode": ("🟢", "\033[38;5;40m"),  # green
+    }
     REPO_W = 20
     for s in sessions:
         repo = (Path(s["repo"]).name or "?") if s["repo"] else "?"
@@ -340,10 +349,13 @@ def main() -> None:
             repo = repo[: REPO_W - 1] + "…"
         tok = s.get("tokens", 0)
         size = f"{humanize(tok):>5} {bucket_glyph(tok)}"
+        emoji, color = PROV.get(s["provider"], ("⚪", ""))
+        age = f"{DIM}{rel(s['time']):>3}{RESET}"
+        prov = f"{emoji} {color}{s['provider']:<8}{RESET}"
+        repo_c = f"{DIM}{repo:<{REPO_W}}{RESET}"
         # Fixed-width visible column (fzf renders this as one field); the
         # resume payload rides along as a hidden tab-delimited field.
-        prov = f"{PROV_EMOJI.get(s['provider'], '⚪')} {s['provider']:<8}"
-        display = f"{rel(s['time']):>3}  {prov}  {size}  {repo:<{REPO_W}}  {s['title']}"
+        display = f"{age}  {prov}  {color}{size}{RESET}  {repo_c}  {s['title']}"
         print(f"{display}\t{json.dumps(s['resume'])}")
 
 

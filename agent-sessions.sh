@@ -18,7 +18,7 @@ fi
 # Line layout: <fixed-width display>\t<resume-json>
 # Show field 1 to the user; keep the JSON payload (field 2) hidden.
 choice="$(python3 "$PY" \
-  | fzf --delimiter=$'\t' --with-nth=1 \
+  | fzf --ansi --delimiter=$'\t' --with-nth=1 \
         --header='AI sessions (newest first) — enter to resume' \
         --preview-window=hidden)" || exit 0
 
