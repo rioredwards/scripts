@@ -29,6 +29,15 @@ CACHE_DIR = Path(os.environ.get("XDG_CACHE_HOME", str(HOME / ".cache"))) / "agen
 CACHE_PATH = CACHE_DIR / "cache.json"
 # Generated titles (id -> {"summary", ...}), filled by agent-sessions-summarize.py.
 SUMMARY_PATH = CACHE_DIR / "summaries.json"
+# Deterministic per-repo Nerd Font icon (full dir path -> glyph string), derived
+# locally from the dir name and self-populated by this picker on cache miss.
+REPO_ICON_PATH = CACHE_DIR / "repo-icons.json"
+FOLDER_GLYPH = ""  # nf-fa-folder, used when derivation finds nothing
+
+try:  # icon derivation is optional; picker still runs without it
+    import sesh_icons
+except Exception:
+    sesh_icons = None
 
 # Loaded cache (path -> {"mtime": float, "rec": {...}}) and the cache rebuilt
 # this run (drops entries whose files have vanished).
@@ -317,6 +326,38 @@ def collect_opencode() -> list[dict]:
     return out
 
 
+def assign_icons(sessions: list[dict]) -> dict:
+    """Map repo path -> Nerd Font icon, cached and de-duplicated.
+
+    Derive only for repos not already cached (sessions arrive newest-first, so
+    recent repos win the best glyph). Persist on change so steady-state runs
+    just read the small cache and stay instant.
+    """
+    try:
+        cache = json.loads(REPO_ICON_PATH.read_text())
+    except Exception:
+        cache = {}
+    if sesh_icons is None:
+        return cache
+    used = set(cache.values())
+    changed = False
+    for s in sessions:
+        repo = s.get("repo")
+        if not repo or repo in cache:
+            continue
+        icon = sesh_icons.derive(Path(repo).name or repo, used) or FOLDER_GLYPH
+        cache[repo] = icon
+        used.add(icon)
+        changed = True
+    if changed:
+        try:
+            REPO_ICON_PATH.parent.mkdir(parents=True, exist_ok=True)
+            REPO_ICON_PATH.write_text(json.dumps(cache))
+        except Exception:
+            pass
+    return cache
+
+
 def main() -> None:
     load_cache()
     sessions = []
@@ -342,6 +383,8 @@ def main() -> None:
             if ent and ent.get("summary"):
                 s["title"] = ent["summary"]
 
+    repo_icon = assign_icons(sessions)
+
     # ANSI 256-color codes matched to the provider emoji hues. fzf needs
     # --ansi to render these. Pad raw strings *before* wrapping in color so
     # escape bytes never throw off column widths.
@@ -362,11 +405,14 @@ def main() -> None:
         emoji, color = PROV.get(s["provider"], ("⚪", ""))
         age = f"{DIM}{rel(s['time']):>3}{RESET}"
         prov = f"{emoji} {color}{s['provider']:<8}{RESET}"
+        icon = repo_icon.get(s["repo"], FOLDER_GLYPH)
+        # Pad icon to 2 cells so 1- and 2-glyph icons keep the column aligned.
+        icon_f = icon if len(icon) >= 2 else icon + " "
         repo_c = f"{DIM}{repo:<{REPO_W}}{RESET}"
         # Fixed-width visible column (fzf renders this as one field); the
         # resume payload rides along as a hidden tab-delimited field.
         size_c = f"{token_color(tok)}{size}{RESET}"
-        display = f"{age}  {prov}  {size_c}  {repo_c}  {s['title']}"
+        display = f"{age}  {prov}  {size_c}  {icon_f} {repo_c}  {s['title']}"
         print(f"{display}\t{json.dumps(s['resume'])}")
 
 
