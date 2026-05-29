@@ -49,15 +49,29 @@ PROMPT = (
 )
 
 EMOJI_PROMPT = (
-    "Pick ONE emoji that best represents this coding project. "
-    "Reply with ONLY the emoji and nothing else.\n\n"
-    "Project folder: {name}\nRecent task titles:\n{titles}\n\nEMOJI:"
+    "Suggest 5 DISTINCT emojis that could represent this coding project, "
+    "ranked best first. Be specific to the project, avoid generic 🤖/💻. "
+    "Do not use any of these already-taken emojis: {used}. "
+    "Reply with ONLY the 5 emojis separated by spaces, nothing else.\n\n"
+    "Project folder: {name}\nRecent task titles:\n{titles}\n\nEMOJIS:"
 )
 
 # Match a single emoji from noisy model output (symbol/pictograph ranges).
+# Excludes variation selectors (️ etc.) so they never match standalone.
 EMOJI_RE = re.compile(
     "[\U0001f300-\U0001faff\U00002600-\U000027bf"
-    "\U0001f000-\U0001f0ff\U00002b00-\U00002bff\U0000fe00-\U0000fe0f]"
+    "\U0001f000-\U0001f0ff\U00002b00-\U00002bff]"
+)
+
+# Distinct fallback pool: when the model's candidates all collide with
+# already-used emojis, draw the first unused one from here so every repo
+# stays unique. Ordered varied; generic 🤖/💻 deliberately omitted.
+EMOJI_POOL = list(
+    "🐶🐱🦊🐻🐼🐨🦁🐯🦄🐙🦋🐝🐞🦀🐢🐧🦉🦜🐳🐝"
+    "🍎🍊🍋🍉🍇🍓🍒🥝🥑🍅🌽🥕🍄🌶🧄🍞🧀🍕🌮🍣"
+    "⚽🏀🏈🎾🎱🎳🎯🎲🎸🎺🎻🥁🎹🎨🎬🎤🎧📷📹🔭"
+    "🌵🌲🌳🌴🌷🌻🌼🌺🍁🍀⭐🌙☀🔥💧🌈⚡❄🌊🪐"
+    "🚗🚲🛴✈🚀🛸⛵🚁🏰🗼⛩🎡🎢🎠🧭🗺🧩🎁🎈🪄"
 )
 
 
@@ -159,13 +173,22 @@ def make_title(body: str) -> str | None:
     return title[:70] or None
 
 
-def make_emoji(name: str, titles: list[str]) -> str | None:
+def make_emoji(name: str, titles: list[str], used: set[str]) -> list[str]:
+    """Return ranked, de-duplicated emoji candidates (best first)."""
     ctx = "\n".join(f"- {t}" for t in titles[:4])
-    out = run_model(EMOJI_PROMPT.format(name=name, titles=ctx or "(none)"))
+    out = run_model(
+        EMOJI_PROMPT.format(
+            name=name, titles=ctx or "(none)", used=" ".join(used) or "(none)"
+        )
+    )
     if not out:
-        return None
-    m = EMOJI_RE.search(out)
-    return m.group(0) if m else None
+        return []
+    seen, cands = set(), []
+    for g in EMOJI_RE.findall(out):  # preserve model's ranking order
+        if g not in seen:
+            seen.add(g)
+            cands.append(g)
+    return cands
 
 
 # --------------------------------------------------------------------------- #
@@ -187,15 +210,24 @@ def fill_repo_emojis(sessions: list, sums: dict, refresh: bool) -> None:
         if title and title != "(no preview)":
             titles_by_dir.setdefault(repo, []).append(title)
 
+    # On refresh, reassign everything from scratch so dedupe is global;
+    # otherwise keep existing and just avoid their emojis for new dirs.
+    if refresh:
+        emap = {}
+    used = set(emap.values())
+
     for repo in titles_by_dir:
-        if repo in emap and not refresh:
+        if repo in emap:
             continue
-        emoji = make_emoji(Path(repo).name or repo, titles_by_dir[repo])
-        if not emoji:
+        cands = make_emoji(Path(repo).name or repo, titles_by_dir[repo], used)
+        # Prefer the model's fit; fall back to the pool to guarantee uniqueness.
+        pick = next((c for c in cands + EMOJI_POOL if c not in used), None)
+        if not pick:
             continue
-        emap[repo] = emoji
+        emap[repo] = pick
+        used.add(pick)
         REPO_EMOJI_PATH.write_text(json.dumps(emap))  # persist incrementally
-        print(f"[emoji] {emoji} {Path(repo).name}", file=sys.stderr)
+        print(f"[emoji] {pick} {Path(repo).name}", file=sys.stderr)
 
 
 def acquire_lock() -> bool:
