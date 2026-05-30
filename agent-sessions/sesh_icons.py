@@ -233,10 +233,11 @@ def derive(name: str, used: set[str], limit: int = 2) -> str | None:
         except Exception:
             pass
 
-    # Pick the first variant whose rendered string is unused.
+    # Pick the first variant whose rendered string is unused. Glyphs are
+    # space-separated so a 2-glyph icon reads as two distinct symbols.
     candidates = []
     if chars:
-        candidates.append("".join(chars[:limit]))  # full multi-glyph
+        candidates.append(" ".join(chars[:limit]))  # full multi-glyph
         candidates.append(chars[0])  # single best, if the pair collides
     for c in _POOL:  # distinct fallbacks guarantee uniqueness
         candidates.append(c)

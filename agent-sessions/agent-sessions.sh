@@ -15,12 +15,14 @@ if command -v ollama >/dev/null 2>&1; then
   disown 2>/dev/null || true
 fi
 
-# Line layout: <fixed-width display>\t<resume-json>
-# Show field 1 to the user; keep the JSON payload (field 2) hidden.
+# Line layout: <fixed-width display>\t<resume-json>\t<preview-json>
+# Show field 1 to the user; keep fields 2-3 hidden. fzf feeds field 3 to the
+# Python preview renderer for the highlighted row.
 choice="$(python3 "$PY" \
   | fzf --ansi --delimiter=$'\t' --with-nth=1 \
         --header='AI sessions (newest first) — enter to resume' \
-        --preview-window=hidden)" || exit 0
+        --preview="python3 '${PY}' --preview {3}" \
+        --preview-window='right,55%,wrap,border-left')" || exit 0
 
 [ -z "$choice" ] && exit 0
 
