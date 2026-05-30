@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Symlink agent-skill(s) into the current repo: .agents/skills/<name>, plus
+# .claude/skills and .codex/skills aliases. Relative symlinks only.
+#
+# Standalone script (not a shell function) so it works in non-interactive
+# bash — the shell agents run. Tab-completion for zsh lives in
+# ~/.dotfiles/zsh/aliases.zsh (_lnskill + compdef).
+#
+# Usage: lnskill <category>/<skill> [more...]
+#   Paths are relative to $LNSKILL_ROOT (default: ~/dev/agent-skills).
+#   A trailing /SKILL.md or / is tolerated. Absolute and ~ paths pass through.
+set -euo pipefail
+
+root="${LNSKILL_ROOT:-$HOME/dev/agent-skills}"
+linker="$root/general/repo-profile-bootstrap/scripts/link_repo_skills.py"
+
+if (($# == 0)); then
+  echo "usage: lnskill <category>/<skill> [more...]" >&2
+  exit 2
+fi
+if [[ ! -f $linker ]]; then
+  echo "lnskill: linker not found: $linker" >&2
+  exit 1
+fi
+
+args=()
+for a in "$@"; do
+  a="${a%/SKILL.md}" # tolerate trailing /SKILL.md from tab-complete
+  a="${a%/}"         # tolerate trailing slash
+  case "$a" in
+  /* | ~*) args+=("$a") ;;
+  *) args+=("$root/$a") ;;
+  esac
+done
+
+exec python3 "$linker" "${args[@]}"
