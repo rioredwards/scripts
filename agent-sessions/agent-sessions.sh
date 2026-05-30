@@ -20,9 +20,9 @@ fi
 # Python preview renderer for the highlighted row.
 choice="$(python3 "$PY" \
   | fzf --ansi --delimiter=$'\t' --with-nth=1 \
-        --header='AI sessions (newest first) — enter to resume' \
+        --header='AI sessions (newest first) — enter resume · ctrl-/ preview · shift-↑/↓ scroll' \
         --preview="python3 '${PY}' --preview {3}" \
-        --preview-window='right,55%,wrap,border-left')" || exit 0
+        --preview-window='nohidden,right,55%,wrap,border-left')" || exit 0
 
 [ -z "$choice" ] && exit 0
 
