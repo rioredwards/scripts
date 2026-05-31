@@ -1,0 +1,43 @@
+#!/bin/sh
+set -eu
+
+PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+
+if [ "$#" -gt 0 ]; then
+  input="$*"
+else
+  input="$(cat)"
+fi
+
+api_key="${OPENAI_API_KEY:-}"
+
+if [ -z "$api_key" ]; then
+  api_key="$(launchctl getenv OPENAI_API_KEY 2>/dev/null || true)"
+fi
+
+if [ -z "$api_key" ]; then
+  api_key="$(security find-generic-password -w -s com.rio.api.openai -a OPENAI_API_KEY 2>/dev/null || true)"
+fi
+
+if [ -z "$api_key" ]; then
+  echo "OPENAI_API_KEY is not set in env, launchd, or Keychain" >&2
+  exit 1
+fi
+
+prompt="Summarize this for text-to-speech.
+
+Return ONLY the spoken summary, with no markdown or extra commentary.
+
+Make it concise, natural, and easy to hear aloud. Keep the important outcome, errors, risks, and next steps. Do not read code, stack traces, long paths, or long lists verbatim. Refer to files by short names unless the exact path is necessary. Include exact commands only when I need to run them. Give me the short and sweet.
+
+Aim for no more than 30 seconds of speech.
+
+<input>
+$input
+</input>"
+
+curl -sS https://api.openai.com/v1/responses \
+  -H "Authorization: Bearer $api_key" \
+  -H "Content-Type: application/json" \
+  -d "$(jq -n --arg model "${OPENAI_MODEL:-gpt-4.1-mini}" --arg input "$prompt" '{model: $model, input: $input}')" |
+  jq -r '.output_text // ([.output[]?.content[]? | select(.type == "output_text") | .text] | join("\n"))'

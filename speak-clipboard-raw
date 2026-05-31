@@ -1,0 +1,2 @@
+#!/bin/sh
+/usr/bin/open "shortcuts://run-shortcut?name=Speak%20Clipboard%20Raw"
