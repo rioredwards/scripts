@@ -1,0 +1,1 @@
+../.dotfiles/scripts/setup-keychain-api-key.sh

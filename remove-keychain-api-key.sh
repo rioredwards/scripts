@@ -1,0 +1,1 @@
+../.dotfiles/scripts/remove-keychain-api-key.sh
