@@ -567,7 +567,20 @@ def build_sessions() -> list[dict]:
     save_cache()
 
     sessions.sort(key=lambda s: s["time"], reverse=True)
-    sessions = sessions[:LIMIT]
+
+    # Dedupe by (provider, id), keeping the newest. Codex emits a separate
+    # rollout-*.jsonl per resume/fork that reuses the same session_meta.id,
+    # so the same id can appear more than once. Sorted newest-first above, so
+    # the first occurrence is the one to keep.
+    seen: set[tuple[str, str]] = set()
+    deduped = []
+    for s in sessions:
+        key = (s["provider"], s["id"])
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(s)
+    sessions = deduped[:LIMIT]
 
     # Prefer a generated summary when available (claude/codex first-message
     # titles are noisy; opencode already has a clean db title).
@@ -618,6 +631,7 @@ def emit_json(sessions: list[dict], query: str = "") -> None:
                 "time": s["time"],
                 "tokens": int(s.get("tokens", 0)),
                 "title": s["title"],
+                "path": s.get("path", ""),  # transcript file; lets --show skip on-disk resolution
                 "first": s.get("first", ""),
                 "last": s.get("last", ""),
                 "match": match,
@@ -724,6 +738,136 @@ def emit_fzf(sessions: list[dict]) -> None:
         print(f"{display}\t{json.dumps(s['resume'])}\t{prev}")
 
 
+# --------------------------------------------------------------------------- #
+# Single-session full transcript: ordered [{role, text}] of real conversational
+# turns (wrappers/tool-output dropped, like first/last). Powers the Raycast
+# message-list view via `--show <provider:id>`. Unlike the previews, text is
+# emitted raw (newlines/code preserved) so a per-message copy is faithful.
+# --------------------------------------------------------------------------- #
+def iter_jsonl(path: str):
+    """Yield parsed objects from a .jsonl file, skipping unreadable lines."""
+    try:
+        with open(path, "r", errors="ignore") as fh:
+            for line in fh:
+                try:
+                    yield json.loads(line)
+                except Exception:
+                    continue
+    except OSError:
+        return
+
+
+def claude_messages(path: str) -> list[dict]:
+    out: list[dict] = []
+    for o in iter_jsonl(path):
+        if o.get("type") not in ("user", "assistant"):
+            continue
+        raw = _claude_msg_text(o)
+        if not raw or is_wrapper_msg(raw):
+            continue
+        out.append({"role": o["type"], "text": raw.strip()})
+    return out
+
+
+def claude_path_for(sid: str) -> str | None:
+    hits = glob.glob(str(HOME / ".claude" / "projects" / "*" / f"{sid}.jsonl"))
+    return max(hits, key=lambda f: Path(f).stat().st_mtime) if hits else None
+
+
+def _codex_role(o: dict) -> str:
+    pl = o.get("payload") if isinstance(o.get("payload"), dict) else {}
+    if o.get("type") == "event_msg":
+        if pl.get("type") == "user_message":
+            return "user"
+        if pl.get("type") == "agent_message":
+            return "assistant"
+    return "user" if pl.get("role") == "user" else "assistant"
+
+
+def codex_messages(path: str) -> list[dict]:
+    out: list[dict] = []
+    for o in iter_jsonl(path):
+        raw = _codex_msg_text(o)
+        if not raw or is_wrapper_msg(raw):
+            continue
+        out.append({"role": _codex_role(o), "text": raw.strip()})
+    return out
+
+
+def codex_path_for(sid: str) -> str | None:
+    """Resolve a codex session id to its newest rollout file. Fallback only:
+    callers normally pass the path the list already knows. The id lives in
+    session_meta (the header line), not the filename, and is reused across
+    forks/resumes — newest mtime matches build_sessions' dedupe."""
+    best, best_mt = None, -1.0
+    root = HOME / ".codex" / "sessions"
+    for f in glob.glob(str(root / "**" / "rollout-*.jsonl"), recursive=True):
+        for o in iter_jsonl(f):
+            if o.get("type") == "session_meta" and (o.get("payload") or {}).get("id") == sid:
+                try:
+                    mt = Path(f).stat().st_mtime
+                except OSError:
+                    mt = -1.0
+                if mt > best_mt:
+                    best, best_mt = f, mt
+            break  # session_meta is the header; only the first line matters
+    return best
+
+
+def opencode_messages(sid: str) -> list[dict]:
+    db = HOME / ".local" / "share" / "opencode" / "opencode.db"
+    if not db.exists():
+        return []
+    out: list[dict] = []
+    try:
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        roles: dict[str, str] = {}
+        for mid, data in con.execute("SELECT id, data FROM message WHERE session_id = ?", (sid,)):
+            try:
+                roles[mid] = json.loads(data).get("role")
+            except Exception:
+                continue
+        for mid, data in con.execute(
+            "SELECT message_id, data FROM part WHERE session_id = ? "
+            "AND data LIKE '%\"type\":\"text\"%' ORDER BY time_created, id",
+            (sid,),
+        ):
+            try:
+                d = json.loads(data)
+            except Exception:
+                continue
+            if d.get("type") != "text":
+                continue
+            raw = d.get("text", "")
+            if not raw or is_wrapper_msg(raw):
+                continue
+            role = roles.get(mid)
+            out.append({"role": role if role in ("user", "assistant") else "assistant", "text": raw.strip()})
+        con.close()
+    except Exception:
+        pass
+    return out
+
+
+def show_messages(provider: str, sid: str, path: str = "") -> None:
+    """Emit one session's ordered [{role, text}] as JSON. `path` (the transcript
+    file the caller already knows) skips on-disk resolution; opencode ignores it
+    (db-backed). Unknown provider / missing id is a contract error, not an empty
+    conversation — exit nonzero so the consumer shows a failure, not "No messages"."""
+    if not sid or provider not in ("claude", "codex", "opencode"):
+        sys.stderr.write("usage: --show <provider:id> [--path <file>]\n")
+        sys.exit(1)
+    if provider == "claude":
+        path = path or claude_path_for(sid) or ""
+        msgs = claude_messages(path) if path else []
+    elif provider == "codex":
+        path = path or codex_path_for(sid) or ""
+        msgs = codex_messages(path) if path else []
+    else:  # opencode
+        msgs = opencode_messages(sid)
+    json.dump(msgs, sys.stdout)
+
+
 def main() -> None:
     args = sys.argv[1:]
     if "--preview" in args:  # fzf preview pane; skip the full session build
@@ -734,6 +878,16 @@ def main() -> None:
         except Exception:
             data = {}
         sys.stdout.write(render_preview(data))
+        return
+    if "--show" in args:  # one session's full transcript; skip the session build
+        i = args.index("--show")
+        key = args[i + 1] if i + 1 < len(args) else ""
+        provider, _, sid = key.partition(":")
+        path = ""
+        if "--path" in args:
+            j = args.index("--path")
+            path = args[j + 1] if j + 1 < len(args) else ""
+        show_messages(provider, sid, path)
         return
     sessions = build_sessions()
     if "--search" in args:
