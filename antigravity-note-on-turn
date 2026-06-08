@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+
+# Antigravity/Gemini CLI passes the assistant response in 'prompt_response'.
+# Codex and Claude use 'last_assistant_message'. We fallback to be robust.
+reply="$(jq -r '.prompt_response // .last_assistant_message // empty')"
+[ -n "$reply" ] || exit 0
+
+printf '%s' "$reply" | "$HOME/scripts/summarize-for-note" | /usr/bin/pbcopy
+"$HOME/scripts/sc" text-phone
