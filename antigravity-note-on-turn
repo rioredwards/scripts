@@ -1,9 +1,21 @@
 #!/bin/sh
 set -eu
 
-# Antigravity/Gemini CLI passes the assistant response in 'prompt_response'.
-# Codex and Claude use 'last_assistant_message'. We fallback to be robust.
-reply="$(jq -r '.prompt_response // .last_assistant_message // empty')"
+# Read the stdin JSON payload
+stdin_json="$(cat)"
+
+# Extract transcript path (for Antigravity) or last assistant message (for Claude/Codex)
+transcript_path="$(echo "$stdin_json" | jq -r '.transcriptPath // .transcript_path // empty')"
+reply=""
+
+if [ -n "$transcript_path" ] && [ -f "$transcript_path" ]; then
+  # Extract the last assistant response from the transcript
+  reply="$(jq -r 'select(.type == "gemini") | .content // empty' "$transcript_path" | tail -n 1)"
+else
+  # Fallback to direct field (Claude/Codex style)
+  reply="$(echo "$stdin_json" | jq -r '.last_assistant_message // .prompt_response // empty')"
+fi
+
 [ -n "$reply" ] || exit 0
 
 printf '%s' "$reply" | "$HOME/scripts/summarize-for-note" | /usr/bin/pbcopy
