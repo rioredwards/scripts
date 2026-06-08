@@ -1,0 +1,1 @@
+../.dotfiles/scripts/setup-hammerspoon-cli.sh

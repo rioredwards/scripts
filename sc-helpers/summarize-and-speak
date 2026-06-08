@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -gt 0 ]; then
+  summary="$(sc process-text-for-speech "$*")"
+else
+  summary="$(cat | sc process-text-for-speech)"
+fi
+
+printf "%s" "$summary" | /usr/bin/pbcopy
+sc speak-clipboard-raw
+printf "%s\n" "$summary"

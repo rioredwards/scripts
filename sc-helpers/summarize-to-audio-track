@@ -1,0 +1,14 @@
+#!/bin/sh              # Specify the script interpreter (the shell to run this script)
+set -eu                # Exit on error (-e) and treat unset variables as an error (-u)
+
+# Check if any arguments were given to the script
+if [ "$#" -gt 0 ]; then
+  # If there are arguments, generate a summary by passing them as a single string to 'sc process-text-for-speech'
+  summary="$(sc process-text-for-speech "$*")"
+else
+  # If no arguments, read standard input, then process it with 'sc process-text-for-speech' to generate a summary
+  summary="$(cat | sc process-text-for-speech)"
+fi
+
+# Pass the summary to 'sc make-spoken-audio-track' to create an audio track from the summary
+sc make-spoken-audio-track "$summary"

@@ -1,0 +1,1 @@
+../.dotfiles/scripts/re-sync-codex-skills.sh

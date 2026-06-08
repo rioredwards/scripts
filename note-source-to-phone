@@ -1,0 +1,39 @@
+#!/bin/sh
+set -eu
+
+usage() {
+  cat <<'EOF'
+Usage:
+  note-source-to-phone /path/to/file.txt
+  note-source-to-phone "some text here"
+  echo "some text here" | note-source-to-phone
+
+Behavior:
+  - If first arg is path to existing file, read that file.
+  - Else if args are provided, treat them as literal text.
+  - Else read text from stdin.
+  - Then summarize, copy to clipboard, and trigger `sc text-phone`.
+EOF
+}
+
+case "${1:-}" in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+esac
+
+text=""
+
+if [ "$#" -gt 0 ] && [ -f "$1" ]; then
+  text="$(cat "$1")"
+elif [ "$#" -gt 0 ]; then
+  text="$*"
+elif [ ! -t 0 ]; then
+  text="$(cat)"
+fi
+
+[ -n "$text" ] || exit 0
+
+printf '%s' "$text" | "$HOME/scripts/summarize-for-note" | /usr/bin/pbcopy
+"$HOME/scripts/sc" text-phone

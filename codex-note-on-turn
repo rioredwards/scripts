@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+
+reply="$(jq -r '.last_assistant_message // empty')"
+[ -n "$reply" ] || exit 0
+
+# write to a file for debugging
+# echo "$reply" > /tmp/codex-note-on-turn.txt
+
+printf '%s' "$reply" | "$HOME/scripts/summarize-for-note" | /usr/bin/pbcopy
+"$HOME/scripts/sc" text-phone

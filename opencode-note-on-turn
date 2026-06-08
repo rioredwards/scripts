@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+
+reply="$(cat /tmp/opencode-last-assistant.txt 2>/dev/null || true)"
+[ -n "$reply" ] || exit 0
+
+printf '%s' "$reply" | "$HOME/scripts/summarize-for-note" | /usr/bin/pbcopy
+"$HOME/scripts/sc" text-phone
