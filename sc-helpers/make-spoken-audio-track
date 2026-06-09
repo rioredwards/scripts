@@ -18,7 +18,7 @@ shortcut_cache="$HOME/.cache/shortcuts"
 marker_file="$(mktemp "${TMPDIR:-/tmp}/make-spoken-audio-track-marker.XXXXXX")"
 trap '/bin/rm -f "$marker_file"' EXIT
 
-result="$(printf "%s" "$input" | sc make-spoken-audio-track)"
+result="$(printf "%s" "$input" | "$HOME/scripts/sc" make-spoken-audio-track)"
 
 if [ -n "$result" ] && [ "$result" != "SUCCESS" ]; then
   echo "Shortcut returned: $result" >&2

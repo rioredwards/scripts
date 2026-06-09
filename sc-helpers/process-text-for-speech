@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -gt 0 ]; then
+  "$HOME/scripts/summarize-for-note" "$*"
+else
+  "$HOME/scripts/summarize-for-note"
+fi

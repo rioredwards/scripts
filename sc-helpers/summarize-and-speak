@@ -1,12 +1,14 @@
 #!/bin/sh
 set -eu
 
+process_text="$HOME/scripts/sc-helpers/process-text-for-speech"
+
 if [ "$#" -gt 0 ]; then
-  summary="$(sc process-text-for-speech "$*")"
+  summary="$("$process_text" "$*")"
 else
-  summary="$(cat | sc process-text-for-speech)"
+  summary="$(cat | "$process_text")"
 fi
 
 printf "%s" "$summary" | /usr/bin/pbcopy
-sc speak-clipboard-raw
+"$HOME/scripts/sc" speak-clipboard-raw
 printf "%s\n" "$summary"
