@@ -59,11 +59,15 @@ trap cleanup EXIT
 args=("$shortcut_name" --output-path "$output_file")
 
 if (( $# > 0 )); then
-  input_file="$(mktemp "${TMPDIR:-/tmp}/sc-input.XXXXXX")"
+  base_tmp="$(mktemp "${TMPDIR:-/tmp}/sc-input.XXXXXX")"
+  input_file="${base_tmp}.txt"
+  mv "$base_tmp" "$input_file"
   printf '%s\n' "$*" > "$input_file"
   args+=(--input-path "$input_file")
 elif [[ ! -t 0 ]]; then
-  input_file="$(mktemp "${TMPDIR:-/tmp}/sc-input.XXXXXX")"
+  base_tmp="$(mktemp "${TMPDIR:-/tmp}/sc-input.XXXXXX")"
+  input_file="${base_tmp}.txt"
+  mv "$base_tmp" "$input_file"
   cat > "$input_file"
   args+=(--input-path "$input_file")
 fi
