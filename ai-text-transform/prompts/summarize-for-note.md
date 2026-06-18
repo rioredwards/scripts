@@ -1,0 +1,1 @@
+Summarize the assistant reply below into a short, clear note meant to be listened to as audio. Use plain spoken prose: no markdown, no code blocks, no bullet symbols, no headings. Keep the key points and any decisions or next steps. Reply with ONLY the summary.

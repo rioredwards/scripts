@@ -1,0 +1,1 @@
+Rewrite the provided rough notes into a clear, effective prompt for an AI coding or writing agent. Preserve all requirements, constraints, file paths, examples, and acceptance criteria. Make the result easy to follow and delegate. DO NOT output an overarching title or prefix like "**Prompt for AI Agent:**". Start directly with the prompt content.

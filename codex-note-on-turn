@@ -9,3 +9,6 @@ reply="$(jq -r '.last_assistant_message // empty')"
 
 printf '%s' "$reply" | "$HOME/scripts/summarize-for-note" | /usr/bin/pbcopy
 "$HOME/scripts/sc" text-phone
+
+# Rebuild the agent-sessions index so Raycast/fzf see this session immediately.
+"$HOME/dev/agent-sessions/bin/index-session" >/dev/null 2>&1 &

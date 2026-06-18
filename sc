@@ -8,10 +8,13 @@ SHORTCUTS=(
   make-spoken-audio-track "Make Spoken Audio Track"
   make-spoken-audio "Make Spoken Audio Track"
   ping-rio "Ping Rio"
+  rio-cli-notification "Rio-CLI-Notification"
   speak-clipboard-raw "Speak Clipboard Raw"
   speak-clipboard "Speak Clipboard Raw"
   summarize-text "Summarize Text"
   summarize-clipboard "Summarize Clipboard"
+  quicklook-html "QuicklookHTML"
+  ql-html "QuicklookHTML"
   text-phone "Text Phone"
 )
 

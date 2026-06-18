@@ -13,15 +13,4 @@ set -euo pipefail
 # @raycast.author rio_edwards
 # @raycast.authorURL https://raycast.com/rio_edwards
 
-ROOT="/Users/rioredwards/dev/DayBar-shell"
-DERIVED="/tmp/DayBar-run-$(whoami)"
-
-xcodebuild \
-  -project "$ROOT/DayBar.xcodeproj" \
-  -scheme DayBar \
-  -destination 'platform=macOS' \
-  -configuration Debug \
-  -derivedDataPath "$DERIVED" \
-  build
-
-open "$DERIVED/Build/Products/Debug/DayBar.app"
+/Users/rioredwards/dev/DayBar/scripts/run-daybar.sh

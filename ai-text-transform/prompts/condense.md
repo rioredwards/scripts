@@ -1,0 +1,1 @@
+Condense the provided text to about half its length while preserving the important meaning, decisions, constraints, and action items. Remove repetition and filler. Keep the user's wording style where useful.

@@ -24,4 +24,7 @@ fi
 printf '%s' "$reply" | "$HOME/scripts/summarize-for-note" | /usr/bin/pbcopy
 "$HOME/scripts/sc" text-phone >/dev/null 2>&1
 
+# Rebuild the agent-sessions index so Raycast/fzf see this session immediately.
+"$HOME/dev/agent-sessions/bin/index-session" >/dev/null 2>&1 &
+
 echo '{"decision": "allow_stop"}'
