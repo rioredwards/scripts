@@ -1,5 +1,6 @@
 import { Command } from "commander";
 import { delegate } from "./delegate.js";
+import { PROVIDERS, PROVIDER_MODELS, type ProviderName } from "./schema.js";
 import { ZodError } from "zod";
 
 const program = new Command();
@@ -46,6 +47,26 @@ program
       process.stderr.write(`Unexpected error: ${String(err)}\n`);
       process.exit(1);
     }
+  });
+
+program
+  .command("providers")
+  .description("List available providers")
+  .action(() => {
+    PROVIDERS.forEach((p) => process.stdout.write(p + "\n"));
+  });
+
+program
+  .command("models")
+  .description("List known models for a provider")
+  .requiredOption("--provider <name>", "provider to list models for")
+  .action((opts: { provider: string }) => {
+    const models = PROVIDER_MODELS[opts.provider as ProviderName];
+    if (!models) {
+      process.stderr.write(`Unknown provider: ${opts.provider}. Available: ${PROVIDERS.join(", ")}\n`);
+      process.exit(1);
+    }
+    models.forEach((m) => process.stdout.write(m + "\n"));
   });
 
 // pnpm passes `--` as argv[2] when using `pnpm dev -- <args>`; strip it
