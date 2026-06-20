@@ -9,6 +9,8 @@ program
   .description("Route and delegate tasks to agent CLIs")
   .version("0.1.0");
 
+program.showHelpAfterError();
+
 program
   .command("delegate")
   .description("Delegate a task to the configured provider")
@@ -49,4 +51,4 @@ program
 // pnpm passes `--` as argv[2] when using `pnpm dev -- <args>`; strip it
 if (process.argv[2] === "--") process.argv.splice(2, 1);
 
-program.parse();
+await program.parseAsync();
