@@ -25,6 +25,14 @@ const codexResult: DelegateResult = {
   exitCode: 0,
 };
 
+const antigravityResult: DelegateResult = {
+  ok: true,
+  provider: "antigravity",
+  stdout: "pong from antigravity",
+  stderr: "",
+  exitCode: 0,
+};
+
 beforeEach(() => {
   mockRunProvider.mockResolvedValue(claudeResult);
 });
@@ -48,6 +56,11 @@ describe("validateInput", () => {
   it("accepts codex provider", () => {
     const r = validateInput({ prompt: "hello", provider: "codex" });
     expect(r.provider).toBe("codex");
+  });
+
+  it("accepts antigravity provider", () => {
+    const r = validateInput({ prompt: "hello", provider: "antigravity" });
+    expect(r.provider).toBe("antigravity");
   });
 
   it("accepts model", () => {
@@ -83,6 +96,14 @@ describe("delegate", () => {
     const result = await delegate({ prompt: "say pong", provider: "codex", model: "gpt-5.1-codex" });
     expect(result.ok).toBe(true);
     expect(mockRunProvider).toHaveBeenCalledWith("codex", "say pong", "gpt-5.1-codex");
+  });
+
+  it("routes to antigravity when provider=antigravity", async () => {
+    mockRunProvider.mockResolvedValue(antigravityResult);
+    const result = await delegate({ prompt: "say pong", provider: "antigravity" });
+    expect(result.ok).toBe(true);
+    expect(result.provider).toBe("antigravity");
+    expect(mockRunProvider).toHaveBeenCalledWith("antigravity", "say pong", undefined);
   });
 
   it("propagates validation error on invalid input", async () => {

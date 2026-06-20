@@ -3,7 +3,7 @@ import { z } from "zod";
 export const DelegateInputSchema = z.object({
   prompt: z.string().min(1, "prompt must not be empty"),
   json: z.boolean().default(false),
-  provider: z.enum(["claude", "codex"]).default("claude"),
+  provider: z.enum(["claude", "codex", "antigravity"]).default("claude"),
   model: z.string().min(1, "model must not be empty").optional(),
 });
 
@@ -24,6 +24,12 @@ export const PROVIDER_MODELS: Record<ProviderName, string[]> = {
     "o3",
     "gpt-4.1",
     "gpt-4.1-mini",
+  ],
+  antigravity: [
+    "gemini-2.5-flash",
+    "gemini-2.5-pro",
+    "claude-sonnet-4-6",
+    "claude-opus-4-6",
   ],
 };
 
