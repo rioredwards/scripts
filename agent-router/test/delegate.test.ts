@@ -1,6 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { delegate, validateInput } from "../src/delegate.js";
-import type { DelegateResult } from "../src/schema.js";
+import {
+  DEFAULT_PROVIDER_MODELS,
+  PROVIDERS,
+  PROVIDER_MODELS,
+  type DelegateResult,
+} from "../src/schema.js";
 
 vi.mock("../src/providers/index.js", () => ({
   runProvider: vi.fn(),
@@ -29,6 +34,14 @@ const antigravityResult: DelegateResult = {
   ok: true,
   provider: "antigravity",
   stdout: "pong from antigravity",
+  stderr: "",
+  exitCode: 0,
+};
+
+const opencodeResult: DelegateResult = {
+  ok: true,
+  provider: "opencode",
+  stdout: "pong from opencode",
   stderr: "",
   exitCode: 0,
 };
@@ -63,6 +76,11 @@ describe("validateInput", () => {
     expect(r.provider).toBe("antigravity");
   });
 
+  it("accepts opencode provider", () => {
+    const r = validateInput({ prompt: "hello", provider: "opencode" });
+    expect(r.provider).toBe("opencode");
+  });
+
   it("accepts model", () => {
     const r = validateInput({ prompt: "hello", model: "sonnet" });
     expect(r.model).toBe("sonnet");
@@ -75,13 +93,23 @@ describe("validateInput", () => {
   it("rejects unknown provider", () => {
     expect(() => validateInput({ prompt: "hello", provider: "gpt4" })).toThrow();
   });
+
+  it("default models are listed in PROVIDER_MODELS", () => {
+    for (const provider of PROVIDERS) {
+      expect(PROVIDER_MODELS[provider]).toContain(DEFAULT_PROVIDER_MODELS[provider]);
+    }
+  });
 });
 
 describe("delegate", () => {
   it("routes to claude by default", async () => {
     const result = await delegate({ prompt: "say only the word pong" });
     expect(result.ok).toBe(true);
-    expect(mockRunProvider).toHaveBeenCalledWith("claude", "say only the word pong", undefined);
+    expect(mockRunProvider).toHaveBeenCalledWith(
+      "claude",
+      "say only the word pong",
+      DEFAULT_PROVIDER_MODELS.claude,
+    );
   });
 
   it("routes to codex when provider=codex", async () => {
@@ -89,11 +117,19 @@ describe("delegate", () => {
     const result = await delegate({ prompt: "say pong", provider: "codex" });
     expect(result.ok).toBe(true);
     expect(result.provider).toBe("codex");
-    expect(mockRunProvider).toHaveBeenCalledWith("codex", "say pong", undefined);
+    expect(mockRunProvider).toHaveBeenCalledWith(
+      "codex",
+      "say pong",
+      DEFAULT_PROVIDER_MODELS.codex,
+    );
   });
 
   it("routes model to selected provider", async () => {
-    const result = await delegate({ prompt: "say pong", provider: "codex", model: "gpt-5.1-codex" });
+    const result = await delegate({
+      prompt: "say pong",
+      provider: "codex",
+      model: "gpt-5.1-codex",
+    });
     expect(result.ok).toBe(true);
     expect(mockRunProvider).toHaveBeenCalledWith("codex", "say pong", "gpt-5.1-codex");
   });
@@ -103,7 +139,23 @@ describe("delegate", () => {
     const result = await delegate({ prompt: "say pong", provider: "antigravity" });
     expect(result.ok).toBe(true);
     expect(result.provider).toBe("antigravity");
-    expect(mockRunProvider).toHaveBeenCalledWith("antigravity", "say pong", undefined);
+    expect(mockRunProvider).toHaveBeenCalledWith(
+      "antigravity",
+      "say pong",
+      DEFAULT_PROVIDER_MODELS.antigravity,
+    );
+  });
+
+  it("routes to opencode when provider=opencode", async () => {
+    mockRunProvider.mockResolvedValue(opencodeResult);
+    const result = await delegate({ prompt: "say pong", provider: "opencode" });
+    expect(result.ok).toBe(true);
+    expect(result.provider).toBe("opencode");
+    expect(mockRunProvider).toHaveBeenCalledWith(
+      "opencode",
+      "say pong",
+      DEFAULT_PROVIDER_MODELS.opencode,
+    );
   });
 
   it("propagates validation error on invalid input", async () => {

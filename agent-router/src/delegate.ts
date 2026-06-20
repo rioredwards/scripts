@@ -1,5 +1,10 @@
-import { DelegateInputSchema, type DelegateInput, type DelegateResult } from "./schema.js";
 import { runProvider } from "./providers/index.js";
+import {
+  DelegateInputSchema,
+  resolveProviderModel,
+  type DelegateInput,
+  type DelegateResult,
+} from "./schema.js";
 
 export function validateInput(raw: unknown): DelegateInput {
   return DelegateInputSchema.parse(raw);
@@ -7,5 +12,6 @@ export function validateInput(raw: unknown): DelegateInput {
 
 export async function delegate(raw: unknown): Promise<DelegateResult> {
   const input = validateInput(raw);
-  return runProvider(input.provider, input.prompt, input.model);
+  const model = resolveProviderModel(input.provider, input.model);
+  return runProvider(input.provider, input.prompt, model);
 }

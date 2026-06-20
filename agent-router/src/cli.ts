@@ -1,7 +1,13 @@
 import { Command, Option } from "commander";
-import { delegate } from "./delegate.js";
-import { PROVIDERS, PROVIDER_MODELS, type ProviderName } from "./schema.js";
 import { ZodError } from "zod";
+import { delegate } from "./delegate.js";
+import {
+  DEFAULT_PROVIDER_MODELS,
+  PROVIDERS,
+  PROVIDER_MODELS,
+  resolveProviderModel,
+  type ProviderName,
+} from "./schema.js";
 
 const program = new Command();
 
@@ -14,23 +20,23 @@ type DelegateOptions = {
 
 class CliValidationError extends Error {}
 
-function resolvePrompt(argumentPrompt: string | undefined, optionPrompt: string | undefined): string | undefined {
+function resolvePrompt(
+  argumentPrompt: string | undefined,
+  optionPrompt: string | undefined,
+): string | undefined {
   return optionPrompt ?? argumentPrompt;
 }
 
-function validateModel(provider: ProviderName, model: string | undefined): void {
-  if (!model) return;
-
+function validateModel(provider: ProviderName, model: string): void {
   const models = PROVIDER_MODELS[provider];
   if (!models.includes(model)) {
-    throw new CliValidationError(`Unknown model for ${provider}: ${model}. Available: ${models.join(", ")}`);
+    throw new CliValidationError(
+      `Unknown model for ${provider}: ${model}. Available: ${models.join(", ")}`,
+    );
   }
 }
 
-program
-  .name("agent-router")
-  .description("Route and delegate tasks to agent CLIs")
-  .version("0.1.0");
+program.name("agent-router").description("Route and delegate tasks to agent CLIs").version("0.1.0");
 
 program.showHelpAfterError();
 
@@ -45,7 +51,8 @@ program
     const useJson = opts.json;
     try {
       const provider = opts.provider ?? "claude";
-      validateModel(provider, opts.model);
+      const model = resolveProviderModel(provider, opts.model);
+      validateModel(provider, model);
 
       const result = await delegate({
         prompt: resolvePrompt(argumentPrompt, opts.prompt),
@@ -94,12 +101,19 @@ program
   .description("List known models for a provider")
   .requiredOption("--provider <name>", "provider to list models for")
   .action((opts: { provider: string }) => {
-    const models = PROVIDER_MODELS[opts.provider as ProviderName];
+    const provider = opts.provider as ProviderName;
+    const models = PROVIDER_MODELS[provider];
     if (!models) {
-      process.stderr.write(`Unknown provider: ${opts.provider}. Available: ${PROVIDERS.join(", ")}\n`);
+      process.stderr.write(
+        `Unknown provider: ${opts.provider}. Available: ${PROVIDERS.join(", ")}\n`,
+      );
       process.exit(1);
     }
-    models.forEach((m) => process.stdout.write(m + "\n"));
+    const defaultModel = DEFAULT_PROVIDER_MODELS[provider];
+    models.forEach((m) => {
+      const marker = m === defaultModel ? " (default)" : "";
+      process.stdout.write(m + marker + "\n");
+    });
   });
 
 // pnpm passes `--` as argv[2] when using `pnpm dev -- <args>`; strip it
