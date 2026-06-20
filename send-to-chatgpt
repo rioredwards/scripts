@@ -1,0 +1,147 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CHATGPT_APP="${CHATGPT_APP:-ChatGPT}"
+POLL_INTERVAL="${POLL_INTERVAL:-2}"
+POLL_TIMEOUT="${POLL_TIMEOUT:-120}"
+VERBOSE="${VERBOSE:-0}"
+
+die() {
+  echo "send-to-chatgpt: $*" >&2
+  exit 1
+}
+
+log() {
+  if [[ "$VERBOSE" == "1" ]]; then
+    echo "send-to-chatgpt: $*" >&2
+  fi
+}
+
+require_cmd() {
+  local cmd
+  for cmd in "$@"; do
+    command -v "$cmd" >/dev/null 2>&1 || die "required command not found: $cmd"
+  done
+}
+
+check_permissions() {
+  local json missing
+  json="$(peekaboo permissions --json 2>/dev/null)" || die "failed to check peekaboo permissions"
+  missing="$(echo "$json" | jq -r '.data.permissions[] | select(.isRequired and (.isGranted | not)) | .name')"
+  if [[ -n "$missing" ]]; then
+    die "missing peekaboo permissions:${missing//$'\n'/', '} (run: peekaboo permissions)"
+  fi
+}
+
+peekaboo_quiet() {
+  if [[ "$VERBOSE" == "1" ]]; then
+    peekaboo "$@"
+  else
+    peekaboo "$@" >/dev/null 2>&1
+  fi
+}
+
+see_chatgpt() {
+  if [[ "$VERBOSE" == "1" ]]; then
+    peekaboo see --app "$CHATGPT_APP" --json
+  else
+    peekaboo see --app "$CHATGPT_APP" --json 2>/dev/null
+  fi
+}
+
+extract_chat_texts() {
+  jq -r '.data.ui_elements[]? | select(.label == "text") | .description // empty'
+}
+
+extract_input_id() {
+  jq -r '
+    [
+      .data.ui_elements[]?
+      | select(.label == "text entry area" or .role_description == "text entry area")
+      | .id
+    ] | first // empty
+  '
+}
+
+is_skippable_text() {
+  local text="$1"
+  [[ "$text" == "$MESSAGE" ]] && return 0
+  [[ "$text" =~ ^Thought\ for ]] && return 0
+  [[ "$text" =~ ^Thinking ]] && return 0
+  return 1
+}
+
+find_new_response() {
+  local see_json="$1"
+  local baseline_file="$2"
+  local text last_new=""
+
+  while IFS= read -r text; do
+    [[ -z "$text" ]] && continue
+    is_skippable_text "$text" && continue
+    if ! grep -Fxq -- "$text" "$baseline_file" 2>/dev/null; then
+      last_new="$text"
+    fi
+  done < <(echo "$see_json" | extract_chat_texts)
+
+  echo "$last_new"
+}
+
+usage() {
+  die 'Usage: send-to-chatgpt "your message"  (or pipe message on stdin)'
+}
+
+if [[ $# -gt 0 ]]; then
+  MESSAGE="$*"
+elif [[ ! -t 0 ]]; then
+  MESSAGE="$(cat)"
+else
+  usage
+fi
+
+MESSAGE="${MESSAGE#"${MESSAGE%%[![:space:]]*}"}"
+MESSAGE="${MESSAGE%"${MESSAGE##*[![:space:]]}"}"
+[[ -n "$MESSAGE" ]] || die "message is empty"
+
+require_cmd peekaboo jq
+check_permissions
+
+baseline_file="$(mktemp)"
+trap 'rm -f "$baseline_file"' EXIT
+
+log "capturing baseline UI state"
+initial_see="$(see_chatgpt)"
+echo "$initial_see" | extract_chat_texts >"$baseline_file"
+
+INPUT_ID="$(echo "$initial_see" | extract_input_id)"
+
+log "launching $CHATGPT_APP"
+peekaboo_quiet app launch "$CHATGPT_APP"
+
+if [[ -n "$INPUT_ID" ]]; then
+  log "focusing input field ($INPUT_ID)"
+  peekaboo_quiet click --on "$INPUT_ID" --app "$CHATGPT_APP" --foreground --wait-for 8000
+else
+  log "textField not found; falling back to query click"
+  peekaboo_quiet click "text entry area" --app "$CHATGPT_APP" --foreground --wait-for 8000 || true
+fi
+
+log "pasting message"
+peekaboo_quiet paste "$MESSAGE" --app "$CHATGPT_APP" --foreground
+peekaboo_quiet press return --app "$CHATGPT_APP" --foreground
+
+log "waiting for response (timeout ${POLL_TIMEOUT}s, interval ${POLL_INTERVAL}s)"
+elapsed=0
+while (( elapsed < POLL_TIMEOUT )); do
+  sleep "$POLL_INTERVAL"
+  elapsed=$((elapsed + POLL_INTERVAL))
+
+  current_see="$(see_chatgpt)"
+  response="$(find_new_response "$current_see" "$baseline_file")"
+  if [[ -n "$response" ]]; then
+    printf '%s\n' "$response"
+    exit 0
+  fi
+done
+
+die "timed out after ${POLL_TIMEOUT}s waiting for ChatGPT response"
