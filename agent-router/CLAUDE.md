@@ -8,6 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 pnpm install          # install deps
 pnpm dev -- delegate --prompt "your prompt"             # run CLI (default: claude)
 pnpm dev -- delegate --prompt "your prompt" --provider codex  # use codex
+pnpm dev -- delegate --prompt "your prompt" --provider codex --model gpt-5.1-codex
 pnpm dev -- delegate --prompt "your prompt" --json      # JSON output
 pnpm test             # unit tests (vitest, no real subprocess)
 pnpm typecheck        # tsc --noEmit

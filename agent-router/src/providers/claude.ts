@@ -4,10 +4,13 @@ import { toFailureResult } from "./utils.js";
 
 export const PROVIDER_NAME = "claude";
 
-export async function runProvider(prompt: string): Promise<DelegateResult> {
+export async function runProvider(prompt: string, model?: string): Promise<DelegateResult> {
   try {
     const { ANTHROPIC_API_KEY: _omit, ...env } = process.env;
-    const result = await execa("claude", ["--print", prompt], { env, extendEnv: false });
+    const args = ["--print"];
+    if (model) args.push("--model", model);
+    args.push(prompt);
+    const result = await execa("claude", args, { env, extendEnv: false });
     return {
       ok: true,
       provider: PROVIDER_NAME,

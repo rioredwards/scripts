@@ -7,5 +7,5 @@ export function validateInput(raw: unknown): DelegateInput {
 
 export async function delegate(raw: unknown): Promise<DelegateResult> {
   const input = validateInput(raw);
-  return runProvider(input.provider, input.prompt);
+  return runProvider(input.provider, input.prompt, input.model);
 }

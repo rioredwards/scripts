@@ -4,6 +4,7 @@ export const DelegateInputSchema = z.object({
   prompt: z.string().min(1, "prompt must not be empty"),
   json: z.boolean().default(false),
   provider: z.enum(["claude", "codex"]).default("claude"),
+  model: z.string().min(1, "model must not be empty").optional(),
 });
 
 export type DelegateInput = z.infer<typeof DelegateInputSchema>;

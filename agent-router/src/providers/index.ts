@@ -4,11 +4,11 @@ import type { DelegateResult, ProviderName } from "../schema.js";
 
 export type { ProviderName };
 
-export function runProvider(provider: ProviderName, prompt: string): Promise<DelegateResult> {
+export function runProvider(provider: ProviderName, prompt: string, model?: string): Promise<DelegateResult> {
   switch (provider) {
     case "codex":
-      return runCodex(prompt);
+      return runCodex(prompt, model);
     case "claude":
-      return runClaude(prompt);
+      return runClaude(prompt, model);
   }
 }

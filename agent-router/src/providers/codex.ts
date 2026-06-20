@@ -7,14 +7,17 @@ import { toFailureResult } from "./utils.js";
 
 export const PROVIDER_NAME = "codex";
 
-export async function runProvider(prompt: string): Promise<DelegateResult> {
+export async function runProvider(prompt: string, model?: string): Promise<DelegateResult> {
   const tmpDir = await mkdtemp(join(tmpdir(), "agent-router-"));
   const outFile = join(tmpDir, "output.txt");
   try {
     const { OPENAI_API_KEY: _omit, ...env } = process.env;
+    const args = ["exec", "--output-last-message", outFile, "--ephemeral"];
+    if (model) args.push("--model", model);
+    args.push(prompt);
     const result = await execa(
       "codex",
-      ["exec", "--output-last-message", outFile, "--ephemeral", prompt],
+      args,
       { env, extendEnv: false, stdin: "ignore" }
     );
     const stdout = await readFile(outFile, "utf-8").catch(() => result.stdout);

@@ -50,6 +50,15 @@ describe("validateInput", () => {
     expect(r.provider).toBe("codex");
   });
 
+  it("accepts model", () => {
+    const r = validateInput({ prompt: "hello", model: "sonnet" });
+    expect(r.model).toBe("sonnet");
+  });
+
+  it("rejects empty model", () => {
+    expect(() => validateInput({ prompt: "hello", model: "" })).toThrow();
+  });
+
   it("rejects unknown provider", () => {
     expect(() => validateInput({ prompt: "hello", provider: "gpt4" })).toThrow();
   });
@@ -59,7 +68,7 @@ describe("delegate", () => {
   it("routes to claude by default", async () => {
     const result = await delegate({ prompt: "say only the word pong" });
     expect(result.ok).toBe(true);
-    expect(mockRunProvider).toHaveBeenCalledWith("claude", "say only the word pong");
+    expect(mockRunProvider).toHaveBeenCalledWith("claude", "say only the word pong", undefined);
   });
 
   it("routes to codex when provider=codex", async () => {
@@ -67,7 +76,13 @@ describe("delegate", () => {
     const result = await delegate({ prompt: "say pong", provider: "codex" });
     expect(result.ok).toBe(true);
     expect(result.provider).toBe("codex");
-    expect(mockRunProvider).toHaveBeenCalledWith("codex", "say pong");
+    expect(mockRunProvider).toHaveBeenCalledWith("codex", "say pong", undefined);
+  });
+
+  it("routes model to selected provider", async () => {
+    const result = await delegate({ prompt: "say pong", provider: "codex", model: "gpt-5.1-codex" });
+    expect(result.ok).toBe(true);
+    expect(mockRunProvider).toHaveBeenCalledWith("codex", "say pong", "gpt-5.1-codex");
   });
 
   it("propagates validation error on invalid input", async () => {
