@@ -13,11 +13,12 @@ program
   .command("delegate")
   .description("Delegate a task to the configured provider")
   .requiredOption("--prompt <text>", "task prompt to send to the provider")
+  .option("--provider <name>", "provider to use: claude, codex")
   .option("--json", "output result as JSON", false)
-  .action(async (opts: { prompt: string; json: boolean }) => {
+  .action(async (opts: { prompt: string; provider?: string; json: boolean }) => {
     const useJson = opts.json;
     try {
-      const result = await delegate({ prompt: opts.prompt, json: useJson });
+      const result = await delegate({ prompt: opts.prompt, provider: opts.provider, json: useJson });
       if (useJson) {
         process.stdout.write(JSON.stringify(result, null, 2) + "\n");
       } else {

@@ -2,15 +2,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { delegate, validateInput } from "../src/delegate.js";
 import type { DelegateResult } from "../src/schema.js";
 
-vi.mock("../src/provider.js", () => ({
-  PROVIDER_NAME: "claude",
+vi.mock("../src/providers/index.js", () => ({
   runProvider: vi.fn(),
 }));
 
-import { runProvider } from "../src/provider.js";
+import { runProvider } from "../src/providers/index.js";
 const mockRunProvider = vi.mocked(runProvider);
 
-const successResult: DelegateResult = {
+const claudeResult: DelegateResult = {
   ok: true,
   provider: "claude",
   stdout: "pong",
@@ -18,8 +17,16 @@ const successResult: DelegateResult = {
   exitCode: 0,
 };
 
+const codexResult: DelegateResult = {
+  ok: true,
+  provider: "codex",
+  stdout: "pong from codex",
+  stderr: "",
+  exitCode: 0,
+};
+
 beforeEach(() => {
-  mockRunProvider.mockResolvedValue(successResult);
+  mockRunProvider.mockResolvedValue(claudeResult);
 });
 
 describe("validateInput", () => {
@@ -31,21 +38,36 @@ describe("validateInput", () => {
     expect(() => validateInput({ prompt: "" })).toThrow();
   });
 
-  it("accepts valid input", () => {
-    const result = validateInput({ prompt: "hello" });
-    expect(result.prompt).toBe("hello");
-    expect(result.json).toBe(false);
+  it("accepts valid input with defaults", () => {
+    const r = validateInput({ prompt: "hello" });
+    expect(r.prompt).toBe("hello");
+    expect(r.json).toBe(false);
+    expect(r.provider).toBe("claude");
+  });
+
+  it("accepts codex provider", () => {
+    const r = validateInput({ prompt: "hello", provider: "codex" });
+    expect(r.provider).toBe("codex");
+  });
+
+  it("rejects unknown provider", () => {
+    expect(() => validateInput({ prompt: "hello", provider: "gpt4" })).toThrow();
   });
 });
 
 describe("delegate", () => {
-  it("happy path: passes prompt to provider and returns result", async () => {
+  it("routes to claude by default", async () => {
     const result = await delegate({ prompt: "say only the word pong" });
     expect(result.ok).toBe(true);
-    expect(result.provider).toBe("claude");
-    expect(result.stdout).toBe("pong");
-    expect(result.exitCode).toBe(0);
-    expect(mockRunProvider).toHaveBeenCalledWith("say only the word pong");
+    expect(mockRunProvider).toHaveBeenCalledWith("claude", "say only the word pong");
+  });
+
+  it("routes to codex when provider=codex", async () => {
+    mockRunProvider.mockResolvedValue(codexResult);
+    const result = await delegate({ prompt: "say pong", provider: "codex" });
+    expect(result.ok).toBe(true);
+    expect(result.provider).toBe("codex");
+    expect(mockRunProvider).toHaveBeenCalledWith("codex", "say pong");
   });
 
   it("propagates validation error on invalid input", async () => {

@@ -1,5 +1,6 @@
 import { execa } from "execa";
-import type { DelegateResult } from "./schema.js";
+import type { DelegateResult } from "../schema.js";
+import { toFailureResult } from "./utils.js";
 
 export const PROVIDER_NAME = "claude";
 
@@ -14,14 +15,7 @@ export async function runProvider(prompt: string): Promise<DelegateResult> {
       stderr: result.stderr,
       exitCode: result.exitCode ?? 0,
     };
-  } catch (err: unknown) {
-    const e = err as { stdout?: string; stderr?: string; exitCode?: number };
-    return {
-      ok: false,
-      provider: PROVIDER_NAME,
-      stdout: e.stdout ?? "",
-      stderr: e.stderr ?? String(err),
-      exitCode: e.exitCode ?? 1,
-    };
+  } catch (err) {
+    return toFailureResult(PROVIDER_NAME, err);
   }
 }
