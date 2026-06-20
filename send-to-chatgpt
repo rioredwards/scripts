@@ -4,7 +4,27 @@ set -euo pipefail
 CHATGPT_APP="${CHATGPT_APP:-ChatGPT}"
 POLL_INTERVAL="${POLL_INTERVAL:-2}"
 POLL_TIMEOUT="${POLL_TIMEOUT:-120}"
+STABLE_POLLS="${STABLE_POLLS:-2}"
 VERBOSE="${VERBOSE:-0}"
+AUTOMATION_CUE="${AUTOMATION_CUE:-1}"
+AUTOMATION_CUE_SCRIPT="${AUTOMATION_CUE_SCRIPT:-/Users/rioredwards/scripts/automation-cue.sh}"
+
+cue_shown=0
+
+cue_start() {
+  [[ "$AUTOMATION_CUE" == "1" ]] || return 0
+  [[ -x "$AUTOMATION_CUE_SCRIPT" ]] || return 0
+  log "showing automation cue"
+  "$AUTOMATION_CUE_SCRIPT" start || true
+  cue_shown=1
+}
+
+cue_stop() {
+  [[ "$cue_shown" == "1" ]] || return 0
+  log "hiding automation cue"
+  "$AUTOMATION_CUE_SCRIPT" stop || true
+  cue_shown=0
+}
 
 die() {
   echo "send-to-chatgpt: $*" >&2
@@ -71,20 +91,42 @@ is_skippable_text() {
   return 1
 }
 
-find_new_response() {
+is_generating() {
+  local see_json="$1"
+  echo "$see_json" | jq -e '
+    .data.ui_elements[]?
+    | select(.label == "Stop" or .label == "Stop generating")
+  ' >/dev/null 2>&1
+}
+
+collect_response_text() {
   local see_json="$1"
   local baseline_file="$2"
-  local text last_new=""
+  local text
+  local -a parts=()
 
   while IFS= read -r text; do
     [[ -z "$text" ]] && continue
     is_skippable_text "$text" && continue
     if ! grep -Fxq -- "$text" "$baseline_file" 2>/dev/null; then
-      last_new="$text"
+      parts+=("$text")
     fi
   done < <(echo "$see_json" | extract_chat_texts)
 
-  echo "$last_new"
+  if ((${#parts[@]} == 0)); then
+    return 0
+  fi
+
+  local part
+  local first=1
+  for part in "${parts[@]}"; do
+    if ((first)); then
+      printf '%s' "$part"
+      first=0
+    else
+      printf '\n%s' "$part"
+    fi
+  done
 }
 
 usage() {
@@ -107,7 +149,9 @@ require_cmd peekaboo jq
 check_permissions
 
 baseline_file="$(mktemp)"
-trap 'rm -f "$baseline_file"' EXIT
+trap 'rm -f "$baseline_file"; cue_stop' EXIT
+
+cue_start
 
 log "capturing baseline UI state"
 initial_see="$(see_chatgpt)"
@@ -130,18 +174,44 @@ log "pasting message"
 peekaboo_quiet paste "$MESSAGE" --app "$CHATGPT_APP" --foreground
 peekaboo_quiet press return --app "$CHATGPT_APP" --foreground
 
-log "waiting for response (timeout ${POLL_TIMEOUT}s, interval ${POLL_INTERVAL}s)"
+log "waiting for response (timeout ${POLL_TIMEOUT}s, interval ${POLL_INTERVAL}s, stable polls ${STABLE_POLLS})"
 elapsed=0
-while (( elapsed < POLL_TIMEOUT )); do
+last_response=""
+stable_count=0
+
+while ((elapsed < POLL_TIMEOUT)); do
   sleep "$POLL_INTERVAL"
   elapsed=$((elapsed + POLL_INTERVAL))
 
   current_see="$(see_chatgpt)"
-  response="$(find_new_response "$current_see" "$baseline_file")"
-  if [[ -n "$response" ]]; then
-    printf '%s\n' "$response"
-    exit 0
+  response="$(collect_response_text "$current_see" "$baseline_file")"
+  response_len=${#response}
+
+  if is_generating "$current_see"; then
+    log "poll: len=${response_len} stable=${stable_count} (still generating)"
+    stable_count=0
+    last_response="$response"
+    continue
+  fi
+
+  if [[ -n "$response" && "$response" == "$last_response" ]]; then
+    stable_count=$((stable_count + 1))
+    log "poll: len=${response_len} stable=${stable_count}"
+    if ((stable_count >= STABLE_POLLS)); then
+      printf '%s\n' "$response"
+      exit 0
+    fi
+  else
+    stable_count=0
+    last_response="$response"
+    log "poll: len=${response_len} stable=${stable_count} (changed)"
   fi
 done
+
+if [[ -n "$last_response" ]]; then
+  log "timed out with partial response (${#last_response} chars); returning best effort"
+  printf '%s\n' "$last_response"
+  exit 0
+fi
 
 die "timed out after ${POLL_TIMEOUT}s waiting for ChatGPT response"
