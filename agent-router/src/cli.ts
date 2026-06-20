@@ -1,9 +1,31 @@
-import { Command } from "commander";
+import { Command, Option } from "commander";
 import { delegate } from "./delegate.js";
 import { PROVIDERS, PROVIDER_MODELS, type ProviderName } from "./schema.js";
 import { ZodError } from "zod";
 
 const program = new Command();
+
+type DelegateOptions = {
+  prompt?: string;
+  provider?: ProviderName;
+  model?: string;
+  json: boolean;
+};
+
+class CliValidationError extends Error {}
+
+function resolvePrompt(argumentPrompt: string | undefined, optionPrompt: string | undefined): string | undefined {
+  return optionPrompt ?? argumentPrompt;
+}
+
+function validateModel(provider: ProviderName, model: string | undefined): void {
+  if (!model) return;
+
+  const models = PROVIDER_MODELS[provider];
+  if (!models.includes(model)) {
+    throw new CliValidationError(`Unknown model for ${provider}: ${model}. Available: ${models.join(", ")}`);
+  }
+}
 
 program
   .name("agent-router")
@@ -13,18 +35,21 @@ program
 program.showHelpAfterError();
 
 program
-  .command("delegate")
+  .command("delegate [prompt]")
   .description("Delegate a task to the configured provider")
-  .requiredOption("--prompt <text>", "task prompt to send to the provider")
-  .option("--provider <name>", "provider to use: claude, codex")
+  .option("--prompt <text>", "task prompt to send to the provider")
+  .addOption(new Option("--provider <name>", "provider to use").choices([...PROVIDERS]))
   .option("--model <name>", "model to use for the selected provider")
   .option("--json", "output result as JSON", false)
-  .action(async (opts: { prompt: string; provider?: string; model?: string; json: boolean }) => {
+  .action(async (argumentPrompt: string | undefined, opts: DelegateOptions) => {
     const useJson = opts.json;
     try {
+      const provider = opts.provider ?? "claude";
+      validateModel(provider, opts.model);
+
       const result = await delegate({
-        prompt: opts.prompt,
-        provider: opts.provider,
+        prompt: resolvePrompt(argumentPrompt, opts.prompt),
+        provider,
         model: opts.model,
         json: useJson,
       });
@@ -41,6 +66,14 @@ program
           process.stdout.write(JSON.stringify({ ok: false, error: msg }) + "\n");
         } else {
           process.stderr.write(`Validation error: ${msg}\n`);
+        }
+        process.exit(1);
+      }
+      if (err instanceof CliValidationError) {
+        if (useJson) {
+          process.stdout.write(JSON.stringify({ ok: false, error: err.message }) + "\n");
+        } else {
+          process.stderr.write(`Validation error: ${err.message}\n`);
         }
         process.exit(1);
       }

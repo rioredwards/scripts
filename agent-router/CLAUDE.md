@@ -6,9 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```zsh
 pnpm install          # install deps
-pnpm dev -- delegate --prompt "your prompt"             # run CLI (default: claude)
+pnpm dev -- delegate "your prompt"                      # run CLI (default: claude)
+pnpm dev -- delegate --prompt "your prompt"             # equivalent flag form
 pnpm dev -- delegate --prompt "your prompt" --provider codex  # use codex
-pnpm dev -- delegate --prompt "your prompt" --provider codex --model gpt-5.1-codex
+pnpm dev -- delegate --prompt "your prompt" --provider codex --model gpt-4.1
 pnpm dev -- delegate --prompt "your prompt" --json      # JSON output
 pnpm test             # unit tests (vitest, no real subprocess)
 pnpm typecheck        # tsc --noEmit
@@ -18,7 +19,7 @@ Run a single test file: `pnpm test test/delegate.test.ts`
 
 ## Architecture
 
-Non-interactive CLI that routes prompts to agent binaries (`claude`, `codex`).
+Non-interactive CLI that routes prompts to agent binaries (`claude`, `codex`, `agy`).
 
 ```
 src/schema.ts           -- zod schema for DelegateInput + DelegateResult; exports ProviderName
@@ -26,6 +27,7 @@ src/delegate.ts         -- validates input, routes to provider
 src/providers/
   claude.ts             -- runs claude --print <prompt> via execa
   codex.ts              -- runs codex exec --output-last-message <tmp> --ephemeral <prompt>
+  antigravity.ts        -- runs agy run <prompt> via execa
   index.ts              -- routes by ProviderName; re-exports ProviderName from schema
   utils.ts              -- shared toFailureResult helper
 src/cli.ts              -- commander CLI, one subcommand: delegate
