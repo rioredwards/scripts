@@ -6,14 +6,23 @@ export const PROVIDER_NAME = "antigravity";
 
 export async function runProvider(prompt: string, model?: string): Promise<DelegateResult> {
   try {
-    const args = ["--print"];
+    const args = ["-p"];
     if (model) args.push("--model", model);
-    args.push(prompt);
-    const result = await execa("agy", args, { stdin: "ignore" });
+    const result = await execa("agy", args, { input: prompt });
+    const stdout = result.stdout.trim();
+    if (!stdout) {
+      return {
+        ok: false,
+        provider: PROVIDER_NAME,
+        stdout: "",
+        stderr: result.stderr || "agy returned empty output",
+        exitCode: result.exitCode ?? 0,
+      };
+    }
     return {
       ok: true,
       provider: PROVIDER_NAME,
-      stdout: result.stdout,
+      stdout,
       stderr: result.stderr,
       exitCode: result.exitCode ?? 0,
     };

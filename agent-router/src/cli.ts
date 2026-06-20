@@ -3,6 +3,7 @@ import { ZodError } from "zod";
 import { delegate } from "./delegate.js";
 import {
   DEFAULT_PROVIDER_MODELS,
+  PROVIDER_DETAILS,
   PROVIDERS,
   PROVIDER_MODELS,
   resolveProviderModel,
@@ -40,6 +41,50 @@ program.name("agent-router").description("Route and delegate tasks to agent CLIs
 
 program.showHelpAfterError();
 
+program.addHelpText(
+  "after",
+  `
+
+Start here:
+  agent-router guide                         progressive usage guide
+  agent-router providers --verbose           providers, binaries, defaults
+  agent-router models --provider opencode    known models for one provider
+
+Examples:
+  agent-router delegate "say pong"
+  agent-router delegate --provider opencode --prompt "summarize README" --json
+`,
+);
+
+program
+  .command("guide")
+  .description("Show progressive usage guide for agents")
+  .action(() => {
+    process.stdout.write(`agent-router guide
+
+Use this CLI when you need one non-interactive response from another installed agent CLI.
+
+Fast path:
+  agent-router delegate "your prompt"
+  agent-router delegate --provider opencode --prompt "your prompt" --json
+
+Discover:
+  agent-router providers --verbose           provider -> binary, default model, behavior
+  agent-router models --provider <name>      known model names for one provider
+  agent-router delegate --help               flags for delegation
+
+Provider defaults:
+${PROVIDERS.map((provider) => {
+  const details = PROVIDER_DETAILS[provider];
+  return `  ${provider.padEnd(12)} binary=${details.binary.padEnd(10)} default=${DEFAULT_PROVIDER_MODELS[provider]}`;
+}).join("\n")}
+
+Need internals?
+  Usually no. Only inspect src/providers/<provider>.ts when changing wrapper behavior.
+  Architecture notes: README.md quick start, CLAUDE.md deeper flow, AGENTS.md repo rules.
+`);
+  });
+
 program
   .command("delegate [prompt]")
   .description("Delegate a task to the configured provider")
@@ -47,6 +92,15 @@ program
   .addOption(new Option("--provider <name>", "provider to use").choices([...PROVIDERS]))
   .option("--model <name>", "model to use for the selected provider")
   .option("--json", "output result as JSON", false)
+  .addHelpText(
+    "after",
+    `
+
+Need provider details?
+  agent-router providers --verbose
+  agent-router guide
+`,
+  )
   .action(async (argumentPrompt: string | undefined, opts: DelegateOptions) => {
     const useJson = opts.json;
     try {
@@ -92,8 +146,21 @@ program
 program
   .command("providers")
   .description("List available providers")
-  .action(() => {
-    PROVIDERS.forEach((p) => process.stdout.write(p + "\n"));
+  .option("--verbose", "include binaries, defaults, and behavior", false)
+  .action((opts: { verbose: boolean }) => {
+    if (!opts.verbose) {
+      PROVIDERS.forEach((p) => process.stdout.write(p + "\n"));
+      process.stderr.write("Run `agent-router providers --verbose` for binaries, defaults, and behavior.\n");
+      return;
+    }
+    PROVIDERS.forEach((provider) => {
+      const details = PROVIDER_DETAILS[provider];
+      process.stdout.write(`${provider}\n`);
+      process.stdout.write(`  binary: ${details.binary}\n`);
+      process.stdout.write(`  default model: ${DEFAULT_PROVIDER_MODELS[provider]}\n`);
+      process.stdout.write(`  wrapper: ${details.command}\n`);
+      process.stdout.write(`  note: ${details.note}\n`);
+    });
   });
 
 program

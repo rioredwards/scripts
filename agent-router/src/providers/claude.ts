@@ -10,7 +10,7 @@ export async function runProvider(prompt: string, model?: string): Promise<Deleg
     const args = ["--print"];
     if (model) args.push("--model", model);
     args.push(prompt);
-    const result = await execa("claude", args, { env, extendEnv: false });
+    const result = await execa("claude", args, { env, extendEnv: false, stdin: "ignore" });
     return {
       ok: true,
       provider: PROVIDER_NAME,
