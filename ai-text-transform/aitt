@@ -193,7 +193,10 @@ fi
 # Run transformation
 # llm reads from stdin naturally, outputting the response
 SYSTEM_PROMPT="You are a pure text transformation engine. Return ONLY the transformed text. DO NOT output any conversational filler, preludes, greetings, explanations, or postscripts. Do not give the output a title like 'Here is the result:'. Your output must consist ENTIRELY of the requested output."
-OUTPUT=$(echo "$ASSEMBLED_PROMPT" | llm --system "$SYSTEM_PROMPT")
+FULL_PROMPT="${SYSTEM_PROMPT}
+
+${ASSEMBLED_PROMPT}"
+OUTPUT=$(~/scripts/agent-router/agent-router delegate --provider claude --model "${LLM_MODEL:-haiku}" --prompt "$FULL_PROMPT")
 
 # Handle output
 if [[ -n "$OUT_PATH" ]]; then

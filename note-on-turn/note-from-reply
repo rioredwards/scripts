@@ -1,0 +1,10 @@
+#!/bin/sh
+# Shared core for all agent note-on-turn hooks.
+# stdin: reply text. Summarizes, texts to phone, rebuilds session index.
+set -eu
+
+text="$(cat)"
+[ -n "$text" ] || exit 0
+
+printf '%s' "$text" | "$HOME/scripts/summarize-for-note" | "$HOME/scripts/sc" text-phone
+"$HOME/dev/agent-sessions/bin/index-session" >/dev/null 2>&1 &

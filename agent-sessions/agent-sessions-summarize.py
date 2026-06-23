@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate concise titles for Claude/Codex sessions via local Ollama.
 
-Writes id -> {"summary", "msg_count", "model"} into
+Writes id -> {"summary", "msg_count", "model", "context_version"} into
 ~/.cache/agent-sessions/summaries.json. The picker (agent-sessions.py) prefers
 these over noisy first-message titles. OpenCode is skipped (it has db titles).
 
@@ -72,6 +72,8 @@ def claude_user_msgs(path: str) -> list[str]:
                         for p in c
                         if isinstance(p, dict) and p.get("type") == "text"
                     )
+                if agg.is_wrapper_msg(raw):
+                    continue
                 t = agg.clean_title(raw, n=MSG_CHARS)
                 if t and t != "(no preview)":
                     out.append(t)
@@ -100,6 +102,8 @@ def codex_user_msgs(path: str) -> list[str]:
                             p.get("text", "") for p in c if isinstance(p, dict) and p.get("text")
                         )
                 if not raw:
+                    continue
+                if agg.is_wrapper_msg(raw):
                     continue
                 t = agg.clean_title(raw, n=MSG_CHARS)
                 if t and t != "(no preview)":
@@ -188,6 +192,8 @@ def main() -> int:
                 break
             sid = s["id"]
             ent = sums.get(sid)
+            if ent and ent.get("context_version") != agg.SUMMARY_CONTEXT_VERSION:
+                ent = None
             msgs = extract[s["provider"]](s["path"])
             n = len(msgs)
             if ent and not args.refresh:
@@ -200,7 +206,12 @@ def main() -> int:
             title = ollama(body)
             if not title:
                 continue
-            sums[sid] = {"summary": title, "msg_count": n, "model": MODEL}
+            sums[sid] = {
+                "summary": title,
+                "msg_count": n,
+                "model": MODEL,
+                "context_version": agg.SUMMARY_CONTEXT_VERSION,
+            }
             SUMMARY_PATH.write_text(json.dumps(sums))  # persist incrementally
             done += 1
             print(f"[{s['provider']}] {title}", file=sys.stderr)

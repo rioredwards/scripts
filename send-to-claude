@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CHATGPT_APP="${CHATGPT_APP:-ChatGPT}"
+CLAUDE_APP="${CLAUDE_APP:-Claude}"
 POLL_INTERVAL="${POLL_INTERVAL:-2}"
 POLL_TIMEOUT="${POLL_TIMEOUT:-120}"
 STABLE_POLLS="${STABLE_POLLS:-2}"
 VERBOSE="${VERBOSE:-0}"
 AUTOMATION_CUE="${AUTOMATION_CUE:-1}"
 AUTOMATION_CUE_SCRIPT="${AUTOMATION_CUE_SCRIPT:-/Users/rioredwards/scripts/automation-cue.sh}"
+
+export PEEKABOO_AX_MAX_DEPTH=30
+export PEEKABOO_AX_MAX_ELEMENTS=1000
 
 cue_shown=0
 
@@ -27,13 +30,13 @@ cue_stop() {
 }
 
 die() {
-  echo "send-to-chatgpt: $*" >&2
+  echo "send-to-claude: $*" >&2
   exit 1
 }
 
 log() {
   if [[ "$VERBOSE" == "1" ]]; then
-    echo "send-to-chatgpt: $*" >&2
+    echo "send-to-claude: $*" >&2
   fi
 }
 
@@ -61,16 +64,16 @@ peekaboo_quiet() {
   fi
 }
 
-see_chatgpt() {
+see_claude() {
   if [[ "$VERBOSE" == "1" ]]; then
-    peekaboo see --app "$CHATGPT_APP" --json
+    peekaboo see --app "$CLAUDE_APP" --json
   else
-    peekaboo see --app "$CHATGPT_APP" --json 2>/dev/null
+    peekaboo see --app "$CLAUDE_APP" --json 2>/dev/null
   fi
 }
 
 extract_chat_texts() {
-  jq -r '.data.ui_elements[]? | select(.label == "text") | .description // empty'
+  jq -r '.data.ui_elements[]? | select(.role_description == "text") | .label // empty'
 }
 
 extract_input_id() {
@@ -86,8 +89,11 @@ extract_input_id() {
 is_skippable_text() {
   local text="$1"
   [[ "$text" == "$MESSAGE" ]] && return 0
-  [[ "$text" =~ ^Thought\ for ]] && return 0
-  [[ "$text" =~ ^Thinking ]] && return 0
+  [[ "$text" =~ ^[0-9]+:[0-9]+(\ [AP]M)?$ ]] && return 0
+  [[ "$text" == "Write a message…" ]] && return 0
+  [[ "$text" =~ ^(Sonnet|Opus|Haiku|Claude|High|Medium|Low) ]] && return 0
+  [[ "$text" == "Claude is AI and can make mistakes. Please double-check responses." ]] && return 0
+  [[ "$text" =~ ^(Learn more|\(opens in new tab\)) ]] && return 0
   return 1
 }
 
@@ -130,19 +136,15 @@ collect_response_text() {
 }
 
 usage() {
-  die 'Usage: send-to-chatgpt "your message"  (or pipe message on stdin)
-       send-to-chatgpt --paste           # send clipboard as-is (supports images)
-       send-to-chatgpt --double-paste    # send clipboard item 1, then Raycast item 2'
+  die 'Usage: send-to-claude "your message"  (or pipe message on stdin)
+       send-to-claude --paste           # send clipboard as-is (supports images)'
 }
 
-PASTE_MODE=""  # "" = text, "paste" = clipboard, "double-paste" = clipboard + raycast 2nd
+PASTE_MODE=""
 MESSAGE=""
 
 if [[ "${1:-}" == "--paste" ]]; then
   PASTE_MODE="paste"
-  shift
-elif [[ "${1:-}" == "--double-paste" ]]; then
-  PASTE_MODE="double-paste"
   shift
 fi
 
@@ -168,42 +170,34 @@ trap 'rm -f "$baseline_file"; cue_stop' EXIT
 cue_start
 
 log "capturing baseline UI state"
-initial_see="$(see_chatgpt)"
+initial_see="$(see_claude)"
 echo "$initial_see" | extract_chat_texts >"$baseline_file"
 
 INPUT_ID="$(echo "$initial_see" | extract_input_id)"
 
-log "launching $CHATGPT_APP"
-peekaboo_quiet app launch "$CHATGPT_APP"
+log "launching $CLAUDE_APP"
+peekaboo_quiet app launch "$CLAUDE_APP"
 
 if [[ -n "$INPUT_ID" ]]; then
   log "focusing input field ($INPUT_ID)"
-  peekaboo_quiet click --on "$INPUT_ID" --app "$CHATGPT_APP" --foreground --wait-for 8000
+  peekaboo_quiet click --on "$INPUT_ID" --app "$CLAUDE_APP" --foreground --wait-for 8000
 else
-  log "textField not found; falling back to query click"
-  peekaboo_quiet click "text entry area" --app "$CHATGPT_APP" --foreground --wait-for 8000 || true
+  log "input field not found; clicking HTML content area"
+  HTML_ID="$(echo "$initial_see" | jq -r '[.data.ui_elements[]? | select(.role_description == "HTML content") | .id] | first // empty')"
+  if [[ -n "$HTML_ID" ]]; then
+    peekaboo_quiet click --on "$HTML_ID" --app "$CLAUDE_APP" --foreground --wait-for 8000 || true
+  fi
 fi
 
 if [[ "$PASTE_MODE" == "paste" ]]; then
   log "pasting clipboard (cmd+v)"
-  peekaboo_quiet hotkey "cmd,v" --app "$CHATGPT_APP" --foreground
-elif [[ "$PASTE_MODE" == "double-paste" ]]; then
-  log "pasting 1st clipboard item (cmd+v)"
-  peekaboo_quiet hotkey "cmd,v" --app "$CHATGPT_APP" --foreground
-  sleep 0.3
-  log "opening Raycast clipboard (cmd+shift+v)"
-  peekaboo_quiet hotkey "cmd,shift,v" --foreground
-  sleep 1.0
-  log "selecting 2nd item and pasting"
-  peekaboo_quiet press down --foreground
-  sleep 0.3
-  peekaboo_quiet press return --foreground
+  peekaboo_quiet hotkey "cmd,v" --app "$CLAUDE_APP" --foreground
 else
   log "pasting message"
-  peekaboo_quiet paste "$MESSAGE" --app "$CHATGPT_APP" --foreground
+  peekaboo_quiet paste "$MESSAGE" --app "$CLAUDE_APP" --foreground
 fi
 
-peekaboo_quiet press return --app "$CHATGPT_APP" --foreground
+peekaboo_quiet press return --app "$CLAUDE_APP" --foreground
 
 log "waiting for response (timeout ${POLL_TIMEOUT}s, interval ${POLL_INTERVAL}s, stable polls ${STABLE_POLLS})"
 elapsed=0
@@ -214,21 +208,31 @@ while ((elapsed < POLL_TIMEOUT)); do
   sleep "$POLL_INTERVAL"
   elapsed=$((elapsed + POLL_INTERVAL))
 
-  current_see="$(see_chatgpt)"
+  current_see="$(see_claude)"
   response="$(collect_response_text "$current_see" "$baseline_file")"
   response_len=${#response}
-
-  if is_generating "$current_see"; then
-    log "poll: len=${response_len} stable=${stable_count} (still generating)"
-    stable_count=0
-    last_response="$response"
-    continue
-  fi
 
   if [[ -n "$response" && "$response" == "$last_response" ]]; then
     stable_count=$((stable_count + 1))
     log "poll: len=${response_len} stable=${stable_count}"
     if ((stable_count >= STABLE_POLLS)); then
+      log "response stable; clicking Copy button"
+      copy_see="$(see_claude)"
+      COPY_ID="$(echo "$copy_see" | jq -r '[.data.ui_elements[]? | select(.label == "Copy") | .id] | last // empty')"
+      if [[ -n "$COPY_ID" ]]; then
+        saved_clipboard="$(pbpaste 2>/dev/null || true)"
+        peekaboo_quiet click --on "$COPY_ID" --app "$CLAUDE_APP" --foreground
+        sleep 0.3
+        full_response="$(pbpaste 2>/dev/null || true)"
+        if [[ -n "$full_response" ]]; then
+          log "got full response from clipboard (${#full_response} chars)"
+          printf '%s\n' "$full_response"
+          exit 0
+        fi
+        log "clipboard empty after copy; falling back to AX text"
+      else
+        log "Copy button not found; falling back to AX text"
+      fi
       printf '%s\n' "$response"
       exit 0
     fi
@@ -245,4 +249,4 @@ if [[ -n "$last_response" ]]; then
   exit 0
 fi
 
-die "timed out after ${POLL_TIMEOUT}s waiting for ChatGPT response"
+die "timed out after ${POLL_TIMEOUT}s waiting for Claude response"

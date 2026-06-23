@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import glob
 import hashlib
+import html
 import json
 import os
 import re
@@ -45,12 +46,16 @@ except Exception:
 # this run (drops entries whose files have vanished).
 _CACHE: dict = {}
 _NEW_CACHE: dict = {}
+CACHE_FORMAT_VERSION = 2
+SUMMARY_CONTEXT_VERSION = 2
+_CACHE_VERSION_KEY = "__format_version__"
 
 
 def load_cache() -> None:
     global _CACHE
     try:
-        _CACHE = json.loads(CACHE_PATH.read_text())
+        data = json.loads(CACHE_PATH.read_text())
+        _CACHE = data if isinstance(data, dict) and data.get(_CACHE_VERSION_KEY) == CACHE_FORMAT_VERSION else {}
     except Exception:
         _CACHE = {}
 
@@ -58,7 +63,7 @@ def load_cache() -> None:
 def save_cache() -> None:
     try:
         CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        CACHE_PATH.write_text(json.dumps(_NEW_CACHE))
+        CACHE_PATH.write_text(json.dumps({_CACHE_VERSION_KEY: CACHE_FORMAT_VERSION, **_NEW_CACHE}))
     except Exception:
         pass
 
@@ -82,6 +87,133 @@ _TAG_DROP = re.compile(
 )
 _SCHED = re.compile(r'<scheduled-task[^>]*\bname="([^"]+)"')
 _TAGS = re.compile(r"<[^>]+>")
+_TAG = re.compile(r"<\s*(/?)\s*([A-Za-z][\w:-]*)([^<>]*)>", re.S)
+_ATTR = re.compile(r"\b([A-Za-z_:][\w:.-]*)\s*=\s*(['\"])(.*?)\2", re.S)
+_AGENTS_HEADER = re.compile(
+    r"(?mi)^# AGENTS\.md instructions(?: for [^\r\n]+)?\s*\r?\n(?:\s*\r?\n)?(?=<INSTRUCTIONS\b)"
+)
+_INJECTED_TAGS = {
+    "user_instructions",
+    "system_instructions",
+    "system-instructions",
+    "developer_instructions",
+    "developer-instructions",
+    "skills_instructions",
+    "skills-instructions",
+    "system-reminder",
+    "environment_context",
+    "ide_opened_file",
+    "ide_selection",
+    "ide_diagnostics",
+    "task-notification",
+    "turn_aborted",
+    "command-name",
+    "command-message",
+    "command-args",
+    "scheduled-task",
+    "bash-input",
+    "bash-stdout",
+    "bash-stderr",
+    "skill",
+}
+_REF_MARKER = re.compile(r"\[ref:(?:file|skill) name=[^\]\r\n]+\]")
+
+
+def _is_injected_tag(name: str) -> bool:
+    return name in _INJECTED_TAGS or name.startswith("local-command-")
+
+
+def _safe_ref(kind: str, value: str) -> str:
+    value = html.unescape(value).strip()
+    if kind == "file":
+        value = re.split(r"[/\\]", value)[-1]
+    valid = value and len(value) <= 100 and not re.search(r"[\x00-\x1f\[\]]", value)
+    if kind == "skill":
+        valid = bool(valid and re.fullmatch(r"[A-Za-z0-9._/-]+", value))
+    return f"[ref:{kind} name={value}]" if valid else ""
+
+
+def _region_refs(region: str) -> list[str]:
+    refs: list[str] = []
+    for match in _TAG.finditer(region):
+        if match.group(1):
+            continue
+        name = match.group(2).lower()
+        attrs = {key.lower(): value for key, _, value in _ATTR.findall(match.group(3))}
+        ref = ""
+        if name in ("file", "context_file", "instruction_file"):
+            ref = _safe_ref("file", attrs.get("name") or attrs.get("path") or "")
+        elif name == "skill":
+            value = attrs.get("name", "")
+            if not value:
+                end = region.find("</skill>", match.end())
+                body = region[match.end() : end if end >= 0 else len(region)]
+                nested = re.search(r"<name>\s*([^<]+?)\s*</name>", body, re.I | re.S)
+                value = nested.group(1) if nested else ""
+            ref = _safe_ref("skill", value)
+        if ref and ref not in refs:
+            refs.append(ref)
+    return refs
+
+
+def _matching_region(s: str, opening: re.Match) -> tuple[int, str] | None:
+    """Return end offset and full balanced injected region, or None."""
+    name = opening.group(2).lower()
+    if opening.group(3).rstrip().endswith("/"):
+        return opening.end(), opening.group(0)
+    depth = 1
+    for match in _TAG.finditer(s, opening.end()):
+        nested = match.group(2).lower()
+        if nested != name:
+            continue
+        if match.group(1):
+            depth -= 1
+            if depth == 0:
+                return match.end(), s[opening.start() : match.end()]
+        elif not match.group(3).rstrip().endswith("/"):
+            depth += 1
+    return None
+
+
+def _compact_injected_context(raw: str) -> str:
+    """Replace balanced harness-owned context with small provenance refs."""
+    s = raw or ""
+    out: list[str] = []
+    cursor = 0
+    while cursor < len(s):
+        agents = _AGENTS_HEADER.search(s, cursor)
+        tag = _TAG.search(s, cursor)
+        if agents and (not tag or agents.start() <= tag.start()):
+            opening = _TAG.match(s, agents.end())
+            if not opening or opening.group(2).lower() != "instructions":
+                out.append(s[cursor : agents.end()])
+                cursor = agents.end()
+                continue
+            matched = _matching_region(s, opening)
+            if not matched:
+                out.append(s[cursor:])
+                break
+            end, _ = matched
+            out.extend((s[cursor : agents.start()], " [ref:file name=AGENTS.md] "))
+            cursor = end
+            continue
+        if not tag:
+            out.append(s[cursor:])
+            break
+        name = tag.group(2).lower()
+        if tag.group(1) or not _is_injected_tag(name):
+            out.append(s[cursor : tag.end()])
+            cursor = tag.end()
+            continue
+        matched = _matching_region(s, tag)
+        if not matched:
+            out.append(s[cursor:])
+            break
+        end, region = matched
+        refs = _region_refs(region)
+        out.extend((s[cursor : tag.start()], " " + " ".join(refs) + " "))
+        cursor = end
+    return "".join(out)
 
 
 def clean_title(s: str, n: int = 80) -> str:
@@ -89,9 +221,7 @@ def clean_title(s: str, n: int = 80) -> str:
     m = _SCHED.search(s)
     if m:
         return "⏰ " + m.group(1)
-    s = _TAG_DROP.sub(" ", s)
-    s = _TAGS.sub(" ", s)  # strip remaining tags, keep inner text
-    s = " ".join(s.split())
+    s = clean_text(s)
     if not s:
         return "(no preview)"
     return s[: n - 1] + "…" if len(s) > n else s
@@ -99,7 +229,7 @@ def clean_title(s: str, n: int = 80) -> str:
 
 def clean_text(s: str) -> str:
     """Strip wrapper tags + collapse whitespace; no truncation. For previews."""
-    s = s or ""
+    s = _compact_injected_context(s or "")
     s = _TAG_DROP.sub(" ", s)
     s = _TAGS.sub(" ", s)
     return " ".join(s.split())
@@ -108,23 +238,7 @@ def clean_text(s: str) -> str:
 # Turns that aren't real conversation and must never become a session's
 # first/last message or title. Callers fall through to the next real turn.
 #
-# 1. Injection blocks: matched on the RAW turn at its very start, because
-#    clean_text strips the tag and would leave the inner prose looking real
-#    (e.g. a codex <user_instructions> AGENTS.md dump, a <system-reminder>).
-_INJECT_PREFIX = re.compile(
-    r"\s*<("
-    r"command-(name|message|args)\b"  # slash-command wrapper
-    r"|local-command-"  # command stdout / caveat banner
-    r"|system-reminder"  # harness-injected context
-    r"|scheduled-task"  # cron/routine banner
-    r"|ide_opened_file|ide_selection|ide_diagnostics"  # IDE context
-    r"|task-notification"  # background task pings
-    r"|environment_context|user_instructions"  # codex prepended context
-    r"|turn_aborted"  # codex interrupt stub
-    r")",
-    re.I,
-)
-# 2. Stub prose with no conversational value, matched on cleaned text.
+# Stub prose with no conversational value, matched on cleaned text.
 _JUNK_TEXT = re.compile(
     r"("
     r"Caveat: The messages below were generated by the user"
@@ -135,7 +249,7 @@ _JUNK_TEXT = re.compile(
     r")",
     re.I,
 )
-# 3. Bare slash-command, incl. namespaced (/caveman:compress) and a few args.
+# Bare slash-command, incl. namespaced (/caveman:compress) and a few args.
 _SLASH_CMD = re.compile(r"/[a-z][\w:-]*(\s|$)", re.I)
 
 
@@ -143,16 +257,14 @@ def is_wrapper_msg(raw: str) -> bool:
     """True for non-conversational turns (slash commands, command/tool output,
     injected context, interrupt stubs) that shouldn't surface as a session's
     first/last message or title. Callers fall through to the next real turn."""
-    raw = raw or ""
-    if _INJECT_PREFIX.match(raw):
+    b = clean_text(raw or "")
+    conversational = _REF_MARKER.sub(" ", b).strip()
+    if not conversational:
         return True
-    b = clean_text(raw)
-    if not b:
-        return True
-    if _JUNK_TEXT.match(b):
+    if _JUNK_TEXT.match(conversational):
         return True
     # bare leading slash-command like "/clear" or "/caveman:compress lite"
-    return bool(_SLASH_CMD.match(b)) and len(b.split()) <= 3
+    return bool(_SLASH_CMD.match(conversational)) and len(conversational.split()) <= 3
 
 
 def clip_mid(s: str, n: int = 200) -> str:
@@ -591,7 +703,11 @@ def build_sessions() -> list[dict]:
     for s in sessions:
         if s["provider"] in ("claude", "codex"):
             ent = sums.get(s["id"])
-            if ent and ent.get("summary"):
+            if (
+                ent
+                and ent.get("context_version") == SUMMARY_CONTEXT_VERSION
+                and ent.get("summary")
+            ):
                 s["title"] = ent["summary"]
     return sessions
 
@@ -742,7 +858,7 @@ def emit_fzf(sessions: list[dict]) -> None:
 # Single-session full transcript: ordered [{role, text}] of real conversational
 # turns (wrappers/tool-output dropped, like first/last). Powers the Raycast
 # message-list view via `--show <provider:id>`. Unlike the previews, text is
-# emitted raw (newlines/code preserved) so a per-message copy is faithful.
+# emitted with injected blocks compacted (newlines/code otherwise preserved).
 # --------------------------------------------------------------------------- #
 def iter_jsonl(path: str):
     """Yield parsed objects from a .jsonl file, skipping unreadable lines."""
@@ -765,7 +881,7 @@ def claude_messages(path: str) -> list[dict]:
         raw = _claude_msg_text(o)
         if not raw or is_wrapper_msg(raw):
             continue
-        out.append({"role": o["type"], "text": raw.strip()})
+        out.append({"role": o["type"], "text": _compact_injected_context(raw).strip()})
     return out
 
 
@@ -790,7 +906,7 @@ def codex_messages(path: str) -> list[dict]:
         raw = _codex_msg_text(o)
         if not raw or is_wrapper_msg(raw):
             continue
-        out.append({"role": _codex_role(o), "text": raw.strip()})
+        out.append({"role": _codex_role(o), "text": _compact_injected_context(raw).strip()})
     return out
 
 
@@ -842,7 +958,12 @@ def opencode_messages(sid: str) -> list[dict]:
             if not raw or is_wrapper_msg(raw):
                 continue
             role = roles.get(mid)
-            out.append({"role": role if role in ("user", "assistant") else "assistant", "text": raw.strip()})
+            out.append(
+                {
+                    "role": role if role in ("user", "assistant") else "assistant",
+                    "text": _compact_injected_context(raw).strip(),
+                }
+            )
         con.close()
     except Exception:
         pass

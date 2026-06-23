@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# Quick test harness for paste modes before integrating into send-to-chatgpt.
+# Usage:
+#   test-paste-modes paste           # cmd+v from clipboard
+#   test-paste-modes double-paste    # cmd+v, then raycast 2nd item (cmd+shift+v -> down -> enter)
+set -euo pipefail
+
+CHATGPT_APP="${CHATGPT_APP:-ChatGPT}"
+DELAY="${DELAY:-0.5}"   # seconds between key events
+
+die() { echo "test-paste-modes: $*" >&2; exit 1; }
+
+require_cmd() {
+  for cmd in "$@"; do
+    command -v "$cmd" >/dev/null 2>&1 || die "required command not found: $cmd"
+  done
+}
+
+focus_input() {
+  echo "-> launching $CHATGPT_APP and focusing input..."
+  peekaboo app launch "$CHATGPT_APP"
+  sleep "$DELAY"
+
+  local initial_see input_id
+  initial_see="$(peekaboo see --app "$CHATGPT_APP" --json 2>/dev/null)"
+  input_id="$(echo "$initial_see" | jq -r '
+    [
+      .data.ui_elements[]?
+      | select(.label == "text entry area" or .role_description == "text entry area")
+      | .id
+    ] | first // empty
+  ')"
+
+  if [[ -n "$input_id" ]]; then
+    peekaboo click --on "$input_id" --app "$CHATGPT_APP" --foreground --wait-for 8000
+  else
+    peekaboo click "text entry area" --app "$CHATGPT_APP" --foreground --wait-for 8000 || true
+  fi
+  sleep "$DELAY"
+}
+
+mode_paste() {
+  focus_input
+  echo "-> pressing cmd+v (paste clipboard)..."
+  peekaboo hotkey "cmd,v" --app "$CHATGPT_APP" --foreground
+  echo "Done. Check ChatGPT input field."
+}
+
+mode_double_paste() {
+  focus_input
+
+  echo "-> pressing cmd+v (paste 1st clipboard item)..."
+  peekaboo hotkey "cmd,v" --app "$CHATGPT_APP" --foreground
+  sleep "$DELAY"
+
+  echo "-> opening Raycast clipboard (cmd+shift+v)..."
+  peekaboo hotkey "cmd,shift,v" --foreground
+  sleep 1.0   # give Raycast picker time to open
+
+  echo "-> pressing down arrow (select 2nd item)..."
+  peekaboo press down --foreground
+  sleep "$DELAY"
+
+  echo "-> pressing enter (paste 2nd item)..."
+  peekaboo press return --foreground
+  echo "Done. Check ChatGPT input field."
+}
+
+require_cmd peekaboo jq
+
+case "${1:-}" in
+  paste)        mode_paste ;;
+  double-paste) mode_double_paste ;;
+  *) die "Usage: test-paste-modes <paste|double-paste>" ;;
+esac

@@ -1,0 +1,3 @@
+#!/bin/sh
+tee /tmp/agy-pretool-debug.json >/dev/null
+echo '{"decision": "allow"}'

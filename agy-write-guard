@@ -1,0 +1,107 @@
+#!/bin/sh
+set -eu
+
+payload="$(cat)"
+tool_name="$(printf '%s' "$payload" | jq -r '.toolCall.name // empty')"
+
+deny() { printf '{"decision": "deny", "reason": "%s"}\n' "$1"; exit 0; }
+allow() { printf '{"decision": "allow"}\n'; exit 0; }
+ask() { printf '{"decision": "ask", "reason": "%s"}\n' "$1"; exit 0; }
+
+# --- Tool-level rules ---
+
+case "$tool_name" in
+  write_to_file|replace_file_content|multi_replace_file_content)
+    deny "Write tools are blocked."
+    ;;
+  view_file|list_dir|find_by_name|grep_search|read_url_content|search_web)
+    allow
+    ;;
+  mcp__*)
+    allow
+    ;;
+  ask_question|manage_task|list_permissions|invoke_subagent|define_subagent|send_message|manage_subagents)
+    allow
+    ;;
+  run_command)
+    ;;  # handled below
+  *)
+    ask "Tool '$tool_name' is not on the allow list — confirm to proceed."
+    ;;
+esac
+
+# --- run_command: parse CommandLine ---
+
+cmd="$(printf '%s' "$payload" | jq -r '.toolCall.args.CommandLine // empty')"
+bin="${cmd%% *}"
+rest="${cmd#"$bin"}"; rest="${rest# }"
+sub="${rest%% *}"
+
+# Deny list (checked first)
+case "$bin" in
+  cp|rm|mv|mkdir|touch|install|chmod|chown|chgrp|sudo)
+    deny "command($bin) is blocked."
+    ;;
+  kill|killall|pkill|launchctl)
+    deny "command($bin) is blocked."
+    ;;
+  sh|bash|zsh|fish|python|python3|ruby|perl|node|bun|deno)
+    deny "command($bin) is blocked."
+    ;;
+  docker|docker-compose|colima|open|osascript|xattr)
+    deny "command($bin) is blocked."
+    ;;
+  defaults)
+    case "$sub" in write) deny "command(defaults write) is blocked." ;; esac
+    ;;
+  plutil)
+    case "$sub" in -replace) deny "command(plutil -replace) is blocked." ;; esac
+    ;;
+  gh)
+    rest2="${rest#"$sub"}"; rest2="${rest2# }"; action="${rest2%% *}"
+    case "$sub" in
+      issue)
+        case "$action" in create|edit|delete|close|reopen) deny "command(gh issue $action) is blocked." ;; esac
+        ;;
+      pr)
+        case "$action" in create|edit|merge|close|reopen|checkout) deny "command(gh pr $action) is blocked." ;; esac
+        ;;
+      api) deny "command(gh api) is blocked." ;;
+    esac
+    ;;
+  git)
+    case "$sub" in
+      add|commit|push|pull|fetch|checkout|switch|reset|clean|restore|rebase|merge|stash|tag|worktree)
+        deny "command(git $sub) is blocked."
+        ;;
+      submodule)
+        rest2="${rest#"$sub"}"; rest2="${rest2# }"; action="${rest2%% *}"
+        case "$action" in update) deny "command(git submodule update) is blocked." ;; esac
+        ;;
+    esac
+    ;;
+esac
+
+# Allow list
+case "$bin" in
+  pwd|ls|cat|head|tail|wc|file|stat|du|df|tree|find|fd|rg|grep|sort|uniq|cut|jq|which|type)
+    allow
+    ;;
+  git)
+    case "$sub" in
+      status|log|show|diff|branch|blame|ls-files|grep|remote|rev-parse) allow ;;
+    esac
+    ;;
+  npm)
+    case "$sub" in list|view|outdated|explain) allow ;; esac
+    ;;
+  pnpm)
+    case "$sub" in list|why|outdated) allow ;; esac
+    ;;
+  yarn)
+    case "$sub" in list|why|outdated) allow ;; esac
+    ;;
+esac
+
+# Default: ask for anything not explicitly listed
+ask "command($bin) is not on the allow list — confirm to proceed."

@@ -1,0 +1,25 @@
+the history of the C programming language
+how Vim became the editor that never dies
+the rise and fall of Flash on the web
+how Git was built in two weeks by Linus Torvalds
+why Rust is replacing C in systems programming
+the story of the Unix wars
+how the iPhone killed dedicated cameras
+the psychology of why developers hate sprints
+how Cloudflare became the backbone of the internet
+how Amazon Web Services was an accident that changed computing forever
+why TypeScript won and CoffeeScript didn't
+the real story behind the mythical man-month
+how Redis became the world's most popular cache
+why JPEG is still everywhere 30 years later
+the rise of the terminal in the AI era
+how Apple Silicon changed laptop benchmarks forever
+the story of open source and why companies give code away
+the rise and fall of Sun Microsystems
+how Stack Overflow shaped a generation of programmers
+the history of the command line interface
+why PostgreSQL quietly became the world's best database
+the rise of remote work culture in software engineering
+how the browser became an operating system
+the story of how Docker changed software deployment
+the story of Netscape and the first browser war
