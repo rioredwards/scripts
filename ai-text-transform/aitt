@@ -30,12 +30,6 @@ SPEAK=0
 DRY_RUN=0
 LIST=0
 
-# Check for stdin first (before consuming positional args)
-STDIN_DATA=""
-if [[ ! -t 0 ]]; then
-  STDIN_DATA=$(cat)
-fi
-
 POSITIONAL=()
 
 while [[ $# -gt 0 ]]; do
@@ -141,6 +135,11 @@ fi
 PROMPT_TEXT=$(cat "$PROMPTS_DIR/${TRANSFORM}.md")
 
 # Gather input text
+STDIN_DATA=""
+if [[ ! -t 0 ]]; then
+  STDIN_DATA=$(cat)
+fi
+
 # Priority: 1. --file PATH, 2. --clipboard, 3. piped stdin, 4. remaining positional argument text
 
 if [[ -n "$FILE" ]]; then
@@ -196,7 +195,7 @@ SYSTEM_PROMPT="You are a pure text transformation engine. Return ONLY the transf
 FULL_PROMPT="${SYSTEM_PROMPT}
 
 ${ASSEMBLED_PROMPT}"
-OUTPUT=$(~/scripts/agent-router/agent-router delegate --provider claude --model "${LLM_MODEL:-haiku}" --prompt "$FULL_PROMPT")
+OUTPUT=$(~/dev/agent-router/agent-router delegate --provider claude --model "${LLM_MODEL:-haiku}" --prompt "$FULL_PROMPT")
 
 # Handle output
 if [[ -n "$OUT_PATH" ]]; then
