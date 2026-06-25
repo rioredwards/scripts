@@ -49,12 +49,17 @@ describe("providers", () => {
     expect(options).toEqual(expect.objectContaining({ extendEnv: false, stdin: "ignore" }));
   });
 
-  it("pipes prompt to agy via stdin", async () => {
+  it("passes prompt to agy as the -p value, model first", async () => {
     await runAntigravity("say pong", "Gemini 3.1 Pro (High)");
 
-    expect(mockExeca).toHaveBeenCalledWith("agy", ["-p", "--model", "Gemini 3.1 Pro (High)"], {
-      input: "say pong",
-    });
+    // agy's -p/--print takes the prompt as the flag value, not via stdin. Putting --model
+    // before -p keeps -p from greedily consuming the model name as the prompt. stdin must be
+    // ignored: agy blocks reading an open stdin pipe (execa's default) even in print mode.
+    expect(mockExeca).toHaveBeenCalledWith(
+      "agy",
+      ["--model", "Gemini 3.1 Pro (High)", "-p", "say pong"],
+      { stdin: "ignore" },
+    );
   });
 
   it("runs cursor via the delegate script and extracts the result block", async () => {

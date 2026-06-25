@@ -6,9 +6,12 @@ export const PROVIDER_NAME = "antigravity";
 
 export async function runProvider(prompt: string, model?: string): Promise<DelegateResult> {
   try {
-    const args = ["-p"];
+    const args: string[] = [];
     if (model) args.push("--model", model);
-    const result = await execa("agy", args, { input: prompt });
+    args.push("-p", prompt);
+    // agy blocks reading stdin in print mode if stdin is an open pipe (execa's
+    // default), so ignore it. The prompt is passed as the -p flag value.
+    const result = await execa("agy", args, { stdin: "ignore" });
     const stdout = result.stdout.trim();
     if (!stdout) {
       return {
