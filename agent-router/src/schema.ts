@@ -62,8 +62,8 @@ export const PROVIDER_DETAILS: Record<
   },
   antigravity: {
     binary: "agy",
-    command: "agy -p --model <model>",
-    note: "Prompt is piped over stdin because positional prompts are misparsed by agy.",
+    command: "agy --model <model> -p <prompt>",
+    note: "Prompt is the -p flag value (model first so -p doesn't eat it); stdin is ignored because agy blocks on an open stdin pipe in print mode.",
   },
   opencode: {
     binary: "opencode",
