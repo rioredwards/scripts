@@ -195,7 +195,7 @@ SYSTEM_PROMPT="You are a pure text transformation engine. Return ONLY the transf
 FULL_PROMPT="${SYSTEM_PROMPT}
 
 ${ASSEMBLED_PROMPT}"
-OUTPUT=$(~/dev/agent-router/agent-router delegate --provider claude --model "${LLM_MODEL:-haiku}" --prompt "$FULL_PROMPT")
+OUTPUT=$(~/scripts/agent-router delegate --provider claude --model "${LLM_MODEL:-haiku}" --prompt "$FULL_PROMPT")
 
 # Handle output
 if [[ -n "$OUT_PATH" ]]; then

@@ -8,3 +8,4 @@
 - `codex-note-on-turn` - Codex `notify` hook that summarizes the final Codex reply, copies it to the clipboard, and triggers the phone note Shortcut pipeline.
 - `note-source-to-phone` - Source-agnostic version of the note hook. Accepts a file path, literal text, or stdin, then summarizes it, copies it to the clipboard, and triggers the phone note Shortcut pipeline.
 - `sync-projects` - Repo sync dashboard and guided walkthrough for cross-machine handoff. Usage: `sync-projects scan --dry-run` or `sync-projects guide`. Narrow with `sync-projects scan --dry-run --project career` or inspect JSON with `sync-projects scan --dry-run --format json --pretty`.
+- `agent-router` - Stable wrapper for `/Users/rioredwards/dev/agent-router/agent-router`. Usage: `agent-router guide`, `agent-router providers --verbose`, or `agent-router delegate "prompt"`.
