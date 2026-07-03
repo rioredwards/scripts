@@ -5,7 +5,7 @@ transform="$1"
 model="${3:-sonnet}"
 [[ "$2" == "--model" ]] && model="$3"
 
-prompts_dir=~/scripts/ai-text-transform/prompts
+prompts_dir=~/dev/ai-text-transform/prompts
 prompt_file="$prompts_dir/${transform}.md"
 [[ ! -f "$prompt_file" ]] && { echo "❌ Unknown transform: $transform" >&2; exit 1; }
 
