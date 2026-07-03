@@ -1,21 +1,19 @@
 #!/usr/bin/env bash
 
 # aitt - AI Text Transform CLI
-# A thin wrapper around Simon Willison's 'llm' CLI
+# A thin wrapper around agent-router (provider: claude)
 
 set -e
 
-# Uncomment and change if you want to override llm's default model
-# export LLM_MODEL="claude-3-5-sonnet-latest"
+# Override the model with LLM_MODEL (default: haiku)
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROMPTS_DIR="$DIR/prompts"
 
 # Dependencies check
-if ! command -v llm >/dev/null 2>&1; then
-  echo "Error: 'llm' CLI not found." >&2
-  echo "Please install it with: brew install llm" >&2
-  echo "To use Anthropic: llm install llm-anthropic && llm keys set anthropic" >&2
+if [ ! -x "$HOME/scripts/agent-router" ]; then
+  echo "Error: agent-router not found at ~/scripts/agent-router." >&2
+  echo "aitt delegates all transforms through it (see ~/dev/agent-router)." >&2
   exit 1
 fi
 
@@ -65,7 +63,7 @@ while [[ $# -gt 0 ]]; do
     -h|--help)
       echo "Usage: aitt [transform] [options] [input text...]"
       echo ""
-      echo "Transforms text using AI presets via the 'llm' CLI."
+      echo "Transforms text using AI presets via agent-router."
       echo ""
       echo "Options:"
       echo "  --file PATH       Read input from file"
@@ -182,7 +180,7 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
   if [[ -n "$LLM_MODEL" ]]; then
     echo "Model: $LLM_MODEL (from environment)"
   else
-    echo "Model: (llm default)"
+    echo "Model: (haiku default)"
   fi
   echo "----------------"
   echo "$ASSEMBLED_PROMPT"

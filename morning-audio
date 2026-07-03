@@ -1,15 +1,16 @@
 #!/bin/zsh
+set -euo pipefail
 export PATH="$HOME/scripts:$PATH"
 topics=~/scripts/morning-audio-topics.txt
 state=~/.cache/morning-audio-state
-mkdir -p $(dirname $state)
+mkdir -p "$(dirname "$state")"
 
 total=$(grep -c . "$topics" 2>/dev/null || echo 0)
 [[ "$total" -eq 0 ]] && { echo "❌ No topics in $topics"; exit 1; }
 
 idx=0
-[[ -f "$state" ]] && idx=$(cat "$state")
-[[ "$idx" -ge "$total" ]] && idx=0
+if [[ -f "$state" ]]; then idx=$(cat "$state"); fi
+if [[ "$idx" -ge "$total" ]]; then idx=0; fi
 
 topic=$(sed -n "$((idx+1))p" "$topics")
 [[ -z "$topic" ]] && { echo "❌ Empty topic at index $idx"; exit 1; }

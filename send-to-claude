@@ -7,7 +7,7 @@ POLL_TIMEOUT="${POLL_TIMEOUT:-120}"
 STABLE_POLLS="${STABLE_POLLS:-2}"
 VERBOSE="${VERBOSE:-0}"
 AUTOMATION_CUE="${AUTOMATION_CUE:-1}"
-AUTOMATION_CUE_SCRIPT="${AUTOMATION_CUE_SCRIPT:-/Users/rioredwards/scripts/automation-cue.sh}"
+AUTOMATION_CUE_SCRIPT="${AUTOMATION_CUE_SCRIPT:-$HOME/scripts/automation-cue.sh}"
 
 export PEEKABOO_AX_MAX_DEPTH=30
 export PEEKABOO_AX_MAX_ELEMENTS=1000
@@ -211,6 +211,13 @@ while ((elapsed < POLL_TIMEOUT)); do
   current_see="$(see_claude)"
   response="$(collect_response_text "$current_see" "$baseline_file")"
   response_len=${#response}
+
+  if is_generating "$current_see"; then
+    log "poll: len=${response_len} stable=${stable_count} (still generating)"
+    stable_count=0
+    last_response="$response"
+    continue
+  fi
 
   if [[ -n "$response" && "$response" == "$last_response" ]]; then
     stable_count=$((stable_count + 1))

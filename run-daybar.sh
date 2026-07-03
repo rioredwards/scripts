@@ -13,4 +13,4 @@ set -euo pipefail
 # @raycast.author rio_edwards
 # @raycast.authorURL https://raycast.com/rio_edwards
 
-/Users/rioredwards/dev/TodayBar/scripts/run-todaybar.sh
+"$HOME/dev/TodayBar/scripts/run-todaybar.sh"

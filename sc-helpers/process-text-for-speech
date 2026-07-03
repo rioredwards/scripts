@@ -2,7 +2,7 @@
 set -eu
 
 if [ "$#" -gt 0 ]; then
-  "$HOME/scripts/summarize-for-note" "$*"
+  "$HOME/scripts/process-text-for-speech" "$*"
 else
-  "$HOME/scripts/summarize-for-note"
+  "$HOME/scripts/process-text-for-speech"
 fi
