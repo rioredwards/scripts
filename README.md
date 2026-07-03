@@ -1,11 +1,37 @@
 # Rio's Scripts
 
-- [Chaining Raycast Commands](https://csswolf.com/how-to-chain-multiple-commands-in-raycast/)
+Small personal command wrappers and automation helpers. App-sized tools live in `~/dev`; this repo keeps script-sized glue plus compatibility shims.
 
-- Available Scripts and how to run them:
-- `notion-hotkey-cli` - This is a CLI tool that allows you to create a new hotkey in Notion. It's installed globally via npm. Usage: `notion-hotkey-cli add --app "Test App" --command "⟡A" --name "Test Command"`. Also can see availeble commands with `notion-hotkey-cli --help`.
-- `sc` - Thin text-only proxy for registered Apple Shortcuts in `shortcut-helpers/`. Run `sc` to list aliases, `sc summarize-text "text to summarize"`, or `echo "text" | sc summarize-text`.
-- `codex-note-on-turn` - Codex `notify` hook that summarizes the final Codex reply, copies it to the clipboard, and triggers the phone note Shortcut pipeline.
-- `note-source-to-phone` - Source-agnostic version of the note hook. Accepts a file path, literal text, or stdin, then summarizes it, copies it to the clipboard, and triggers the phone note Shortcut pipeline.
-- `sync-projects` - Repo sync dashboard and guided walkthrough for cross-machine handoff. Usage: `sync-projects scan --dry-run` or `sync-projects guide`. Narrow with `sync-projects scan --dry-run --project career` or inspect JSON with `sync-projects scan --dry-run --format json --pretty`.
-- `agent-router` - Stable wrapper for `/Users/rioredwards/dev/agent-router/agent-router`. Usage: `agent-router guide`, `agent-router providers --verbose`, or `agent-router delegate "prompt"`.
+## Common Commands
+
+- `agent-router` - wrapper for `~/dev/agent-router/agent-router`. Examples: `agent-router guide`, `agent-router providers --verbose`, `agent-router delegate "prompt"`.
+- `aitt` - compatibility shim for `~/dev/ai-text-transform/aitt`.
+- `aitt-claude` - Claude-oriented text transform helper that now calls `aitt`.
+- `sc` - text-only proxy for Apple Shortcuts registered in `sc-helpers/`. Run `sc` to list aliases.
+- `note-on-turn/` - hook scripts for summarizing final agent replies into the phone note pipeline.
+- `note-source-to-phone` - source-agnostic note pipeline helper for a file path, literal text, or stdin.
+- `process-text-for-speech` - prepares text for speech via `aitt`.
+- `summarize-for-note` - summarizes text for the note pipeline via `aitt`.
+- `grok-stt`, `grok-tts` - Grok speech helpers.
+- `morning-audio`, `run-daybar.sh`, `daybar-watchdog.sh` - local daily-driver audio and status helpers.
+- `lnskill` - symlink a skill from `~/dev/agent-skills/` into a project.
+
+## Dotfiles Script Links
+
+Several commands here are symlinks into `~/.dotfiles/scripts/` so they stay on PATH:
+
+- `brew-add.sh`
+- `brew-install-layered.sh`
+- `check-brew-sync.sh`
+- `drift-check.sh`
+- `install-git-hooks.sh`
+- `keychain-to-launchd-env.sh`
+- `maintenance-doctor.sh`
+- `path_drift_audit.py`
+- `re-sync-codex-skills.sh`
+- `remove-keychain-api-key.sh`
+- `setup-hammerspoon-cli.sh`
+- `setup-keychain-api-key.sh`
+- `validate-recent-projects.sh`
+
+Archived or old one-off scripts live in `archive/`.

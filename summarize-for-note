@@ -13,7 +13,7 @@ if [ -z "$text" ]; then
 fi
 
 # Try to summarize with aitt. Fallback to original text if aitt fails.
-if output="$(printf '%s' "$text" | "$HOME/scripts/ai-text-transform/aitt" summarize-for-note 2>/dev/null)" && [ -n "$output" ]; then
+if output="$(printf '%s' "$text" | "$HOME/scripts/aitt" summarize-for-note 2>/dev/null)" && [ -n "$output" ]; then
   printf '%s' "$output"
 else
   printf '%s' "$text"

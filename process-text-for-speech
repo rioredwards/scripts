@@ -12,4 +12,4 @@ if [ -z "$text" ]; then
   exit 0
 fi
 
-printf '%s' "$text" | "$HOME/scripts/ai-text-transform/aitt" process-text-for-speech
+printf '%s' "$text" | "$HOME/scripts/aitt" process-text-for-speech
