@@ -1,4 +1,4 @@
 #!/usr/bin/env zsh
 set -euo pipefail
 
-exec /Users/rioredwards/dev/agent-router/agent-router "$@"
+exec "$HOME/dev/agent-router/agent-router" "$@"

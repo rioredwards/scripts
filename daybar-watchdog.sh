@@ -3,7 +3,6 @@
 # Outputs a 2-3 line report for piping to note-source-to-phone
 set -euo pipefail
 
-TMUX_CMD="tmux -S /tmp/tmux-501/default"
 SESSION="daybar-shell"
 LOOP_DIR="$HOME/dev/DayBar-shell/.agent-loop"
 

@@ -7,4 +7,6 @@ text="$(cat)"
 [ -n "$text" ] || exit 0
 
 printf '%s' "$text" | "$HOME/scripts/summarize-for-note" | "$HOME/scripts/sc" text-phone
-"$HOME/dev/agent-sessions/bin/index-session" >/dev/null 2>&1 &
+log_dir="$HOME/.cache/note-on-turn"
+mkdir -p "$log_dir"
+"$HOME/dev/agent-sessions/bin/index-session" >>"$log_dir/index-session.log" 2>&1 &
