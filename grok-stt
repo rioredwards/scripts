@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+# grok-stt — transcribe audio with the xAI (Grok) STT API.
+#
+# Reads an audio file and writes the transcript to stdout (or -o FILE).
+#
+# Usage:
+#   grok-stt recording.mp3              # print transcript to stdout
+#   grok-stt -i recording.mp3           # same, explicit flag
+#   grok-stt recording.mp3 -o out.txt   # write transcript to file
+#   grok-stt -l es recording.mp3        # transcribe Spanish audio
+#   grok-stt recording.mp3 | pbcopy     # copy transcript to clipboard
+#
+# Options:
+#   -i FILE     Audio file to transcribe (or first positional arg)
+#   -l LANG     BCP-47 language code (default: en)
+#   -o FILE     Write transcript to FILE instead of stdout
+#   -h          Show this help
+#
+# Auth: needs XAI_API_KEY in env (loaded from Keychain via launchd) or the
+# Keychain item service "com.rio.api.xai" account "XAI_API_KEY".
+#
+# Retries on 408/429/5xx (max 2 retries, exponential backoff). Fatal on 401/403.
+
+set -euo pipefail
+
+API_URL="https://api.x.ai/v1/stt"
+MAX_RETRIES=2
+RETRY_BASE_MS=2000
+
+# --- arg parsing ---
+audio_file=""
+lang="en"
+out_file=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -i) shift; audio_file="$1" ;;
+    -l) shift; lang="$1" ;;
+    -o) shift; out_file="$1" ;;
+    -h|--help)
+      sed -n '2,/^$/p' "$0" | sed 's/^# \?//'
+      exit 0
+      ;;
+    -*) echo "grok-stt: unknown option $1" >&2; exit 1 ;;
+    *)  [[ -z "$audio_file" ]] && audio_file="$1" || { echo "grok-stt: unexpected arg: $1" >&2; exit 1; } ;;
+  esac
+  shift
+done
+
+if [[ -z "$audio_file" ]]; then
+  echo "grok-stt: audio file required (use -i FILE or pass as positional arg)" >&2
+  exit 1
+fi
+
+if [[ ! -f "$audio_file" ]]; then
+  echo "grok-stt: file not found: $audio_file" >&2
+  exit 1
+fi
+
+if [[ ! -s "$audio_file" ]]; then
+  echo "grok-stt: file is empty: $audio_file" >&2
+  exit 1
+fi
+
+# --- API key ---
+key="${XAI_API_KEY:-}"
+if [[ -z "$key" ]]; then
+  key="$(security find-generic-password -s com.rio.api.xai -a XAI_API_KEY -w 2>/dev/null || true)"
+fi
+if [[ -z "$key" ]]; then
+  echo "grok-stt: XAI_API_KEY not found in env or Keychain (com.rio.api.xai)" >&2
+  exit 1
+fi
+
+# --- convert to mp3 if needed ---
+workdir="$(mktemp -d)"
+trap 'rm -rf "$workdir"' EXIT
+
+ext="${audio_file##*.}"
+if [[ "${ext,,}" != "mp3" ]]; then
+  converted="$workdir/audio.mp3"
+  echo "grok-stt: converting $ext → mp3..." >&2
+  ffmpeg -y -i "$audio_file" -ar 16000 -ac 1 -b:a 64k "$converted" -loglevel error
+  audio_file="$converted"
+fi
+
+response_file="$workdir/response.json"
+
+attempt=0
+while true; do
+  http_code="$(curl -sS -w '%{http_code}' -o "$response_file" \
+    -X POST "$API_URL" \
+    -H "Authorization: Bearer $key" \
+    -F "format=true" \
+    -F "language=$lang" \
+    -F "file=@${audio_file};type=audio/mpeg")"
+
+  if [[ "$http_code" == "200" ]]; then
+    break
+  fi
+
+  # Fatal: bad/expired key
+  if [[ "$http_code" == "401" || "$http_code" == "403" ]]; then
+    echo "grok-stt: auth error (HTTP $http_code) — check XAI_API_KEY" >&2
+    head -c 500 "$response_file" >&2; echo >&2
+    exit 1
+  fi
+
+  # Retryable: timeout, rate limit, server error
+  if [[ "$http_code" =~ ^(408|429|500|502|503|504)$ ]] && [[ $attempt -lt $MAX_RETRIES ]]; then
+    attempt=$((attempt + 1))
+    backoff_ms=$(( RETRY_BASE_MS * (2 ** (attempt - 1)) ))
+    echo "grok-stt: HTTP $http_code — retrying (attempt $attempt/$MAX_RETRIES, ${backoff_ms}ms)..." >&2
+    sleep "$(echo "scale=3; $backoff_ms / 1000" | bc)"
+    continue
+  fi
+
+  echo "grok-stt: API error (HTTP $http_code)" >&2
+  head -c 500 "$response_file" >&2; echo >&2
+  exit 1
+done
+
+text="$(jq -r '.text // ""' "$response_file")"
+if [[ -z "$text" ]]; then
+  echo "grok-stt: API returned empty transcript" >&2
+  cat "$response_file" >&2; echo >&2
+  exit 1
+fi
+
+if [[ -z "$out_file" ]]; then
+  out_dir="${TMPDIR:-/tmp}grok-stt"
+  mkdir -p "$out_dir"
+  out_file="$out_dir/$(date +%Y%m%d_%H%M%S).txt"
+fi
+
+printf '%s\n' "$text" > "$out_file"
+echo "grok-stt: transcript saved to $out_file" >&2
+printf '%s\n' "$text"

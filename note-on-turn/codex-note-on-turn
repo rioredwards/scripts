@@ -1,1 +1,4 @@
-/Users/rioredwards/scripts/note-on-turn/claude-note-on-turn
+#!/bin/sh
+set -eu
+jq -r '.last_assistant_message // empty' | "$HOME/scripts/note-on-turn/note-from-reply"
+echo '{"continue": true}'

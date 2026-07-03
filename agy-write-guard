@@ -1,12 +1,29 @@
 #!/bin/sh
 set -eu
 
+# shellcheck source=/dev/null
+. "${HOME}/scripts/agent-hooks-env.sh"
+AGY_WRITE_GUARD="${AGY_WRITE_GUARD:-deny}"
+export AGY_WRITE_GUARD
+
 payload="$(cat)"
 tool_name="$(printf '%s' "$payload" | jq -r '.toolCall.name // empty')"
 
-deny() { printf '{"decision": "deny", "reason": "%s"}\n' "$1"; exit 0; }
-allow() { printf '{"decision": "allow"}\n'; exit 0; }
-ask() { printf '{"decision": "ask", "reason": "%s"}\n' "$1"; exit 0; }
+debug_log() {
+  {
+    printf '%s guard=%s src=%s tool=%s decision=%s' \
+      "$(date '+%Y-%m-%dT%H:%M:%S')" "$AGY_WRITE_GUARD" "${AGENT_HOOKS_SRC:-default}" "$tool_name" "$1"
+    [ -n "${2:-}" ] && printf ' reason=%s' "$2"
+    printf '\n'
+  } >> "${AGY_WRITE_GUARD_DEBUG:-/tmp/agy-write-guard.log}" 2>/dev/null || true
+}
+
+deny() { debug_log deny "$1"; printf '{"decision": "deny", "reason": "%s"}\n' "$1"; exit 0; }
+allow() { debug_log allow; printf '{"decision": "allow"}\n'; exit 0; }
+ask() { debug_log ask "$1"; printf '{"decision": "ask", "reason": "%s"}\n' "$1"; exit 0; }
+
+# AGY_WRITE_GUARD=allow (or off) bypasses all restrictions; default deny
+case "$AGY_WRITE_GUARD" in allow|off) allow ;; esac
 
 # --- Tool-level rules ---
 

@@ -13,10 +13,9 @@ A Unix-friendly CLI to transform text using AI. Built on top of Simon Willison's
    llm install llm-anthropic
    llm keys set anthropic
    ```
-3. Ensure this directory is in your `$PATH` or create symlinks to `aitt` in your `~/bin` or `~/.local/bin` directory.
+3. Ensure this directory is in your `$PATH` or create a symlink to `aitt` in your `~/bin` or `~/.local/bin` directory.
    ```bash
    ln -s ~/scripts/ai-text-transform/aitt /usr/local/bin/aitt
-   ln -s ~/scripts/ai-text-transform/aitt /usr/local/bin/ai-text-transform
    ```
 
 ## Usage
@@ -37,6 +36,7 @@ aitt --dry-run condense --file notes.md
 To add a new transform, simply create a new Markdown file in the `prompts/` directory. The filename (without `.md`) becomes the transform name.
 
 For example, `prompts/translate-fr.md` allows you to run:
+
 ```bash
 echo "Hello" | aitt translate-fr
 ```

@@ -1,0 +1,181 @@
+#!/usr/bin/env bash
+# grok-tts — synthesize speech with the xAI (Grok) TTS API.
+#
+# Reads text from -i FILE, args, or stdin and writes an MP3. Does not play by
+# default. Text over the API's 15000-char limit is auto-chunked on paragraph
+# (or sentence) boundaries and the parts are concatenated into one MP3.
+#
+# Usage:
+#   grok-tts "Hello there"                 # synth + save, print path
+#   echo "Hello" | grok-tts                # text from stdin
+#   grok-tts -i notes.md -o out.mp3        # read text from a file
+#   grok-tts -v Ara -l es "Hola"           # pick voice + language
+#   grok-tts -c -i long.md -o out.mp3      # compress dynamic range
+#   grok-tts -p "play it"                  # also play after saving
+#
+# Options:
+#   -i FILE     Read input text from FILE (overrides args/stdin)
+#   -v VOICE    Voice id: Leo (default), Eve, Ara, Rex, Sal
+#   -l LANG     BCP-47 language code or "auto" (default: en)
+#   -o FILE     Output mp3 path (default: temp file in $TMPDIR)
+#   -f FORMAT   "sr:br" mp3 sample_rate:bit_rate (default: 44100:128000)
+#   -c          Compress dynamic range (acompressor + loudnorm)
+#   -p          Play the audio after saving (off by default)
+#   -h          Show this help
+#
+# Auth: needs XAI_API_KEY in env (loaded from Keychain via launchd) or the
+# Keychain item service "com.rio.api.xai" account "XAI_API_KEY".
+
+set -euo pipefail
+
+API_URL="https://api.x.ai/v1/tts"
+MAX_CHARS=15000
+
+voice="Leo"
+lang="en"
+outfile=""
+infile=""
+format="44100:128000"
+play=0
+compress=0
+
+usage() { sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; }
+
+while getopts ":i:v:l:o:f:cph" opt; do
+  case "$opt" in
+    i) infile="$OPTARG" ;;
+    v) voice="$OPTARG" ;;
+    l) lang="$OPTARG" ;;
+    o) outfile="$OPTARG" ;;
+    f) format="$OPTARG" ;;
+    c) compress=1 ;;
+    p) play=1 ;;
+    h) usage; exit 0 ;;
+    \?) echo "grok-tts: unknown option -$OPTARG" >&2; exit 2 ;;
+    :) echo "grok-tts: -$OPTARG needs an argument" >&2; exit 2 ;;
+  esac
+done
+shift $((OPTIND - 1))
+
+# Text source: -i FILE wins, then args, then stdin.
+if [ -n "$infile" ]; then
+  [ -f "$infile" ] || { echo "grok-tts: input file not found: $infile" >&2; exit 2; }
+  text="$(cat "$infile")"
+elif [ "$#" -gt 0 ]; then
+  text="$*"
+elif [ ! -t 0 ]; then
+  text="$(cat)"
+else
+  echo "grok-tts: no text given (use -i FILE, args, or stdin)" >&2
+  exit 2
+fi
+
+if [ -z "${text//[[:space:]]/}" ]; then
+  echo "grok-tts: empty text" >&2
+  exit 2
+fi
+
+# API key: env first, Keychain fallback for non-login shells.
+key="${XAI_API_KEY:-}"
+if [ -z "$key" ]; then
+  key="$(security find-generic-password -s com.rio.api.xai -a XAI_API_KEY -w 2>/dev/null || true)"
+fi
+if [ -z "$key" ]; then
+  echo "grok-tts: XAI_API_KEY not found in env or Keychain (com.rio.api.xai)" >&2
+  exit 1
+fi
+
+sample_rate="${format%%:*}"
+bit_rate="${format##*:}"
+
+# Default output: temp mp3.
+if [ -z "$outfile" ]; then
+  outfile="$(mktemp "${TMPDIR:-/tmp}/grok-tts.XXXXXX")".mp3
+fi
+
+workdir="$(mktemp -d "${TMPDIR:-/tmp}/grok-tts-work.XXXXXX")"
+trap 'rm -rf "$workdir"' EXIT
+
+# synth_one TEXT OUTPATH — one API call for text under the char limit.
+synth_one() {
+  local t="$1" out="$2" body http_code
+  body="$(jq -n \
+    --arg text "$t" \
+    --arg voice "$voice" \
+    --arg lang "$lang" \
+    --argjson sr "$sample_rate" \
+    --argjson br "$bit_rate" \
+    '{text: $text, voice_id: $voice, language: $lang,
+      output_format: {codec: "mp3", sample_rate: $sr, bit_rate: $br}}')"
+  http_code="$(curl -sS -w '%{http_code}' -o "$out" \
+    -X POST "$API_URL" \
+    -H "Authorization: Bearer $key" \
+    -H "Content-Type: application/json" \
+    -d "$body")"
+  if [ "$http_code" != "200" ]; then
+    echo "grok-tts: API error (HTTP $http_code)" >&2
+    head -c 500 "$out" >&2; echo >&2
+    return 1
+  fi
+}
+
+# Split text into <=MAX_CHARS pieces, preferring paragraph then sentence breaks.
+# Writes chunk_NNN files into $workdir and prints the count.
+split_chunks() {
+  awk -v max="$MAX_CHARS" -v out="$workdir/chunk_" '
+    function flush(s,   f) {
+      if (length(s) == 0) return
+      n++; f = out sprintf("%03d", n); printf "%s", s > f; close(f)
+    }
+    # Hard-split an oversized single unit (no paragraph/sentence breaks).
+    function emit(unit,   piece) {
+      while (length(unit) > max) {
+        piece = substr(unit, 1, max)
+        flush(piece)
+        unit = substr(unit, max + 1)
+      }
+      if (length(buf) + length(unit) > max) { flush(buf); buf = "" }
+      buf = buf unit
+    }
+    { para = para $0 "\n" }
+    /^[[:space:]]*$/ { emit(para); para = "" }
+    END { emit(para); flush(buf); print n }
+  ' <<< "$text"
+}
+
+char_count=${#text}
+
+if [ "$char_count" -le "$MAX_CHARS" ]; then
+  # Single request straight to the (possibly pre-compress) target.
+  raw="$workdir/full.mp3"
+  synth_one "$text" "$raw"
+else
+  count="$(split_chunks)"
+  echo "grok-tts: input ${char_count} chars > ${MAX_CHARS}, split into ${count} chunks" >&2
+  i=0
+  for chunk in "$workdir"/chunk_*; do
+    i=$((i + 1))
+    echo "grok-tts: synth chunk ${i}/${count}..." >&2
+    synth_one "$(cat "$chunk")" "$chunk.mp3"
+  done
+  # Concatenate chunk MP3s (re-encode for a clean join).
+  list="$workdir/list.txt"; : > "$list"
+  for m in "$workdir"/chunk_*.mp3; do printf "file '%s'\n" "$m" >> "$list"; done
+  raw="$workdir/full.mp3"
+  ffmpeg -y -f concat -safe 0 -i "$list" -c:a libmp3lame -b:a "${bit_rate%000}k" "$raw" \
+    >/dev/null 2>&1
+fi
+
+if [ "$compress" -eq 1 ]; then
+  ffmpeg -y -i "$raw" \
+    -af "acompressor=threshold=-18dB:ratio=4:attack=5:release=120:makeup=4,loudnorm=I=-16:TP=-1.5:LRA=7" \
+    -c:a libmp3lame -b:a "${bit_rate%000}k" "$outfile" >/dev/null 2>&1
+else
+  cp "$raw" "$outfile"
+fi
+
+echo "$outfile"
+
+if [ "$play" -eq 1 ]; then
+  afplay "$outfile"
+fi

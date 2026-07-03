@@ -52,20 +52,20 @@ shortcut_name="${SHORTCUTS[$shortcut_alias]:-}"
 shift
 
 input_file=""
-output_file="$(mktemp "${TMPDIR:-/tmp}/sc-output.XXXXXX")"
 cleanup() {
   [[ -n "$input_file" && -f "$input_file" ]] && command rm -f "$input_file"
-  [[ -f "$output_file" ]] && command rm -f "$output_file"
 }
 trap cleanup EXIT
 
-args=("$shortcut_name" --output-path "$output_file")
+# --output-path is unreliable on this macOS (writes 0 bytes); the shortcut
+# result comes back on stdout, so let `shortcuts run` write straight through.
+args=("$shortcut_name")
 
 if (( $# > 0 )); then
   base_tmp="$(mktemp "${TMPDIR:-/tmp}/sc-input.XXXXXX")"
   input_file="${base_tmp}.txt"
   mv "$base_tmp" "$input_file"
-  printf '%s\n' "$*" > "$input_file"
+  printf '%s' "$*" > "$input_file"
   args+=(--input-path "$input_file")
 elif [[ ! -t 0 ]]; then
   base_tmp="$(mktemp "${TMPDIR:-/tmp}/sc-input.XXXXXX")"
@@ -76,7 +76,3 @@ elif [[ ! -t 0 ]]; then
 fi
 
 shortcuts run "${args[@]}"
-
-if [[ -s "$output_file" ]]; then
-  cat "$output_file"
-fi
