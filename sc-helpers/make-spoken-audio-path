@@ -1,0 +1,31 @@
+#!/bin/sh
+set -eu
+
+sc="$HOME/scripts/sc"
+audio_dir="$HOME/.cache/shortcuts"
+
+name="$(cat | "$sc" make-spoken-audio-track)" || {
+  echo "make-spoken-audio-path: shortcut failed" >&2
+  exit 1
+}
+
+if [ -z "$name" ]; then
+  echo "make-spoken-audio-path: shortcut returned empty basename" >&2
+  exit 1
+fi
+
+case "$name" in
+  */*)
+    echo "make-spoken-audio-path: shortcut returned non-basename: $name" >&2
+    exit 1
+    ;;
+esac
+
+audio_path="$audio_dir/$name"
+
+if [ ! -f "$audio_path" ]; then
+  echo "make-spoken-audio-path: expected audio file not found: $audio_path" >&2
+  exit 1
+fi
+
+printf '%s\n' "$audio_path"
