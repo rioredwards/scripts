@@ -2,8 +2,7 @@
 set -eu
 
 process_text="$HOME/scripts/sc-helpers/process-text-for-speech"
-sc="$HOME/scripts/sc"
-audio_dir="$HOME/.cache/shortcuts"
+make_spoken_audio_path="$HOME/scripts/sc-helpers/make-spoken-audio-path"
 
 if [ "$#" -gt 0 ]; then
   summary="$("$process_text" "$*")"
@@ -11,8 +10,4 @@ else
   summary="$(cat | "$process_text")"
 fi
 
-# The "Make Spoken Audio Track" shortcut renames the file and returns its
-# basename on stdout; it always lands in audio_dir, so prepend that for a
-# usable absolute path.
-name="$(printf "%s" "$summary" | "$sc" make-spoken-audio-track)"
-printf '%s/%s\n' "$audio_dir" "$name"
+printf "%s" "$summary" | "$make_spoken_audio_path"
