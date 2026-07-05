@@ -44,6 +44,17 @@ require_cmd() {
   done
 }
 
+ensure_daemon() {
+  # daemon status exits 0 regardless of actual state, so check its text output
+  peekaboo daemon status 2>/dev/null | grep -q "Status: not running" || return 0
+  log "peekaboo daemon not running, starting it"
+  # daemon start re-execs itself; a bare PATH lookup fails with
+  # 'Error: The file "peekaboo" doesn't exist', so use the absolute path
+  local peekaboo_bin
+  peekaboo_bin="$(command -v peekaboo)"
+  "$peekaboo_bin" daemon start >/dev/null 2>&1 || die "failed to start peekaboo daemon"
+}
+
 check_permissions() {
   local json missing
   json="$(peekaboo permissions --json 2>/dev/null)" || die "failed to check peekaboo permissions"
@@ -130,9 +141,9 @@ collect_response_text() {
 }
 
 usage() {
-  die 'Usage: send-to-chatgpt "your message"  (or pipe message on stdin)
-       send-to-chatgpt --paste           # send clipboard as-is (supports images)
-       send-to-chatgpt --double-paste    # send clipboard item 1, then Raycast item 2'
+  die 'Usage: send-to-chatgpt "your message"        (or pipe message on stdin)
+       send-to-chatgpt --paste ["extra text"]  # send clipboard as-is (supports images), optionally followed by text
+       send-to-chatgpt --double-paste          # send clipboard item 1, then Raycast item 2'
 }
 
 PASTE_MODE=""  # "" = text, "paste" = clipboard, "double-paste" = clipboard + raycast 2nd
@@ -141,6 +152,7 @@ MESSAGE=""
 if [[ "${1:-}" == "--paste" ]]; then
   PASTE_MODE="paste"
   shift
+  MESSAGE="$*"
 elif [[ "${1:-}" == "--double-paste" ]]; then
   PASTE_MODE="double-paste"
   shift
@@ -160,6 +172,7 @@ if [[ -z "$PASTE_MODE" ]]; then
 fi
 
 require_cmd peekaboo jq
+ensure_daemon
 check_permissions
 
 baseline_file="$(mktemp)"
@@ -187,6 +200,11 @@ fi
 if [[ "$PASTE_MODE" == "paste" ]]; then
   log "pasting clipboard (cmd+v)"
   peekaboo_quiet hotkey "cmd,v" --app "$CHATGPT_APP" --foreground
+  if [[ -n "$MESSAGE" ]]; then
+    log "typing extra text after image"
+    sleep 0.3
+    peekaboo_quiet paste "$MESSAGE" --app "$CHATGPT_APP" --foreground
+  fi
 elif [[ "$PASTE_MODE" == "double-paste" ]]; then
   log "pasting 1st clipboard item (cmd+v)"
   peekaboo_quiet hotkey "cmd,v" --app "$CHATGPT_APP" --foreground
