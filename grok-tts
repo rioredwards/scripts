@@ -21,8 +21,8 @@
 #   -l LANG     BCP-47 language code or "auto" (default: en)
 #   -o FILE     Output mp3 path (default: temp file in $TMPDIR)
 #   -f FORMAT   "sr:br" mp3 sample_rate:bit_rate (default: 44100:128000)
-#   -P          Polish voice: heavy comp + HPF + podcast EQ + de-esser +
-#               loudnorm, tuned for spoken TTS. This is the DEFAULT.
+#   -P          Polish voice: heavy comp + HPF + de-esser + loudnorm,
+#               tuned for spoken TTS. This is the DEFAULT.
 #   -c          Lighter dynamic-range compress only (acompressor + loudnorm).
 #   -r          Raw: no post-processing, straight synth output.
 #   -p          Play the audio after saving (off by default)
@@ -44,9 +44,10 @@ format="44100:128000"
 play=0
 mode="polish"   # polish (default) | compress | raw
 
-# Full voice-master chain for spoken TTS: heavy dynamic-range compression,
-# high-pass rumble cut, podcast-voice EQ, dynamic de-esser, loudness normalize.
-POLISH_CHAIN="acompressor=threshold=-30dB:ratio=8:attack=10:release=150,highpass=f=90,equalizer=f=300:t=q:w=1.4:g=-4,equalizer=f=3500:t=q:w=1.5:g=3,equalizer=f=7000:t=q:w=2:g=-2,deesser=i=0.20:m=0.5:f=0.35,loudnorm=I=-16:TP=-1.5:LRA=9"
+# Voice-master chain for spoken TTS: heavy dynamic-range compression,
+# high-pass rumble cut, dynamic de-esser, loudness normalize. No EQ boost —
+# a presence boost was exciting a raspy top end, so it's left flat.
+POLISH_CHAIN="acompressor=threshold=-30dB:ratio=8:attack=10:release=150,highpass=f=90,deesser=i=0.20:m=0.5:f=0.35,loudnorm=I=-16:TP=-1.5:LRA=9"
 
 usage() { sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; }
 
