@@ -1,12 +1,24 @@
 #!/bin/sh
 # Shared core for all agent note-on-turn hooks.
-# stdin: reply text. Summarizes, texts to phone, rebuilds session index.
+# stdin: reply text. Summarizes, texts to phone, optionally speaks, rebuilds session index.
 set -eu
+
+# Load agent-hooks profile (AGENT_SPEAK, etc.). Env vars already set win over profile.
+# shellcheck source=/dev/null
+. "$HOME/scripts/agent-hooks-env.sh"
+AGENT_SPEAK="${AGENT_SPEAK:-off}"
 
 text="$(cat)"
 [ -n "$text" ] || exit 0
 
-printf '%s' "$text" | "$HOME/scripts/summarize-for-note" | "$HOME/scripts/sc" text-phone
+summary="$(printf '%s' "$text" | "$HOME/scripts/summarize-for-note")"
+printf '%s' "$summary" | "$HOME/scripts/sc" text-phone
+
+# Speak the summary aloud when the voice toggle is on.
+case "$AGENT_SPEAK" in
+  on|1|true|yes) printf '%s' "$summary" | "$HOME/scripts/note-on-turn/speak-note" ;;
+esac
+
 log_dir="$HOME/.cache/note-on-turn"
 mkdir -p "$log_dir"
 "$HOME/dev/agent-sessions/bin/index-session" >>"$log_dir/index-session.log" 2>&1 &

@@ -1,0 +1,13 @@
+#!/bin/sh
+# stdin: note text. Speaks it aloud via macOS `say`.
+# Runs detached so it never blocks the calling hook (say is synchronous).
+set -eu
+
+text="$(cat)"
+[ -n "$text" ] || exit 0
+
+# Strip markdown noise so speech sounds natural.
+speech="$(printf '%s' "$text" | sed 's/[*_`#>~|]//g')"
+[ -n "$speech" ] || exit 0
+
+( say -- "$speech" >/dev/null 2>&1 & ) &
