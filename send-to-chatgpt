@@ -94,6 +94,75 @@ extract_input_id() {
   '
 }
 
+SIDEBAR_MAX_X=1150  # elements left of this are sidebar; right of it are the main pane
+
+ensure_project() {
+  local name="$1"
+  local see_json header_label sidebar_id see_more_id
+
+  see_json="$(see_chatgpt)"
+
+  header_label="$(echo "$see_json" | jq -r --argjson maxx "$SIDEBAR_MAX_X" '
+    [.data.ui_elements[]?
+      | select(.role == "button" and .bounds.x >= $maxx and .bounds.y >= 90 and .bounds.y <= 140)
+    ] | first | .label // empty
+  ')"
+
+  if [[ "$header_label" == "$name" ]]; then
+    log "already at project home: $name"
+    return 0
+  fi
+
+  # NOTE: the "<chat title>, <project name>" toolbar button is the model-picker
+  # (Auto/Instant/Thinking dropdown), NOT a project breadcrumb -- confirmed by
+  # live testing (clicking it opens the model dropdown, no navigation happens).
+  # No reliable "return to project home while inside an unrelated chat" shortcut
+  # exists yet; always fall through to the sidebar search below.
+
+  log "not in project '$name' (currently: ${header_label:-none}), searching sidebar"
+
+  sidebar_id="$(echo "$see_json" | jq -r --argjson maxx "$SIDEBAR_MAX_X" --arg n "$name" '
+    [.data.ui_elements[]?
+      | select(.role == "button" and .bounds.x < $maxx and .label == $n)
+    ] | first | .id // empty
+  ')"
+
+  if [[ -z "$sidebar_id" ]]; then
+    see_more_id="$(echo "$see_json" | jq -r '[.data.ui_elements[]? | select(.label == "See more")] | first | .id // empty')"
+    if [[ -n "$see_more_id" ]]; then
+      log "expanding project list (See more)"
+      peekaboo_quiet click --on "$see_more_id" --app "$CHATGPT_APP" --foreground --wait-for 3000
+      see_json="$(see_chatgpt)"
+      sidebar_id="$(echo "$see_json" | jq -r --argjson maxx "$SIDEBAR_MAX_X" --arg n "$name" '
+        [.data.ui_elements[]?
+          | select(.role == "button" and .bounds.x < $maxx and .label == $n)
+        ] | first | .id // empty
+      ')"
+    fi
+  fi
+
+  [[ -n "$sidebar_id" ]] || die "project '$name' not found in ChatGPT sidebar (create it manually first, automation can't reliably drive the New Project dialog)"
+
+  log "opening project: $name"
+  peekaboo_quiet click --on "$sidebar_id" --app "$CHATGPT_APP" --foreground --wait-for 5000
+}
+
+click_top_chat() {
+  local see_json id
+
+  see_json="$(see_chatgpt)"
+  id="$(echo "$see_json" | jq -r --argjson maxx "$SIDEBAR_MAX_X" '
+    [.data.ui_elements[]?
+      | select(.role == "button" and .bounds.x >= $maxx and .bounds.y > 200 and .bounds.width > 400)
+    ] | sort_by(.bounds.y) | first | .id // empty
+  ')"
+
+  [[ -n "$id" ]] || die "no existing chats found in this project"
+
+  log "opening most recent chat in project"
+  peekaboo_quiet click --on "$id" --app "$CHATGPT_APP" --foreground --wait-for 5000
+}
+
 is_skippable_text() {
   local text="$1"
   [[ "$text" == "$MESSAGE" ]] && return 0
@@ -143,22 +212,67 @@ collect_response_text() {
 usage() {
   die 'Usage: send-to-chatgpt "your message"        (or pipe message on stdin)
        send-to-chatgpt --paste ["extra text"]  # send clipboard as-is (supports images), optionally followed by text
-       send-to-chatgpt --double-paste          # send clipboard item 1, then Raycast item 2'
+       send-to-chatgpt --double-paste          # send clipboard item 1, then Raycast item 2
+
+       send-to-chatgpt --project ["name"] "message"        # open project (default: repo dir name), start a new chat in it
+       send-to-chatgpt --project ["name"] --continue "msg"  # reply in the project'"'"'s most recent chat instead
+       send-to-chatgpt --project ["name"] --peek            # print the project'"'"'s most recent chat text, no send'
 }
 
-PASTE_MODE=""  # "" = text, "paste" = clipboard, "double-paste" = clipboard + raycast 2nd
+PASTE_MODE=""       # "" = text, "paste" = clipboard, "double-paste" = clipboard + raycast 2nd
+PROJECT_MODE=0
+PROJECT_NAME=""
+PROJECT_ACTION="new"  # new | continue | peek
 MESSAGE=""
 
-if [[ "${1:-}" == "--paste" ]]; then
-  PASTE_MODE="paste"
-  shift
-  MESSAGE="$*"
-elif [[ "${1:-}" == "--double-paste" ]]; then
-  PASTE_MODE="double-paste"
-  shift
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --paste)
+      PASTE_MODE="paste"
+      shift
+      ;;
+    --double-paste)
+      PASTE_MODE="double-paste"
+      shift
+      ;;
+    --project)
+      PROJECT_MODE=1
+      shift
+      if [[ $# -gt 0 && "$1" != --* ]]; then
+        PROJECT_NAME="$1"
+        shift
+      fi
+      ;;
+    --continue)
+      PROJECT_ACTION="continue"
+      shift
+      ;;
+    --peek)
+      PROJECT_ACTION="peek"
+      shift
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      usage
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+if [[ "$PROJECT_MODE" == "1" && -z "$PROJECT_NAME" ]]; then
+  PROJECT_NAME="$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")"
 fi
 
-if [[ -z "$PASTE_MODE" ]]; then
+if [[ "$PROJECT_ACTION" == "peek" ]]; then
+  [[ "$PROJECT_MODE" == "1" ]] || die "--peek requires --project"
+elif [[ -n "$PASTE_MODE" ]]; then
+  MESSAGE="$*"
+else
   if [[ $# -gt 0 ]]; then
     MESSAGE="$*"
   elif [[ ! -t 0 ]]; then
@@ -174,6 +288,17 @@ fi
 require_cmd peekaboo jq
 ensure_daemon
 check_permissions
+
+if [[ "$PROJECT_MODE" == "1" ]]; then
+  ensure_project "$PROJECT_NAME"
+  if [[ "$PROJECT_ACTION" == "continue" || "$PROJECT_ACTION" == "peek" ]]; then
+    click_top_chat
+  fi
+  if [[ "$PROJECT_ACTION" == "peek" ]]; then
+    see_chatgpt | extract_chat_texts
+    exit 0
+  fi
+fi
 
 baseline_file="$(mktemp)"
 trap 'rm -f "$baseline_file"; cue_stop' EXIT
