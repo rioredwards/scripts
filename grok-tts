@@ -10,7 +10,9 @@
 #   echo "Hello" | grok-tts                # text from stdin
 #   grok-tts -i notes.md -o out.mp3        # read text from a file
 #   grok-tts -v Ara -l es "Hola"           # pick voice + language
-#   grok-tts -c -i long.md -o out.mp3      # compress dynamic range
+#   grok-tts -i long.md -o out.mp3         # full voice polish (default)
+#   grok-tts -r -i long.md -o out.mp3      # raw, no post-processing
+#   grok-tts -c -i long.md -o out.mp3      # lighter compress only
 #   grok-tts -p "play it"                  # also play after saving
 #
 # Options:
@@ -19,7 +21,10 @@
 #   -l LANG     BCP-47 language code or "auto" (default: en)
 #   -o FILE     Output mp3 path (default: temp file in $TMPDIR)
 #   -f FORMAT   "sr:br" mp3 sample_rate:bit_rate (default: 44100:128000)
-#   -c          Compress dynamic range (acompressor + loudnorm)
+#   -P          Polish voice: heavy comp + HPF + podcast EQ + de-esser +
+#               loudnorm, tuned for spoken TTS. This is the DEFAULT.
+#   -c          Lighter dynamic-range compress only (acompressor + loudnorm).
+#   -r          Raw: no post-processing, straight synth output.
 #   -p          Play the audio after saving (off by default)
 #   -h          Show this help
 #
@@ -37,18 +42,24 @@ outfile=""
 infile=""
 format="44100:128000"
 play=0
-compress=0
+mode="polish"   # polish (default) | compress | raw
 
-usage() { sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; }
+# Full voice-master chain for spoken TTS: heavy dynamic-range compression,
+# high-pass rumble cut, podcast-voice EQ, dynamic de-esser, loudness normalize.
+POLISH_CHAIN="acompressor=threshold=-30dB:ratio=8:attack=10:release=150,highpass=f=90,equalizer=f=300:t=q:w=1.4:g=-4,equalizer=f=3500:t=q:w=1.5:g=3,equalizer=f=7000:t=q:w=2:g=-2,deesser=i=0.20:m=0.5:f=0.35,loudnorm=I=-16:TP=-1.5:LRA=9"
 
-while getopts ":i:v:l:o:f:cph" opt; do
+usage() { sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; }
+
+while getopts ":i:v:l:o:f:cPrph" opt; do
   case "$opt" in
     i) infile="$OPTARG" ;;
     v) voice="$OPTARG" ;;
     l) lang="$OPTARG" ;;
     o) outfile="$OPTARG" ;;
     f) format="$OPTARG" ;;
-    c) compress=1 ;;
+    c) mode="compress" ;;
+    P) mode="polish" ;;
+    r) mode="raw" ;;
     p) play=1 ;;
     h) usage; exit 0 ;;
     \?) echo "grok-tts: unknown option -$OPTARG" >&2; exit 2 ;;
@@ -166,13 +177,20 @@ else
     >/dev/null 2>&1
 fi
 
-if [ "$compress" -eq 1 ]; then
-  ffmpeg -y -i "$raw" \
-    -af "acompressor=threshold=-18dB:ratio=4:attack=5:release=120:makeup=4,loudnorm=I=-16:TP=-1.5:LRA=7" \
-    -c:a libmp3lame -b:a "${bit_rate%000}k" "$outfile" >/dev/null 2>&1
-else
-  cp "$raw" "$outfile"
-fi
+case "$mode" in
+  polish)
+    ffmpeg -y -i "$raw" -af "$POLISH_CHAIN" \
+      -c:a libmp3lame -b:a "${bit_rate%000}k" "$outfile" >/dev/null 2>&1
+    ;;
+  compress)
+    ffmpeg -y -i "$raw" \
+      -af "acompressor=threshold=-18dB:ratio=4:attack=5:release=120:makeup=4,loudnorm=I=-16:TP=-1.5:LRA=7" \
+      -c:a libmp3lame -b:a "${bit_rate%000}k" "$outfile" >/dev/null 2>&1
+    ;;
+  raw)
+    cp "$raw" "$outfile"
+    ;;
+esac
 
 echo "$outfile"
 
