@@ -1,7 +1,22 @@
 #!/bin/sh
-# stdin: note text. Speaks it aloud via macOS `say`.
-# Runs detached so it never blocks the calling hook (say is synchronous).
+# stdin: note text. Speaks it aloud.
+# Engine: `say` (macOS, offline, default) or `grok` (xAI TTS via grok-tts).
+# Chosen by AGENT_SPEAK_ENGINE (agent-hooks profile) or the -e flag.
+# Runs detached so it never blocks the calling hook.
 set -eu
+
+# Load profile so this works even when called standalone (env still wins).
+# shellcheck source=/dev/null
+[ -f "$HOME/scripts/agent-hooks-env.sh" ] && . "$HOME/scripts/agent-hooks-env.sh"
+engine="${AGENT_SPEAK_ENGINE:-say}"
+
+while getopts ":e:" opt; do
+  case "$opt" in
+    e) engine="$OPTARG" ;;
+    *) : ;;
+  esac
+done
+shift $((OPTIND - 1))
 
 text="$(cat)"
 [ -n "$text" ] || exit 0
@@ -10,4 +25,13 @@ text="$(cat)"
 speech="$(printf '%s' "$text" | sed 's/[*_`#>~|]//g')"
 [ -n "$speech" ] || exit 0
 
-( say -- "$speech" >/dev/null 2>&1 & ) &
+case "$engine" in
+  grok)
+    # Synthesize + play via xAI. Fall back to macOS `say` on any failure.
+    ( printf '%s' "$speech" | "$HOME/scripts/grok-tts" -p >/dev/null 2>&1 \
+        || say -- "$speech" >/dev/null 2>&1 & ) &
+    ;;
+  *)
+    ( say -- "$speech" >/dev/null 2>&1 & ) &
+    ;;
+esac
