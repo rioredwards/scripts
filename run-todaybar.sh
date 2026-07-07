@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Required parameters:
 # @raycast.schemaVersion 1
-# @raycast.title Run DayBar
+# @raycast.title Run todayBar
 # @raycast.mode compact
 
 # Optional parameters:
