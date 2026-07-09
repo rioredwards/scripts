@@ -1,14 +1,14 @@
 #!/bin/bash
-# daybar-watchdog.sh — health check for the DayBar agent loop in tmux
-# Outputs a 2-3 line report for piping to note-source-to-phone
+# todaybar-watchdog.sh — health check for the TodayBar agent loop in tmux
+# Outputs a 2-3 line report for piping to text-phone-summary
 set -euo pipefail
 
-SESSION="daybar-shell"
-LOOP_DIR="$HOME/dev/DayBar-shell/.agent-loop"
+SESSION="todaybar"
+LOOP_DIR="$HOME/dev/TodayBar/.agent-loop"
 
 # 1. Session alive?
 if ! tmux has-session -t "$SESSION" 2>/dev/null; then
-  echo "🔴 daybar: tmux session \"$SESSION\" is GONE. Crashed or killed."
+  echo "🔴 todaybar: tmux session \"$SESSION\" is GONE. Crashed or killed."
   exit 0
 fi
 
@@ -61,4 +61,4 @@ else
   status="🟡"
 fi
 
-echo "${status} daybar: ${agent_count} agents in win1. Review: ${review_state}.${dangers:+ Alerts:${dangers}}"
+echo "${status} todaybar: ${agent_count} agents in win1. Review: ${review_state}.${dangers:+ Alerts:${dangers}}"

@@ -13,7 +13,7 @@ Small personal command wrappers and automation helpers. App-sized tools live in 
 - `process-text-for-speech` - prepares text for speech via `aitt`.
 - `summarize-for-note` - summarizes text for the note pipeline via `aitt`.
 - `grok-stt`, `grok-tts` - Grok speech helpers.
-- `run-daybar.sh`, `daybar-watchdog.sh` - local daily-driver status helpers.
+- `run-todaybar.sh`, `todaybar-watchdog.sh` - local daily-driver status helpers.
 - `lnskill` - symlink a skill from `~/dev/agent-skills/` into a project.
 
 ## Dotfiles Script Links
