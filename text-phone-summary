@@ -4,9 +4,9 @@ set -eu
 usage() {
   cat <<'EOF'
 Usage:
-  note-source-to-phone /path/to/file.txt
-  note-source-to-phone "some text here"
-  echo "some text here" | note-source-to-phone
+  text-phone-summary /path/to/file.txt
+  text-phone-summary "some text here"
+  echo "some text here" | text-phone-summary
 
 Behavior:
   - If first arg is path to existing file, read that file.
