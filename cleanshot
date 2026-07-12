@@ -1,0 +1,117 @@
+#!/usr/bin/env zsh
+set -euo pipefail
+
+# Minimal CleanShot X CLI. Fires cleanshot:// URL scheme commands.
+# Docs: https://cleanshot.com/docs-api
+
+typeset -A COMMANDS
+COMMANDS=(
+  area           capture-area
+  fullscreen     capture-fullscreen
+  screen         capture-fullscreen
+  window         capture-window
+  prev           capture-previous-area
+  previous       capture-previous-area
+  timer          self-timer
+  scroll         scrolling-capture
+  record         record-screen
+  ocr            capture-text
+  text           capture-text
+  all-in-one     all-in-one
+  allinone       all-in-one
+  pin            pin
+  annotate       open-annotate
+  clipboard      open-from-clipboard
+  overlay        add-quick-access-overlay
+  settings       open-settings
+  history        open-history
+  restore        restore-recently-closed
+  hide-icons     hide-desktop-icons
+  show-icons     show-desktop-icons
+  toggle-icons   toggle-desktop-icons
+)
+
+usage() {
+  cat <<'EOF'
+Usage:
+  cleanshot <command> [key=value ...] [-n|--dry-run]
+
+Commands (alias -> cleanshot://):
+EOF
+  for a in ${(ok)COMMANDS}; do
+    printf '  %-14s %s\n' "$a" "${COMMANDS[$a]}"
+  done
+  cat <<'EOF'
+
+Params are passed straight through as URL query args. Common ones:
+  action=copy|save|annotate|upload|pin   post-capture action
+  x= y= width= height=                   region (origin lower-left)
+  display=1|2                            target display
+  filepath=/path/to/img.png              for pin / annotate / overlay
+  tab=general|shortcuts|...              for settings
+  start=true autoscroll=true             for scroll
+  linebreaks=true                        for ocr
+
+Examples:
+  cleanshot area action=copy
+  cleanshot fullscreen action=save
+  cleanshot ocr linebreaks=true
+  cleanshot pin filepath="$SCREENSHOT_DIR/shot.png"
+  cleanshot settings tab=shortcuts
+  cleanshot area action=upload --dry-run    # print URL, don't fire
+EOF
+}
+
+die() {
+  printf 'cleanshot: %s\n\n' "$1" >&2
+  usage >&2
+  exit 1
+}
+
+# Percent-encode a string byte-for-byte (safe for spaces/paths/unicode).
+urlencode() {
+  local s="$1" i c
+  local LC_ALL=C
+  for (( i=1; i<=${#s}; i++ )); do
+    c="${s[i]}"
+    case "$c" in
+      [a-zA-Z0-9._~-]) printf '%s' "$c" ;;
+      *) printf '%%%02X' "$(( $(printf '%d' "'$c") & 0xFF ))" ;;
+    esac
+  done
+}
+
+cmd="${1:-}"
+if [[ -z "$cmd" || "$cmd" == "-h" || "$cmd" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+target="${COMMANDS[$cmd]:-}"
+[[ -n "$target" ]] || die "unknown command: $cmd"
+shift
+
+dry_run=0
+query=""
+for arg in "$@"; do
+  case "$arg" in
+    -n|--dry-run) dry_run=1 ;;
+    *=*)
+      key="${arg%%=*}"
+      val="${arg#*=}"
+      [[ -n "$key" ]] || die "empty param key in: $arg"
+      query+="&${key}=$(urlencode "$val")"
+      ;;
+    *) die "params must be key=value (got: $arg)" ;;
+  esac
+done
+
+url="cleanshot://${target}"
+[[ -n "$query" ]] && url+="?${query#&}"
+
+if (( dry_run )); then
+  printf '%s\n' "$url"
+  exit 0
+fi
+
+open "$url"
