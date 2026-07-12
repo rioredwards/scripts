@@ -6,7 +6,6 @@ Small personal command wrappers and automation helpers. App-sized tools live in 
 
 - `agent-router` - wrapper for `~/dev/agent-router/agent-router`. Examples: `agent-router guide`, `agent-router providers --verbose`, `agent-router delegate "prompt"`.
 - `aitt` - compatibility shim for `~/dev/ai-text-transform/aitt`.
-- `aitt-claude` - Claude-oriented text transform helper that now calls `aitt`.
 - `sc` - text-only proxy for Apple Shortcuts registered in `sc-helpers/`. Run `sc` to list aliases.
 - `cleanshot` - minimal CleanShot X CLI firing `cleanshot://` URL commands. Run `cleanshot` to list aliases; `--dry-run` prints the URL.
 - `note-on-turn/` - hook scripts for summarizing final agent replies into the phone note pipeline.
