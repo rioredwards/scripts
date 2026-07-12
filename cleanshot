@@ -47,10 +47,31 @@ Params are passed straight through as URL query args. Common ones:
   action=copy|save|annotate|upload|pin   post-capture action
   x= y= width= height=                   region (origin lower-left)
   display=1|2                            target display
-  filepath=/path/to/img.png              for pin / annotate / overlay
+  filepath=/path/to/img.png              for pin / annotate / overlay / ocr
   tab=general|shortcuts|...              for settings
   start=true autoscroll=true             for scroll
   linebreaks=true                        for ocr
+
+OCR (ocr / text -> capture-text):
+  No region args => interactive: you drag a box to OCR.
+  Pass x= y= width= height= to OCR a fixed region with no dragging
+  (origin lower-left, in points not pixels). Result is copied to the
+  clipboard. Add linebreaks=true to keep line breaks.
+    cleanshot ocr                                  # drag to select
+    cleanshot ocr linebreaks=true                  # drag, keep newlines
+    cleanshot ocr x=0 y=0 width=1920 height=1080   # whole 1080p display
+  Or OCR an existing PNG/JPEG on disk instead of the screen:
+    cleanshot ocr filepath="$SCREENSHOT_DIR/shot.png"
+  Full screen = your display's point size (e.g. a 3840x2160 @2x panel
+  is width=1920 height=1080; origin lower-left). Check display sizing
+  with: cleanshot settings tab=general
+
+Save location:
+  action=save writes to CleanShot's configured export folder, not the
+  cwd. This script does not set or control it. Read the current path:
+    defaults read com.getcleanshot.app-setapp exportPath
+  (currently $SCREENSHOT_DIR). Change it in CleanShot > Settings > General,
+  or open with: cleanshot settings tab=general
 
 Examples:
   cleanshot area action=copy
