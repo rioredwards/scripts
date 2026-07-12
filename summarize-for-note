@@ -1,6 +1,27 @@
 #!/bin/sh
 set -eu
 
+# Optional verbosity knob. `balanced` maps to the original prompt so existing
+# stdin-only callers (note-from-reply, text-phone-summary) are unaffected.
+level="balanced"
+strict=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -l|--level) level="${2:-}"; shift 2 ;;
+    -l=*|--level=*) level="${1#*=}"; shift ;;
+    --strict) strict=1; shift ;;
+    --) shift; break ;;
+    *) break ;;
+  esac
+done
+
+case "$level" in
+  brief) prompt="summarize-for-note-brief" ;;
+  balanced) prompt="summarize-for-note" ;;
+  deep) prompt="summarize-for-note-deep" ;;
+  *) echo "summarize-for-note: unknown level '$level' (want brief|balanced|deep)" >&2; exit 2 ;;
+esac
+
 text=""
 if [ "$#" -gt 0 ]; then
   text="$*"
@@ -12,9 +33,14 @@ if [ -z "$text" ]; then
   exit 0
 fi
 
-# Try to summarize with aitt. Fallback to original text if aitt fails.
-if output="$(printf '%s' "$text" | "$HOME/scripts/aitt" summarize-for-note 2>/dev/null)" && [ -n "$output" ]; then
+# Try to summarize with aitt. Default: fall back to original text if aitt fails (keeps
+# the Stop-hook pipeline degrading gracefully). --strict: fail loud instead, so callers
+# that need a real summary (the app) don't cache raw text as a summary.
+if output="$(printf '%s' "$text" | "$HOME/scripts/aitt" "$prompt" 2>/dev/null)" && [ -n "$output" ]; then
   printf '%s' "$output"
+elif [ "$strict" -eq 1 ]; then
+  echo "summarize-for-note: summarizer failed (strict mode)" >&2
+  exit 3
 else
   printf '%s' "$text"
 fi
