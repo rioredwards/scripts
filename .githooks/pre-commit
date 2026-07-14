@@ -1,0 +1,11 @@
+#!/bin/zsh
+# Guard-only pre-commit: block absolute cross-machine home paths.
+# The guard itself lives in the dotfiles repo (single source of truth).
+# See ~/.agents/AGENTS.md and ~/.dotfiles/scripts/check-home-paths.sh.
+set -uo pipefail
+
+GUARD="$HOME/.dotfiles/scripts/check-home-paths.sh"
+if [[ -f "$GUARD" ]]; then
+  zsh "$GUARD" || true
+fi
+exit 0

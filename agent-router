@@ -1,4 +1,10 @@
 #!/usr/bin/env zsh
 set -euo pipefail
 
-exec "$HOME/dev/agent-router/agent-router" "$@"
+# agent-router needs Node >=18 and pnpm 10. Make it run from ANY shell,
+# including non-interactive agent shells that skip nvm autoload / omz PATH.
+node_bin=$(command ls -d "$HOME"/.nvm/versions/node/v*/bin 2>/dev/null | sort -V | tail -1)
+[ -n "$node_bin" ] && export PATH="$node_bin:$PATH"
+
+export AGENT_ROUTER_WORKSPACE="${AGENT_ROUTER_WORKSPACE:-$PWD}"
+exec corepack pnpm@10 --silent --dir "$HOME/dev/agent-router" dev -- "$@"
