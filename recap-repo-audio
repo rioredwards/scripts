@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# recap-repo-audio — generate a spoken re-entry recap for a repo, cached.
+#
+# Pipeline: gather-context.sh (repo recon bundle) -> aitt repo-recap-audio
+# (semantic synthesis into a short spoken recap) -> grok-tts (mp3).
+#
+# The result is cached under a key of repo name + git HEAD, so re-running on an
+# unchanged (clean) repo is free. Dirty working trees always regenerate, since
+# their content isn't captured by HEAD. Prints the mp3 path on stdout.
+#
+# On any stage failure: log to stderr and exit non-zero. No silent engine swap.
+#
+# Usage: recap-repo-audio [-r REPO] [-b BUDGET] [-m MODEL] [-o OUTDIR] [-f] [-p] [-q]
+#   -r REPO    repo path (default: $PWD); resolved to its git root
+#   -b BUDGET  gather-context char budget            (default 40000)
+#   -m MODEL   aitt synthesis model                  (default: $RECAP_AUDIO_MODEL or sonnet)
+#   -o OUTDIR  cache dir for mp3 + sidecar           (default: $RECAP_AUDIO_DIR or ~/.cache/agent-audio-recaps)
+#   -f         force regenerate even on a cache hit
+#   -p         play the result with afplay when done
+#   -q         quiet (suppress progress on stderr)
+set -euo pipefail
+
+repo=""
+budget=40000
+model="${RECAP_AUDIO_MODEL:-sonnet}"
+outdir="${RECAP_AUDIO_DIR:-$HOME/.cache/agent-audio-recaps}"
+force=0
+play=0
+quiet=0
+
+usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; }
+
+while getopts ":r:b:m:o:fpqh" opt; do
+  case "$opt" in
+    r) repo="$OPTARG" ;;
+    b) budget="$OPTARG" ;;
+    m) model="$OPTARG" ;;
+    o) outdir="$OPTARG" ;;
+    f) force=1 ;;
+    p) play=1 ;;
+    q) quiet=1 ;;
+    h) usage; exit 0 ;;
+    :) echo "recap-repo-audio: -$OPTARG needs an argument" >&2; exit 2 ;;
+    *) echo "recap-repo-audio: unknown option -$OPTARG" >&2; exit 2 ;;
+  esac
+done
+
+log() { [ "$quiet" -eq 1 ] || printf '%s\n' "$*" >&2; }
+
+# Resolve the repo root.
+repo="${repo:-$PWD}"
+[ -d "$repo" ] || { echo "recap-repo-audio: not a directory: $repo" >&2; exit 2; }
+root="$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null)" ||
+  { echo "recap-repo-audio: not a git repo: $repo" >&2; exit 2; }
+name="$(basename "$root")"
+
+# Cache key: short HEAD, plus a -dirty marker when the working tree has changes
+# (those aren't captured by HEAD, so a dirty tree can't be safely cached).
+head="$(git -C "$root" rev-parse --short HEAD 2>/dev/null || echo nohead)"
+dirty=""
+if ! git -C "$root" diff --quiet --ignore-submodules 2>/dev/null ||
+   ! git -C "$root" diff --cached --quiet --ignore-submodules 2>/dev/null; then
+  dirty="-dirty"
+fi
+
+mkdir -p "$outdir"
+out="$outdir/$name-$head$dirty.mp3"
+sidecar="${out%.mp3}.json"
+
+# Cache hit: only for clean trees (dirty content is volatile).
+if [ "$force" -eq 0 ] && [ -z "$dirty" ] && [ -s "$out" ]; then
+  log "cache hit: $out"
+  printf '%s\n' "$out"
+  [ "$play" -eq 1 ] && exec afplay "$out"
+  exit 0
+fi
+
+# 1. Recon: budget-bounded context bundle for the repo.
+log "gathering context ($name @ $head$dirty, budget $budget)..."
+bundle="$(cd "$root" && "$HOME/dev/agent-skills/general/re-entry-recap/gather-context.sh" --budget "$budget" 2>/dev/null)" ||
+  { echo "recap-repo-audio: gather-context failed for $name" >&2; exit 1; }
+[ -n "$bundle" ] || { echo "recap-repo-audio: empty context bundle for $name" >&2; exit 1; }
+
+# 2. Synthesis: bundle -> short spoken recap via the aitt preset.
+log "synthesizing recap (model: $model)..."
+recap="$(printf '%s' "$bundle" | LLM_MODEL="$model" "$HOME/scripts/aitt" repo-recap-audio 2>/dev/null)" ||
+  { echo "recap-repo-audio: synth (aitt) failed for $name" >&2; exit 1; }
+[ -n "$recap" ] || { echo "recap-repo-audio: empty recap for $name" >&2; exit 1; }
+
+# 3. TTS: recap -> mp3. Write to a temp file then move, so a killed run never
+# leaves a half-written mp3 that later reads as a cache hit. The temp name keeps
+# the .mp3 suffix — grok-tts derives its output format from the extension.
+log "synthesizing audio (grok)..."
+tmp="${out%.mp3}.tmp.$$.mp3"
+if ! printf '%s' "$recap" | "$HOME/scripts/grok-tts" -o "$tmp" >/dev/null 2>&1; then
+  rm -f "$tmp"
+  echo "recap-repo-audio: grok-tts failed for $name" >&2
+  exit 1
+fi
+mv -f "$tmp" "$out"
+
+# Metadata sidecar (mirrors the turn-note sidecars so the Raycast UI can show
+# the transcript + origin). Best-effort; failure here doesn't fail the recap.
+jq -n \
+  --arg audio "$(basename "$out")" \
+  --arg summary "$recap" \
+  --arg repo "$root" \
+  --arg repo_name "$name" \
+  --arg head "$head" \
+  --arg kind "repo-recap" \
+  --arg engine "grok" \
+  --arg model "$model" \
+  --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  '{audio:$audio, summary:$summary, repo:$repo, repo_name:$repo_name, head:$head, kind:$kind, engine:$engine, model:$model, created_at:$created_at}' \
+  >"$sidecar" 2>/dev/null || true
+
+log "done: $out"
+printf '%s\n' "$out"
+[ "$play" -eq 1 ] && exec afplay "$out"
+exit 0
