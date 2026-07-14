@@ -16,7 +16,7 @@ printf '%s' "$summary" | "$HOME/scripts/sc" text-phone
 
 # Speak the summary aloud when the voice toggle is on.
 case "$AGENT_SPEAK" in
-  on|1|true|yes) printf '%s' "$summary" | "$HOME/scripts/note-on-turn/speak-note" ;;
+  on|1|true|yes) printf '%s' "$summary" | "$HOME/scripts/hooks/note-on-turn/speak-note" ;;
 esac
 
 log_dir="$HOME/.cache/note-on-turn"

@@ -8,4 +8,4 @@ if [ -n "$transcript_path" ] && [ -f "$transcript_path" ]; then
   jq -s -r '[.[] | select(.source == "MODEL" and .type == "PLANNER_RESPONSE" and has("content") and .content != "")] | last | .content // empty' "$transcript_path"
 else
   echo "$stdin_json" | jq -r '.last_assistant_message // .prompt_response // empty'
-fi | "$HOME/scripts/note-on-turn/note-from-reply"
+fi | "$HOME/scripts/hooks/note-on-turn/note-from-reply"

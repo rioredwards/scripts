@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+jq -r '.last_assistant_message // empty' | "$HOME/scripts/hooks/note-on-turn/note-from-reply"
+echo '{"continue": true}'
