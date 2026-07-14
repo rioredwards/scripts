@@ -9,9 +9,14 @@
 // Main use: pasting a screenshot path copied on one Mac into a Claude session
 // on the other; the file lives at the same $HOME-relative spot on both (iCloud).
 //
-// Generic + safe: matches any /Users/<user>/ or /home/<user>/ prefix, and only
-// remaps when the rewritten path actually EXISTS on this machine (so an
-// unrelated /Users/someone-else/... path is left untouched).
+// Resolution is by EXISTENCE, not by a fixed extension:
+//   - filenames may contain spaces (screenshots do),
+//   - the pasted path may omit the extension (e.g. CleanShot "...@2x"),
+//   - the path may be followed by trailing words ("read <path> and ...").
+// So from each /Users|home/<user>/ start we take the rest of the line, then
+// find the LONGEST prefix that resolves to a real local file — trying the
+// literal path and the path with a known media extension appended. Existence
+// gating also means an unrelated /Users/someone-else/... path is left untouched.
 //
 // UserPromptSubmit hooks CANNOT rewrite the prompt text, only inject context,
 // so this is advisory: Claude is TOLD the correct path and opens that instead.
@@ -30,28 +35,45 @@ try {
   const HOME = process.env.HOME || '';
   if (!HOME) process.exit(0);
 
-  // Match absolute paths under any user's home: /Users/<user>/... (macOS) or
-  // /home/<user>/... (linux). Username is one non-slash segment. Allow spaces in
-  // the filename (screenshots have them) by anchoring on a file extension rather
-  // than terminating at whitespace. Non-greedy to the first extension.
-  const re = /\/(?:Users|home)\/[^/\n'"`]+\/[^\n'"`]*?\.(?:png|jpe?g|gif|heic|heif|webp|tiff?|bmp|mov|mp4|m4a|pdf)/gi;
-  const homePrefixRe = /^\/(?:Users|home)\/[^/]+/;
+  // Extensions to probe when the literal path doesn't exist on disk.
+  const EXTS = ['', '.png', '.jpg', '.jpeg', '.gif', '.heic', '.heif', '.webp',
+                '.tif', '.tiff', '.bmp', '.mov', '.mp4', '.m4a', '.pdf'];
+  const exists = p => { try { return fs.statSync(p).isFile(); } catch { return false; } };
+
+  // Each candidate = a home-path start plus everything to end of line / quote.
+  const startRe = /\/(?:Users|home)\/[^/\n'"`]+\/[^\n'"`]*/g;
+  const prefixRe = /^(\/(?:Users|home)\/[^/]+)(\/.*)$/;
 
   const seen = new Set();
   const maps = [];
   let m;
-  while ((m = re.exec(prompt)) !== null) {
-    const orig = m[0];
-    const target = HOME + orig.replace(homePrefixRe, '');
-    if (orig === target) continue;        // already this machine's path
-    if (seen.has(orig)) continue;
-    seen.add(orig);
-    // Only remap when the file really exists here — avoids rewriting an
-    // unrelated home path that happens to match the shape.
-    let exists = false;
-    try { exists = fs.existsSync(target); } catch {}
-    if (!exists) continue;
-    maps.push({ orig, target });
+  while ((m = startRe.exec(prompt)) !== null) {
+    const candidate = m[0].replace(/\s+$/, '');   // drop trailing whitespace
+    const pm = prefixRe.exec(candidate);
+    if (!pm) continue;
+    const foreignPrefix = pm[1];                  // e.g. /Users/rioedwards
+    const tailFull = pm[2];                       // e.g. /Library/.../CleanShot ... @2x
+
+    // Longest-prefix existence probe: trim trailing space-delimited tokens so a
+    // real filename with internal spaces wins over the same path plus stray
+    // trailing words. At each length, also try appending a known extension.
+    const tokens = tailFull.split(' ');
+    let hit = null;
+    for (let i = tokens.length; i >= 1 && !hit; i--) {
+      const tailCand = tokens.slice(0, i).join(' ');
+      const localBase = HOME + tailCand;
+      for (const ext of EXTS) {
+        if (exists(localBase + ext)) {
+          hit = { orig: foreignPrefix + tailCand, target: localBase + ext };
+          break;
+        }
+      }
+    }
+    if (!hit) continue;
+    if (hit.orig === hit.target) continue;         // already this machine's path
+    if (seen.has(hit.orig)) continue;
+    seen.add(hit.orig);
+    maps.push(hit);
   }
 
   if (maps.length === 0) process.exit(0);
