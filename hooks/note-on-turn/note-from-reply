@@ -19,6 +19,13 @@ case "$AGENT_SPEAK" in
   on|1|true|yes) printf '%s' "$summary" | "$HOME/scripts/hooks/note-on-turn/speak-note" ;;
 esac
 
+# Write a local audio file of the summary into the agent-audio dir when the
+# audio-file toggle is on (replaces the old phone Shortcut). Self-detaches.
+AGENT_AUDIO_FILE="${AGENT_AUDIO_FILE:-off}"
+case "$AGENT_AUDIO_FILE" in
+  on|1|true|yes) printf '%s' "$summary" | "$HOME/scripts/hooks/note-on-turn/audio-note-to-file" ;;
+esac
+
 log_dir="$HOME/.cache/note-on-turn"
 mkdir -p "$log_dir"
 "$HOME/dev/agent-sessions/bin/index-session" >>"$log_dir/index-session.log" 2>&1 &

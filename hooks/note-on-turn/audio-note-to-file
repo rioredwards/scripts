@@ -1,0 +1,121 @@
+#!/bin/sh
+# stdin: reply summary. Synthesizes a local audio file into the agent-audio
+# iCloud dir and writes a metadata sidecar next to it. This replaces the old
+# phone Shortcut that produced these files from the text message.
+#
+# Engine: `grok` (xAI TTS via grok-tts, default) | `say` (macOS, offline).
+# Chosen by AGENT_AUDIO_FILE_ENGINE (agent-hooks profile) or the -e flag.
+# A Siri-shortcut engine will be added here later.
+#
+# Origin metadata (session/cwd/repo/transcript) is read from HOOK_* env vars
+# that the per-agent wrapper exports. Missing fields are written as "".
+#
+# Runs the synth detached so it never blocks the calling hook. Failures are
+# logged (never fall back to a different engine silently) and the text message
+# is unaffected either way.
+set -eu
+
+# Load profile so this works standalone too (env already set wins).
+# shellcheck source=/dev/null
+[ -f "$HOME/scripts/agent-hooks-env.sh" ] && . "$HOME/scripts/agent-hooks-env.sh"
+engine="${AGENT_AUDIO_FILE_ENGINE:-grok}"
+
+while getopts ":e:" opt; do
+  case "$opt" in
+    e) engine="$OPTARG" ;;
+    *) : ;;
+  esac
+done
+shift $((OPTIND - 1))
+
+summary="$(cat)"
+[ -n "$summary" ] || exit 0
+
+# Only generate on the designated host so a stowed profile doesn't make every
+# machine write to the same shared iCloud dir. Empty = any host.
+want_host="${AGENT_AUDIO_FILE_HOST:-}"
+if [ -n "$want_host" ] && [ "$want_host" != "$(hostname -s 2>/dev/null)" ]; then
+  exit 0
+fi
+
+# Strip markdown noise so speech sounds natural.
+speech="$(printf '%s' "$summary" | sed 's/[*_`#>~|]//g')"
+[ -n "$speech" ] || exit 0
+
+dir="${AGENT_AUDIO_FILE_DIR:-$HOME/Library/Mobile Documents/iCloud~is~workflow~my~workflows/Documents/agent-audio}"
+mkdir -p "$dir"
+
+log_dir="$HOME/.cache/note-on-turn"
+mkdir -p "$log_dir"
+log="$log_dir/audio-note.log"
+
+# File extension follows the engine.
+case "$engine" in
+  grok) ext="mp3" ;;
+  say)  ext="aiff" ;;
+  *) printf '%s unknown engine "%s"\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$engine" >>"$log"; exit 2 ;;
+esac
+
+# Slug the summary into a filename that matches the existing convention:
+# leading dash, dash-joined words, capped. The Raycast extension prettifies
+# this back into a readable title.
+slug="$(printf '%s' "$summary" \
+  | sed 's/[*_`#>~|]//g' \
+  | tr '\n\t' '  ' \
+  | sed -E 's/[^A-Za-z0-9]+/-/g; s/^-+//; s/-+$//' \
+  | cut -c1-48 \
+  | sed -E 's/-+$//')"
+[ -n "$slug" ] || slug="note"
+base="-$slug"
+
+# Avoid clobbering an identical earlier summary.
+out="$dir/$base.$ext"
+n=2
+while [ -e "$out" ]; do
+  out="$dir/$base-$n.$ext"
+  n=$((n + 1))
+done
+sidecar="${out%.$ext}.json"
+
+cwd="${HOOK_CWD:-}"
+
+(
+  # Synthesize the audio. On failure: log and stop — no silent engine swap.
+  case "$engine" in
+    grok)
+      if ! printf '%s' "$speech" | "$HOME/scripts/grok-tts" -o "$out" >/dev/null 2>>"$log"; then
+        printf '%s grok-tts failed: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$out" >>"$log"
+        exit 1
+      fi
+      ;;
+    say)
+      if ! say -o "$out" -- "$speech" >/dev/null 2>>"$log"; then
+        printf '%s say failed: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$out" >>"$log"
+        exit 1
+      fi
+      ;;
+  esac
+
+  # Origin metadata sidecar (written only after the audio exists so there are
+  # no orphan sidecars). Migrates into the sessions store later.
+  repo=""
+  repo_name=""
+  if [ -n "$cwd" ] && [ -d "$cwd" ]; then
+    repo="$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null || true)"
+    [ -n "$repo" ] && repo_name="$(basename "$repo")"
+  fi
+
+  jq -n \
+    --arg audio "$(basename "$out")" \
+    --arg summary "$summary" \
+    --arg agent "${HOOK_AGENT:-}" \
+    --arg session_id "${HOOK_SESSION_ID:-}" \
+    --arg cwd "$cwd" \
+    --arg repo "$repo" \
+    --arg repo_name "$repo_name" \
+    --arg transcript_path "${HOOK_TRANSCRIPT_PATH:-}" \
+    --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --arg engine "$engine" \
+    '{audio:$audio, summary:$summary, agent:$agent, session_id:$session_id, cwd:$cwd, repo:$repo, repo_name:$repo_name, transcript_path:$transcript_path, created_at:$created_at, engine:$engine}' \
+    > "$sidecar" 2>>"$log" || printf '%s sidecar write failed: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$sidecar" >>"$log"
+) &
