@@ -1,29 +1,31 @@
 #!/bin/sh
 # Shared core for all agent note-on-turn hooks.
-# stdin: reply text. Summarizes, texts to phone, optionally speaks, rebuilds session index.
+# stdin: reply text. Adapters export optional HOOK_* origin metadata.
 set -eu
+
+scripts_root="${SCRIPTS:-$HOME/scripts}"
 
 # Load agent-hooks profile (AGENT_SPEAK, etc.). Env vars already set win over profile.
 # shellcheck source=/dev/null
-. "$HOME/scripts/agent-hooks-env.sh"
+. "$scripts_root/agent-hooks-env.sh"
 AGENT_SPEAK="${AGENT_SPEAK:-off}"
 
 text="$(cat)"
 [ -n "$text" ] || exit 0
 
-summary="$(printf '%s' "$text" | "$HOME/scripts/summarize-for-note")"
-printf '%s' "$summary" | "$HOME/scripts/sc" text-phone
+summary="$(printf '%s' "$text" | "$scripts_root/summarize-for-note")"
+printf '%s' "$summary" | "$scripts_root/sc" text-phone
 
 # Speak the summary aloud when the voice toggle is on.
 case "$AGENT_SPEAK" in
-  on|1|true|yes) printf '%s' "$summary" | "$HOME/scripts/hooks/note-on-turn/speak-note" ;;
+  on|1|true|yes) printf '%s' "$summary" | "$scripts_root/hooks/note-on-turn/speak-note" ;;
 esac
 
 # Write a local audio file of the summary into the agent-audio dir when the
 # audio-file toggle is on (replaces the old phone Shortcut). Self-detaches.
 AGENT_AUDIO_FILE="${AGENT_AUDIO_FILE:-off}"
 case "$AGENT_AUDIO_FILE" in
-  on|1|true|yes) printf '%s' "$summary" | "$HOME/scripts/hooks/note-on-turn/audio-note-to-file" ;;
+  on|1|true|yes) printf '%s' "$summary" | "$scripts_root/hooks/note-on-turn/audio-note-to-file" ;;
 esac
 
 log_dir="$HOME/.cache/note-on-turn"

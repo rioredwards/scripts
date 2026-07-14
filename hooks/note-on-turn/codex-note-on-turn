@@ -1,4 +1,14 @@
 #!/bin/sh
 set -eu
-jq -r '.last_assistant_message // empty' | "$HOME/scripts/hooks/note-on-turn/note-from-reply"
-echo '{"continue": true}'
+
+scripts_root="${SCRIPTS:-$HOME/scripts}"
+payload="$(cat)"
+
+HOOK_AGENT=codex
+HOOK_SESSION_ID="$(printf '%s' "$payload" | jq -r '.session_id // empty')"
+HOOK_CWD="$(printf '%s' "$payload" | jq -r '.cwd // empty')"
+HOOK_TRANSCRIPT_PATH="$(printf '%s' "$payload" | jq -r '.transcript_path // empty')"
+export HOOK_AGENT HOOK_SESSION_ID HOOK_CWD HOOK_TRANSCRIPT_PATH
+
+printf '%s' "$payload" | jq -r '.last_assistant_message // empty' | "$scripts_root/hooks/note-on-turn/note-from-reply"
+printf '%s\n' '{"continue": true}'
