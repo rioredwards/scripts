@@ -99,6 +99,10 @@ if ! printf '%s' "$recap" | "$HOME/scripts/grok-tts" -o "$tmp" >/dev/null 2>&1; 
 fi
 mv -f "$tmp" "$out"
 
+# Duration (whole seconds) via afinfo, for the UI to show track length. Best-effort.
+duration="$(afinfo "$out" 2>/dev/null | awk '/estimated duration/ {print int($3)}')"
+[ -n "$duration" ] || duration=0
+
 # Metadata sidecar (mirrors the turn-note sidecars so the Raycast UI can show
 # the transcript + origin). Best-effort; failure here doesn't fail the recap.
 jq -n \
@@ -110,8 +114,9 @@ jq -n \
   --arg kind "repo-recap" \
   --arg engine "grok" \
   --arg model "$model" \
+  --argjson duration_seconds "$duration" \
   --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  '{audio:$audio, summary:$summary, repo:$repo, repo_name:$repo_name, head:$head, kind:$kind, engine:$engine, model:$model, created_at:$created_at}' \
+  '{audio:$audio, summary:$summary, repo:$repo, repo_name:$repo_name, head:$head, kind:$kind, engine:$engine, model:$model, duration_seconds:$duration_seconds, created_at:$created_at}' \
   >"$sidecar" 2>/dev/null || true
 
 log "done: $out"
