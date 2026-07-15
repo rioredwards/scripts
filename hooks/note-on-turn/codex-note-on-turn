@@ -10,5 +10,13 @@ HOOK_CWD="$(printf '%s' "$payload" | jq -r '.cwd // empty')"
 HOOK_TRANSCRIPT_PATH="$(printf '%s' "$payload" | jq -r '.transcript_path // empty')"
 export HOOK_AGENT HOOK_SESSION_ID HOOK_CWD HOOK_TRANSCRIPT_PATH
 
-printf '%s' "$payload" | jq -r '.last_assistant_message // empty' | "$scripts_root/hooks/note-on-turn/note-from-reply"
+reply="$(printf '%s' "$payload" | jq -r '.last_assistant_message // empty')"
+
+if [ -n "$reply" ]; then
+  # Fully detach phone delivery so Codex can complete the Stop hook now.
+  (
+    printf '%s' "$reply" | "$scripts_root/hooks/note-on-turn/note-from-reply"
+  ) </dev/null >/dev/null 2>&1 &
+fi
+
 printf '%s\n' '{"continue": true}'
