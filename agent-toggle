@@ -1,0 +1,91 @@
+#!/bin/sh
+# agent-toggle — flip machine-local agent-hook knobs from anywhere (incl. a phone
+# Shortcut over SSH). Writes to ~/.config/agent-hooks/local.sh, which wins over
+# the dotfiles-synced agent-hooks profile, so a remote flip can't be reverted by
+# an auto-sync. Hooks re-read this every turn — a change takes effect next turn,
+# no restart.
+#
+# Usage:
+#   agent-toggle                     # list every knob + current state
+#   agent-toggle <knob>              # show one knob
+#   agent-toggle <knob> on|off|toggle
+#
+# Knobs (friendly name -> env var):
+#   text         AGENT_TEXT         reply summary -> text to phone
+#   audio        AGENT_AUDIO_FILE   reply -> grok TTS mp3 -> iCloud   ($ grok)
+#   spin-check   AGENT_SPIN_CHECK   every-N-tool outside-model sanity ($ codex)
+#   speak        AGENT_SPEAK        speak reply aloud on this mac (say)
+#   perm-watch   AGENT_PERM_WATCH   watch for permission dialogs
+#   write-guard  AGY_WRITE_GUARD    block risky writes  (SAFETY RAIL)
+set -eu
+
+local_dir="$HOME/.config/agent-hooks"
+local_file="$local_dir/local.sh"
+
+KNOBS="text audio spin-check speak perm-watch write-guard"
+
+# friendly name -> env key
+knob_key() {
+  case "$1" in
+    text|sms)              echo AGENT_TEXT ;;
+    audio)                 echo AGENT_AUDIO_FILE ;;
+    spin-check|spin)       echo AGENT_SPIN_CHECK ;;
+    speak)                 echo AGENT_SPEAK ;;
+    perm-watch|perm)       echo AGENT_PERM_WATCH ;;
+    write-guard|guard)     echo AGY_WRITE_GUARD ;;
+    *) return 1 ;;
+  esac
+}
+
+# effective value of an env key, resolved through the real loader (profile + local).
+current() {
+  _ck="$1"
+  _cv="$(
+    . "$HOME/scripts/agent-hooks-env.sh" >/dev/null 2>&1 || true
+    eval "printf '%s' \"\${$_ck:-off}\""
+  )"
+  case "$_cv" in on|1|true|yes) echo on ;; *) echo off ;; esac
+}
+
+# rewrite one key in the local override, preserving the other lines
+set_state() {
+  key="$1"; state="$2"
+  mkdir -p "$local_dir"
+  tmp="$local_file.tmp.$$"
+  if [ -f "$local_file" ]; then
+    grep -v "^export $key=" "$local_file" > "$tmp" 2>/dev/null || : > "$tmp"
+  else
+    : > "$tmp"
+  fi
+  printf 'export %s=%s\n' "$key" "$state" >> "$tmp"
+  mv -f "$tmp" "$local_file"
+}
+
+list_all() {
+  for k in $KNOBS; do
+    env_key="$(knob_key "$k")"
+    printf '%-12s %s\n' "$k" "$(current "$env_key")"
+  done
+}
+
+# no args -> list everything
+if [ "$#" -eq 0 ] || [ "${1:-}" = status ] || [ "${1:-}" = ls ]; then
+  list_all
+  exit 0
+fi
+
+case "${1:-}" in -h|--help|help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;; esac
+
+knob="$1"
+env_key="$(knob_key "$knob")" || { echo "agent-toggle: unknown knob '$knob' (one of: $KNOBS)" >&2; exit 2; }
+action="${2:-show}"
+
+case "$action" in
+  show)   echo "$knob: $(current "$env_key")" ;;
+  on|off) set_state "$env_key" "$action"; echo "$knob: $action" ;;
+  toggle)
+    if [ "$(current "$env_key")" = on ]; then set_state "$env_key" off; else set_state "$env_key" on; fi
+    echo "$knob: $(current "$env_key")"
+    ;;
+  *) echo "agent-toggle: unknown action '$action' (on|off|toggle)" >&2; exit 2 ;;
+esac

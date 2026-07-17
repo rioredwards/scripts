@@ -14,7 +14,12 @@ text="$(cat)"
 [ -n "$text" ] || exit 0
 
 summary="$(printf '%s' "$text" | "$scripts_root/summarize-for-note")"
-printf '%s' "$summary" | "$scripts_root/sc" text-phone
+
+# Text the summary to Rio's phone when the text toggle is on.
+AGENT_TEXT="${AGENT_TEXT:-on}"
+case "$AGENT_TEXT" in
+  on|1|true|yes) printf '%s' "$summary" | "$scripts_root/sc" text-phone ;;
+esac
 
 # Speak the summary aloud when the voice toggle is on.
 case "$AGENT_SPEAK" in
