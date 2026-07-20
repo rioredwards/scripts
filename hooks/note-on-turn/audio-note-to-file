@@ -10,9 +10,11 @@
 # Origin metadata (session/cwd/repo/transcript) is read from HOOK_* env vars
 # that the per-agent wrapper exports. Missing fields are written as "".
 #
-# Runs the synth detached so it never blocks the calling hook. Failures are
-# logged (never fall back to a different engine silently) and the text message
-# is unaffected either way.
+# Runs the synth detached so it never blocks the calling hook. Pass -w to wait
+# instead: synth runs in the foreground and the audio path is printed on
+# success (for callers like content-pipeline that need the file now). Failures
+# are logged (never fall back to a different engine silently) and the text
+# message is unaffected either way.
 set -eu
 
 # Load profile so this works standalone too (env already set wins).
@@ -20,9 +22,11 @@ set -eu
 [ -f "$HOME/scripts/agent-hooks-env.sh" ] && . "$HOME/scripts/agent-hooks-env.sh"
 engine="${AGENT_AUDIO_FILE_ENGINE:-grok}"
 
-while getopts ":e:" opt; do
+wait_mode=0
+while getopts ":e:w" opt; do
   case "$opt" in
     e) engine="$OPTARG" ;;
+    w) wait_mode=1 ;;
     *) : ;;
   esac
 done
@@ -79,7 +83,7 @@ sidecar="${out%.$ext}.json"
 
 cwd="${HOOK_CWD:-}"
 
-(
+synth_and_sidecar() {
   # Synthesize the audio. On failure: log and stop — no silent engine swap.
   case "$engine" in
     grok)
@@ -118,4 +122,11 @@ cwd="${HOOK_CWD:-}"
     --arg engine "$engine" \
     '{audio:$audio, summary:$summary, agent:$agent, session_id:$session_id, cwd:$cwd, repo:$repo, repo_name:$repo_name, transcript_path:$transcript_path, created_at:$created_at, engine:$engine}' \
     > "$sidecar" 2>>"$log" || printf '%s sidecar write failed: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$sidecar" >>"$log"
-) &
+}
+
+if [ "$wait_mode" -eq 1 ]; then
+  synth_and_sidecar
+  printf '%s\n' "$out"
+else
+  synth_and_sidecar &
+fi
