@@ -23,10 +23,12 @@ set -eu
 engine="${AGENT_AUDIO_FILE_ENGINE:-grok}"
 
 wait_mode=0
-while getopts ":e:w" opt; do
+structured_file=""
+while getopts ":e:ws:" opt; do
   case "$opt" in
     e) engine="$OPTARG" ;;
     w) wait_mode=1 ;;
+    s) structured_file="$OPTARG" ;;
     *) : ;;
   esac
 done
@@ -109,6 +111,13 @@ synth_and_sidecar() {
     [ -n "$repo" ] && repo_name="$(basename "$repo")"
   fi
 
+  # Optional structured summary (-s FILE): a JSON object merged into the
+  # sidecar as .structured. Invalid JSON fails the jq call and is logged.
+  structured='null'
+  if [ -n "$structured_file" ] && [ -f "$structured_file" ]; then
+    structured="$(cat "$structured_file")"
+  fi
+
   jq -n \
     --arg audio "$(basename "$out")" \
     --arg summary "$summary" \
@@ -120,7 +129,9 @@ synth_and_sidecar() {
     --arg transcript_path "${HOOK_TRANSCRIPT_PATH:-}" \
     --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     --arg engine "$engine" \
-    '{audio:$audio, summary:$summary, agent:$agent, session_id:$session_id, cwd:$cwd, repo:$repo, repo_name:$repo_name, transcript_path:$transcript_path, created_at:$created_at, engine:$engine}' \
+    --argjson structured "$structured" \
+    '{audio:$audio, summary:$summary, agent:$agent, session_id:$session_id, cwd:$cwd, repo:$repo, repo_name:$repo_name, transcript_path:$transcript_path, created_at:$created_at, engine:$engine}
+     + (if $structured == null then {} else {structured: $structured} end)' \
     > "$sidecar" 2>>"$log" || printf '%s sidecar write failed: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$sidecar" >>"$log"
 }
 
