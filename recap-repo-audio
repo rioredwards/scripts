@@ -77,7 +77,7 @@ fi
 
 # 1. Recon: budget-bounded context bundle for the repo.
 log "gathering context ($name @ $head$dirty, budget $budget)..."
-bundle="$(cd "$root" && "$HOME/dev/agent-skills/general/re-entry-recap/gather-context.sh" --budget "$budget" 2>/dev/null)" ||
+bundle="$(cd "$root" && "$HOME/dev/agent-skills/plugins/utils/scripts/gather-context.sh" --budget "$budget" 2>/dev/null)" ||
   { echo "recap-repo-audio: gather-context failed for $name" >&2; exit 1; }
 [ -n "$bundle" ] || { echo "recap-repo-audio: empty context bundle for $name" >&2; exit 1; }
 
