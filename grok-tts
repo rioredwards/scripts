@@ -17,7 +17,7 @@
 #
 # Options:
 #   -i FILE     Read input text from FILE (overrides args/stdin)
-#   -v VOICE    Voice id: Leo (default), Eve, Ara, Rex, Sal
+#   -v VOICE    Voice id: Altair (default), Leo, Eve, Ara, Rex, Sal
 #   -l LANG     BCP-47 language code or "auto" (default: en)
 #   -o FILE     Output mp3 path (default: temp file in $TMPDIR)
 #   -f FORMAT   "sr:br" mp3 sample_rate:bit_rate (default: 44100:128000)
@@ -36,7 +36,7 @@ set -euo pipefail
 API_URL="https://api.x.ai/v1/tts"
 MAX_CHARS=15000
 
-voice="Leo"
+voice="Altair"
 lang="en"
 outfile=""
 infile=""
