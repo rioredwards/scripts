@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+# pr-review — review a GitHub PR locally with Claude Code.
+#
+# Usage: pr-review [--model MODEL_ID] [--wait SECONDS] [PR_NUMBER]
+#   --model    Claude model (default: claude-opus-4-8).
+#   --wait     Sleep before starting, so a just-completed `git push` has landed
+#              on GitHub before the diff is fetched. Used by the pre-push hook.
+#   PR_NUMBER  PR to review (default: the open PR for the current branch).
+#
+# Authenticates through the Claude Code CLI's own login (subscription), NOT an
+# Anthropic API key — this is the whole point, so it costs no API credits. The
+# GitHub Actions counterpart (install-pr-review) uses secrets.ANTHROPIC_API_KEY
+# and does spend them.
+#
+# Requires: claude (logged in), gh (authed).
+#
+# Difference from the Actions version: no inline comments. The GitHub inline-
+# comment MCP tool only exists inside claude-code-action, so findings land in
+# one summary comment with file:line references instead.
+
+set -euo pipefail
+
+MODEL="claude-opus-4-8"
+WAIT=0
+PR=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --model) MODEL="${2:?--model needs a value}"; shift 2 ;;
+    --wait)  WAIT="${2:?--wait needs a value}"; shift 2 ;;
+    -h|--help) sed -n '2,18p' "$0"; exit 0 ;;
+    *) PR="$1"; shift ;;
+  esac
+done
+
+command -v claude >/dev/null || { echo "ERROR: claude CLI not found on PATH" >&2; exit 1; }
+command -v gh >/dev/null     || { echo "ERROR: gh not found on PATH" >&2; exit 1; }
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 \
+  || { echo "ERROR: not a git repo: $PWD" >&2; exit 1; }
+
+[[ "$WAIT" -gt 0 ]] && sleep "$WAIT"
+
+REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner) \
+  || { echo "ERROR: no GitHub remote (gh can't resolve repo)" >&2; exit 1; }
+
+if [[ -z "$PR" ]]; then
+  PR=$(gh pr view --json number -q .number 2>/dev/null) \
+    || { echo "ERROR: no open PR for the current branch; pass a PR number" >&2; exit 1; }
+fi
+
+echo "pr-review: reviewing ${REPO}#${PR} with ${MODEL}" >&2
+
+# Prompt is kept in step with the Actions workflow that install-pr-review
+# generates, minus the inline-comment instructions, so both reviewers judge by
+# the same standard.
+PROMPT=$(cat <<EOF
+REPO: ${REPO}
+PR NUMBER: ${PR}
+
+You are an expert code reviewer. Be terse and direct — no praise, no filler.
+Only comment on things that matter.
+
+Process:
+1. Run \`gh pr view ${PR}\` to understand the PR's intent.
+2. Run \`gh pr diff ${PR}\` to read the full diff.
+3. If CLAUDE.md or README.md exists in the repo root, read it and enforce its
+   conventions.
+4. Before reporting any finding, open the surrounding source files and verify
+   it against the actual code — never judge from the diff hunk alone. Context
+   outside the hunk often resolves what looks like a bug.
+
+Review priorities (highest first):
+1. Bugs and logic errors — code that won't do what it's meant to
+2. Security — injection, secrets committed, unsafe input handling, overly
+   broad permissions
+3. Silent failure — swallowed errors, catch-and-continue, fallbacks that hide
+   problems (prefer fail fast and loud)
+4. Portability — hardcoded absolute paths or usernames; require \$HOME/~ or
+   relative paths
+5. Dead code, unused files, needless complexity
+
+Rules:
+- Report only issues you are confident about after verification. A false
+  positive costs more than a miss.
+- Max 10 findings — keep the most severe, note that the rest were folded.
+- No style/formatting nits unless they change meaning. Never restate what the
+  code does.
+
+Output — post exactly ONE comment with \`gh pr comment ${PR} --body ...\`:
+- First line is the verdict: ✅ approve or ❌ needs changes.
+- Then one finding per line, severity-tagged 🚨 blocker / ⚠️ should fix /
+  💡 optional, each starting with \`path/to/file.py:LINE\` so it is clickable.
+- If nothing is wrong, the comment body is exactly "✅ LGTM" — no invented
+  nitpicks.
+EOF
+)
+
+exec claude -p "$PROMPT" \
+  --model "$MODEL" \
+  --allowed-tools "Read,Grep,Glob,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh issue view:*),Bash(gh pr comment:*)"

@@ -9,22 +9,41 @@
 #   agent-toggle                     # list every knob + current state
 #   agent-toggle <knob>              # show one knob
 #   agent-toggle <knob> on|off|toggle
+#   agent-toggle set <knob|KEY> VAL  # set any knob to a literal value
+#   agent-toggle unset <knob|KEY>    # drop the local override (back to profile)
+#   agent-toggle --json              # every knob as JSON (value + where it came from)
 #
-# Knobs (friendly name -> env var):
+# Toggles (friendly name -> env var):
 #   text         AGENT_TEXT         reply summary -> text to phone
 #   audio        AGENT_AUDIO_FILE   reply -> grok TTS mp3 -> iCloud   ($ grok)
 #   spin-check   AGENT_SPIN_CHECK   every-N-tool outside-model sanity ($ codex)
 #   speak        AGENT_SPEAK        speak reply aloud on this mac (say)
 #   perm-watch   AGENT_PERM_WATCH   watch for permission dialogs
 #   write-guard  AGY_WRITE_GUARD    block risky writes  (SAFETY RAIL)
+#   auto-cue     AGENT_AUTOMATION_CUE  fullscreen "hands off" cue while an agent
+#                                      drives the GUI (click/screenshot/app)
+#
+# Settings (free-value knobs, same precedence):
+#   speak-engine   AGENT_SPEAK_ENGINE         say | grok
+#   audio-engine   AGENT_AUDIO_FILE_ENGINE    grok | say
+#   audio-ttl      AGENT_AUDIO_FILE_TTL_MIN   auto-off after N min (0 = never)
+#   audio-host     AGENT_AUDIO_FILE_HOST      only this `hostname -s` generates
+#   spin-every     AGENT_SPIN_CHECK_EVERY     fire every Nth tool call
+#   spin-model     AGENT_SPIN_CHECK_MODEL     reviewer model
+#   spin-provider  AGENT_SPIN_CHECK_PROVIDER  agent-router provider
+#   spin-timeout   AGENT_SPIN_CHECK_TIMEOUT   seconds to wait on the reviewer
+#   perm-debounce  AGENT_PERM_WATCH_DEBOUNCE  seconds before repeating a dialog
+#   cue-stale      AGENT_AUTOMATION_CUE_STALE minutes before a stranded cue clears
 set -eu
 
 local_dir="$HOME/.config/agent-hooks"
 local_file="$local_dir/local.sh"
+profile_file="${AGENT_HOOKS_PROFILE:-$HOME/.dotfiles/zsh/profiles/agent-hooks.sh}"
 
-KNOBS="text audio spin-check speak perm-watch write-guard"
+KNOBS="text audio spin-check speak perm-watch write-guard auto-cue"
+VALUE_KNOBS="speak-engine audio-engine audio-ttl audio-host spin-every spin-model spin-provider spin-timeout perm-debounce cue-stale"
 
-# friendly name -> env key
+# friendly name -> env key. Accepts the env key itself so callers can pass either.
 knob_key() {
   case "$1" in
     text|sms)              echo AGENT_TEXT ;;
@@ -33,18 +52,69 @@ knob_key() {
     speak)                 echo AGENT_SPEAK ;;
     perm-watch|perm)       echo AGENT_PERM_WATCH ;;
     write-guard|guard)     echo AGY_WRITE_GUARD ;;
+    auto-cue|cue)          echo AGENT_AUTOMATION_CUE ;;
+    speak-engine)          echo AGENT_SPEAK_ENGINE ;;
+    audio-engine)          echo AGENT_AUDIO_FILE_ENGINE ;;
+    audio-ttl)             echo AGENT_AUDIO_FILE_TTL_MIN ;;
+    audio-host)            echo AGENT_AUDIO_FILE_HOST ;;
+    spin-every)            echo AGENT_SPIN_CHECK_EVERY ;;
+    spin-model)            echo AGENT_SPIN_CHECK_MODEL ;;
+    spin-provider)         echo AGENT_SPIN_CHECK_PROVIDER ;;
+    spin-timeout)          echo AGENT_SPIN_CHECK_TIMEOUT ;;
+    perm-debounce)         echo AGENT_PERM_WATCH_DEBOUNCE ;;
+    cue-stale)             echo AGENT_AUTOMATION_CUE_STALE ;;
+    AGENT_*|AGY_*)         echo "$1" ;;
     *) return 1 ;;
   esac
 }
 
-# effective value of an env key, resolved through the real loader (profile + local).
-current() {
-  _ck="$1"
-  _cv="$(
+# every env key this script knows about — used to strip ambient values when
+# asking "what would the files alone say?"
+all_keys() {
+  for _ak in $KNOBS $VALUE_KNOBS; do knob_key "$_ak"; done
+}
+
+# raw value of an env key as the hooks would see it right now (ambient env wins,
+# exactly like a real hook run). Empty when unset everywhere.
+raw_current() {
+  _rk="$1"
+  (
     . "$HOME/scripts/agent-hooks-env.sh" >/dev/null 2>&1 || true
-    eval "printf '%s' \"\${$_ck:-off}\""
-  )"
-  case "$_cv" in on|1|true|yes) echo on ;; *) echo off ;; esac
+    eval "printf '%s' \"\${$_rk:-}\""
+  )
+}
+
+# raw value from the config files alone, with any ambient value stripped first.
+# Differs from raw_current only when something exported an override into this
+# shell — which is what makes the `env` source detectable.
+raw_file() {
+  _fk="$1"
+  (
+    for _uk in $(all_keys); do unset "$_uk" 2>/dev/null || true; done
+    . "$HOME/scripts/agent-hooks-env.sh" >/dev/null 2>&1 || true
+    eval "printf '%s' \"\${$_fk:-}\""
+  )
+}
+
+# where a value comes from: env (exported into this shell) | local (machine
+# override) | profile (synced default) | default (nothing sets it; the hook's
+# own fallback applies).
+source_of() {
+  _sk="$1"
+  if [ "$(raw_current "$_sk")" != "$(raw_file "$_sk")" ]; then
+    echo env
+  elif [ -f "$local_file" ] && grep -qE "^(export )?${_sk}=" "$local_file"; then
+    echo local
+  elif [ -f "$profile_file" ] && grep -qE "^(export )?${_sk}=" "$profile_file"; then
+    echo profile
+  else
+    echo default
+  fi
+}
+
+# effective on/off state of a toggle, resolved through the real loader.
+current() {
+  case "$(raw_current "$1")" in on|1|true|yes) echo on ;; *) echo off ;; esac
 }
 
 # rewrite one key in the local override, preserving the other lines
@@ -52,19 +122,72 @@ set_state() {
   key="$1"; state="$2"
   mkdir -p "$local_dir"
   tmp="$local_file.tmp.$$"
+  # Drop the knob's own line AND its _SINCE stamp; both get rewritten below.
   if [ -f "$local_file" ]; then
-    grep -v "^export $key=" "$local_file" > "$tmp" 2>/dev/null || : > "$tmp"
+    grep -vE "^export ${key}(_SINCE)?=" "$local_file" > "$tmp" 2>/dev/null || : > "$tmp"
   else
     : > "$tmp"
   fi
   printf 'export %s=%s\n' "$key" "$state" >> "$tmp"
+  # Stamp the switch-on time so a time-based auto-off can measure the knob's age
+  # (see AGENT_AUDIO_FILE_TTL_MIN). Generic across knobs; only audio uses it now.
+  if [ "$state" = on ]; then
+    printf 'export %s_SINCE=%s\n' "$key" "$(date +%s)" >> "$tmp"
+  fi
   mv -f "$tmp" "$local_file"
+}
+
+# drop a key's local override entirely, so the synced profile takes over again
+unset_state() {
+  key="$1"
+  [ -f "$local_file" ] || return 0
+  tmp="$local_file.tmp.$$"
+  grep -vE "^export ${key}(_SINCE)?=" "$local_file" > "$tmp" 2>/dev/null || : > "$tmp"
+  mv -f "$tmp" "$local_file"
+}
+
+# local.sh is eval'd by the loader, so a value carrying quotes, `$`, or a
+# newline would be executed. Allow only what a knob legitimately needs.
+validate_value() {
+  case "$1" in
+    "") return 0 ;;
+    *[!A-Za-z0-9._-]*)
+      echo "agent-toggle: refusing value '$1' — only letters, digits, dot, underscore, dash" >&2
+      return 1 ;;
+  esac
+}
+
+json_escape() {
+  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+}
+
+json_row() {
+  printf '{"name":"%s","key":"%s","kind":"%s","value":"%s","source":"%s"}' \
+    "$(json_escape "$1")" "$(json_escape "$2")" "$3" \
+    "$(json_escape "$(raw_current "$2")")" "$(source_of "$2")"
+}
+
+list_json() {
+  printf '['
+  sep=""
+  for k in $KNOBS; do
+    printf '%s' "$sep"; json_row "$k" "$(knob_key "$k")" toggle; sep=","
+  done
+  for k in $VALUE_KNOBS; do
+    printf '%s' "$sep"; json_row "$k" "$(knob_key "$k")" value; sep=","
+  done
+  printf ']\n'
 }
 
 list_all() {
   for k in $KNOBS; do
     env_key="$(knob_key "$k")"
-    printf '%-12s %s\n' "$k" "$(current "$env_key")"
+    printf '%-14s %-16s %s\n' "$k" "$(current "$env_key")" "($(source_of "$env_key"))"
+  done
+  for k in $VALUE_KNOBS; do
+    env_key="$(knob_key "$k")"
+    val="$(raw_current "$env_key")"
+    printf '%-14s %-16s %s\n' "$k" "${val:-—}" "($(source_of "$env_key"))"
   done
 }
 
@@ -74,11 +197,41 @@ if [ "$#" -eq 0 ] || [ "${1:-}" = status ] || [ "${1:-}" = ls ]; then
   exit 0
 fi
 
-case "${1:-}" in -h|--help|help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;; esac
+case "${1:-}" in
+  --json) list_json; exit 0 ;;
+  -h|--help|help) sed -n '2,35p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  set)
+    [ "$#" -ge 3 ] || { echo "agent-toggle: usage: agent-toggle set <knob|KEY> VALUE" >&2; exit 2; }
+    key="$(knob_key "$2")" || { echo "agent-toggle: unknown knob '$2'" >&2; exit 2; }
+    validate_value "$3" || exit 2
+    set_state "$key" "$3"
+    echo "$2: ${3:-—}"
+    exit 0 ;;
+  unset)
+    [ "$#" -ge 2 ] || { echo "agent-toggle: usage: agent-toggle unset <knob|KEY>" >&2; exit 2; }
+    key="$(knob_key "$2")" || { echo "agent-toggle: unknown knob '$2'" >&2; exit 2; }
+    unset_state "$key"
+    echo "$2: $(raw_current "$key" || true) ($(source_of "$key"))"
+    exit 0 ;;
+esac
 
 knob="$1"
-env_key="$(knob_key "$knob")" || { echo "agent-toggle: unknown knob '$knob' (one of: $KNOBS)" >&2; exit 2; }
+env_key="$(knob_key "$knob")" || { echo "agent-toggle: unknown knob '$knob' (one of: $KNOBS $VALUE_KNOBS)" >&2; exit 2; }
 action="${2:-show}"
+
+# Value knobs have no on/off state — show the value, and treat a bare
+# `agent-toggle <knob> <value>` as a set.
+case " $VALUE_KNOBS " in
+  *" $knob "*)
+    if [ "$action" = show ]; then
+      echo "$knob: $(raw_current "$env_key" || true) ($(source_of "$env_key"))"
+    else
+      validate_value "$action" || exit 2
+      set_state "$env_key" "$action"
+      echo "$knob: ${action:-—}"
+    fi
+    exit 0 ;;
+esac
 
 case "$action" in
   show)   echo "$knob: $(current "$env_key")" ;;

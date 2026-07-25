@@ -28,9 +28,33 @@ esac
 
 # Write a local audio file of the summary into the agent-audio dir when the
 # audio-file toggle is on (replaces the old phone Shortcut). Self-detaches.
+#
+# Self-expiring: if the toggle has been on longer than AGENT_AUDIO_FILE_TTL_MIN
+# (default 60), auto-disable it and text Rio — a forgotten toggle otherwise
+# burns TTS credits all day. The switch-on time is stamped by `agent-toggle` as
+# AGENT_AUDIO_FILE_SINCE; if it's missing (enabled before this guard, or via the
+# profile default), we stamp it now so the cap always applies. TTL_MIN=0 disables.
 AGENT_AUDIO_FILE="${AGENT_AUDIO_FILE:-off}"
+synth_audio() { printf '%s' "$summary" | "$scripts_root/hooks/note-on-turn/audio-note-to-file"; }
 case "$AGENT_AUDIO_FILE" in
-  on|1|true|yes) printf '%s' "$summary" | "$scripts_root/hooks/note-on-turn/audio-note-to-file" ;;
+  on|1|true|yes)
+    ttl_min="${AGENT_AUDIO_FILE_TTL_MIN:-60}"
+    case "$ttl_min" in ''|*[!0-9]*) ttl_min=60 ;; esac
+    since="${AGENT_AUDIO_FILE_SINCE:-}"
+    case "$since" in *[!0-9]*) since="" ;; esac
+    if [ "$ttl_min" -eq 0 ]; then
+      synth_audio
+    elif [ -z "$since" ]; then
+      "$scripts_root/agent-toggle" audio on >/dev/null 2>&1 || true
+      synth_audio
+    elif [ "$(( $(date +%s) - since ))" -gt "$(( ttl_min * 60 ))" ]; then
+      "$scripts_root/agent-toggle" audio off >/dev/null 2>&1 || true
+      printf '🔇 Agent audio auto-off after %sm (forgotten toggle — TTS credits saved)' "$ttl_min" \
+        | "$scripts_root/sc" text-phone >/dev/null 2>&1 || true
+    else
+      synth_audio
+    fi
+    ;;
 esac
 
 log_dir="$HOME/.cache/note-on-turn"
