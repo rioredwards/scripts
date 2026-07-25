@@ -1,0 +1,161 @@
+#!/bin/sh
+# Cap the agent-audio dir by total size, newest first.
+#
+# Replaces the count-based rotation that used to live inline in
+# hooks/note-on-turn/audio-note-to-file, which had three problems: it only
+# globbed *.mp3/*.aiff (so .caf and .m4a files accumulated forever — 450MB of
+# them by 2026-07-25), it capped by file count rather than size, and it only ran
+# after a successful synth (so with audio generation off, nothing ever pruned).
+#
+# Deletes oldest-first until the dir fits under AGENT_AUDIO_FILE_MAX_MB, then
+# applies AGENT_AUDIO_FILE_KEEP as a secondary cap so the phone's clip list
+# stays browsable even when clips are small.
+#
+# Sizes are logical, not on-disk: iCloud evicts file contents (a file can report
+# a real size while occupying zero blocks), so `du` wildly understates this dir.
+# Logical size is also what counts against the iCloud quota.
+#
+# Scope is the tmp/ half of the agent-audio dir and nothing else. Several
+# workflows write there — per-turn agent clips, the phone's dictation captures
+# (spoken-*.caf, 20-80MB apiece), one-off content-pipeline output — and putting
+# a file there is the statement that it's disposable, so every audio format
+# rotates. Files worth keeping belong in the sibling stable/ dir, which this
+# never reads.
+#
+#   agent-audio-prune          # prune
+#   agent-audio-prune -n       # dry run — print what would go, delete nothing
+#   agent-audio-prune -v       # report each removal
+set -eu
+
+audio_base="${AGENT_AUDIO_BASE_DIR:-$HOME/Library/Mobile Documents/iCloud~is~workflow~my~workflows/Documents/agent-audio}"
+dir="${AGENT_AUDIO_FILE_DIR:-$audio_base/tmp}"
+max_mb="${AGENT_AUDIO_FILE_MAX_MB:-300}"
+keep="${AGENT_AUDIO_FILE_KEEP:-200}"
+exts="${AGENT_AUDIO_FILE_PRUNE_EXTS:-mp3 aiff aif wav aac caf m4a}"
+
+dry=0
+verbose=0
+while getopts ":nv" opt; do
+  case "$opt" in
+    n) dry=1; verbose=1 ;;
+    v) verbose=1 ;;
+    *) : ;;
+  esac
+done
+
+[ -d "$dir" ] || exit 0
+case "$max_mb" in ''|*[!0-9]*) max_mb=300 ;; esac
+case "$keep" in ''|*[!0-9]*) keep=200 ;; esac
+max_bytes=$(( max_mb * 1048576 ))
+
+log_dir="$HOME/.cache/note-on-turn"
+mkdir -p "$log_dir"
+log="$log_dir/audio-prune.log"
+
+# These are regenerable rotation artifacts, but they live in iCloud alongside
+# files Rio may care about, so removal goes through Trash and stays recoverable.
+remove() {
+  [ -e "$1" ] || return 0
+  if [ "$dry" -eq 1 ]; then
+    [ "$verbose" -eq 1 ] && printf '  would remove  %s\n' "$(basename "$1")"
+    return 0
+  fi
+  if command -v trash >/dev/null 2>&1; then
+    trash -- "$1" >/dev/null 2>&1 || rm -f -- "$1"
+  else
+    rm -f -- "$1"
+  fi
+  [ "$verbose" -eq 1 ] && printf '  removed  %s\n' "$(basename "$1")"
+  return 0
+}
+
+# Drop a clip's sidecar, but only when it really belongs to that clip. Pairing is
+# by filename stem alone, so a same-stem sibling of a different extension would
+# otherwise take an unrelated sidecar down with it.
+remove_sidecar_for() {
+  audio="$1"
+  side="${audio%.*}.json"
+  [ -f "$side" ] || return 0
+  if command -v jq >/dev/null 2>&1; then
+    claimed="$(jq -r '.audio // ""' "$side" 2>/dev/null || echo '')"
+    if [ -n "$claimed" ] && [ "$claimed" != "$(basename "$audio")" ]; then
+      printf '%s kept mismatched sidecar: %s claims %s\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(basename "$side")" "$claimed" >>"$log"
+      return 0
+    fi
+  fi
+  remove "$side"
+}
+
+# Every in-scope audio file, newest first, as mtime|bytes|path.
+set -- -false
+for ext in $exts; do
+  set -- "$@" -o -name "*.$ext"
+done
+# -maxdepth 1 is load-bearing: clips are flat, and without it a $dir pointed one
+# level up would recurse into the sibling stable/ dir and rotate the keepers.
+listing="$(find "$dir" -maxdepth 1 -type f \( "$@" \) -print0 2>/dev/null \
+  | xargs -0 stat -f '%m|%z|%N' 2>/dev/null | sort -t'|' -k1,1nr || true)"
+
+[ -n "$listing" ] || exit 0
+
+total=0
+kept=0
+freed=0
+removed=0
+
+# `while read` in a pipeline runs in a subshell under some shells, so drive the
+# loop from a here-doc to keep the counters in this one.
+while IFS='|' read -r mtime bytes path; do
+  [ -n "${path:-}" ] || continue
+  case "$bytes" in ''|*[!0-9]*) continue ;; esac
+  next=$(( total + bytes ))
+  if [ "$next" -le "$max_bytes" ] && [ "$kept" -lt "$keep" ]; then
+    total="$next"
+    kept=$(( kept + 1 ))
+  else
+    remove_sidecar_for "$path"
+    remove "$path"
+    freed=$(( freed + bytes ))
+    removed=$(( removed + 1 ))
+  fi
+done <<EOF
+$listing
+EOF
+
+# Sidecars whose audio is already gone (a manual delete, or an older prune that
+# removed the audio and missed the pair).
+#
+# The .audio field wins over the filename stem when it's present, otherwise this
+# sweep would undo the mismatch guard above: a sidecar deliberately spared for
+# pointing at a different clip would then be deleted right after for having no
+# clip at its own stem.
+for side in "$dir"/*.json; do
+  [ -f "$side" ] || continue
+  claimed=""
+  if command -v jq >/dev/null 2>&1; then
+    claimed="$(jq -r '.audio // ""' "$side" 2>/dev/null || echo '')"
+  fi
+  if [ -n "$claimed" ]; then
+    [ -e "$dir/$claimed" ] || remove "$side"
+    continue
+  fi
+  stem="${side%.json}"
+  found=0
+  for ext in mp3 aiff aif caf m4a wav aac; do
+    [ -e "$stem.$ext" ] && { found=1; break; }
+  done
+  [ "$found" -eq 0 ] && remove "$side"
+done
+
+summary="$(printf 'kept %d files (%.1f MB), removed %d (%.1f MB freed), cap %d MB' \
+  "$kept" "$(echo "$total" | awk '{print $1/1048576}')" \
+  "$removed" "$(echo "$freed" | awk '{print $1/1048576}')" "$max_mb")"
+
+if [ "$dry" -eq 1 ]; then
+  printf 'DRY RUN: %s\n' "$summary"
+else
+  printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$summary" >>"$log"
+  [ "$verbose" -eq 1 ] && printf '%s\n' "$summary"
+fi
+exit 0

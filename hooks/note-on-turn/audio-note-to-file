@@ -37,10 +37,34 @@ shift $((OPTIND - 1))
 summary="$(cat)"
 [ -n "$summary" ] || exit 0
 
+log_dir="$HOME/.cache/note-on-turn"
+mkdir -p "$log_dir"
+log="$log_dir/audio-note.log"
+
 # Only generate on the designated host so a stowed profile doesn't make every
 # machine write to the same shared iCloud dir. Empty = any host.
+#
+# A mismatch is expected on the non-designated machine (background hook: log and
+# exit 0), but it's a hard failure for a caller that asked for the file with -w
+# — exit 3 so it surfaces instead of looking like an empty result.
+#
+# macOS renumbers LocalHostName after a Bonjour name collision (Rios-Mac-mini-2
+# becomes Rios-Mac-mini-3), which silently broke this gate and dropped two turns
+# on 2026-07-25. The suffix also flaps back on its own, so a gate that matches
+# the literal name works until it doesn't. Compare with any trailing collision
+# suffix stripped, case-insensitively, so neither a renumber nor a `scutil --set
+# HostName` (which lowercases) can quietly disable audio generation.
 want_host="${AGENT_AUDIO_FILE_HOST:-}"
-if [ -n "$want_host" ] && [ "$want_host" != "$(hostname -s 2>/dev/null)" ]; then
+this_host="$(hostname -s 2>/dev/null)"
+host_base() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/-[0-9]+$//'; }
+if [ -n "$want_host" ] && [ "$(host_base "$want_host")" != "$(host_base "$this_host")" ]; then
+  printf '%s host gate: %s != AGENT_AUDIO_FILE_HOST=%s\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$this_host" "$want_host" >>"$log"
+  if [ "$wait_mode" -eq 1 ]; then
+    printf 'audio-note-to-file: host gate blocked — this host is %s, AGENT_AUDIO_FILE_HOST=%s\n' \
+      "$this_host" "$want_host" >&2
+    exit 3
+  fi
   exit 0
 fi
 
@@ -48,12 +72,20 @@ fi
 speech="$(printf '%s' "$summary" | sed 's/[*_`#>~|]//g')"
 [ -n "$speech" ] || exit 0
 
-dir="${AGENT_AUDIO_FILE_DIR:-$HOME/Library/Mobile Documents/iCloud~is~workflow~my~workflows/Documents/agent-audio}"
+# The agent-audio dir is split into tmp/ and stable/. Everything written here is
+# a regenerable per-turn clip, so it goes to tmp/, which is the only half the
+# size cap ever touches. Anything worth keeping gets moved to stable/ by hand.
+audio_base="${AGENT_AUDIO_BASE_DIR:-$HOME/Library/Mobile Documents/iCloud~is~workflow~my~workflows/Documents/agent-audio}"
+dir="${AGENT_AUDIO_FILE_DIR:-$audio_base/tmp}"
 mkdir -p "$dir"
 
-log_dir="$HOME/.cache/note-on-turn"
-mkdir -p "$log_dir"
-log="$log_dir/audio-note.log"
+# Rotation lives in agent-audio-prune (size-based, every audio extension, also
+# runs on a schedule so the dir shrinks while generation is off). Called here
+# too so a burst of turns can't overshoot the cap between scheduled runs.
+prune_dir() {
+  [ -x "$HOME/scripts/agent-audio-prune" ] || return 0
+  "$HOME/scripts/agent-audio-prune" >/dev/null 2>&1 || true
+}
 
 # File extension follows the engine.
 case "$engine" in
@@ -85,18 +117,35 @@ sidecar="${out%.$ext}.json"
 
 cwd="${HOOK_CWD:-}"
 
+# A synth failure produces no audio and no sidecar, so the turn disappears with
+# nothing but a log line to show for it — XAI_API_KEY went missing on 2026-07-21
+# and ate a run of turns unnoticed. Text Rio instead, debounced so a sustained
+# outage sends one message rather than one per turn.
+notify_failure() {
+  stamp="$log_dir/audio-note-failed.stamp"
+  now="$(date +%s)"
+  last="$(cat "$stamp" 2>/dev/null || echo 0)"
+  case "$last" in ''|*[!0-9]*) last=0 ;; esac
+  [ "$(( now - last ))" -ge "${AGENT_AUDIO_FILE_ALERT_EVERY:-1800}" ] || return 0
+  printf '%s' "$now" > "$stamp"
+  printf '🔴 Agent audio failed (%s): %s' "$engine" "$1" \
+    | "$HOME/scripts/sc" text-phone >/dev/null 2>&1 || true
+}
+
 synth_and_sidecar() {
-  # Synthesize the audio. On failure: log and stop — no silent engine swap.
+  # Synthesize the audio. On failure: log, alert, and stop — no silent engine swap.
   case "$engine" in
     grok)
       if ! printf '%s' "$speech" | "$HOME/scripts/grok-tts" -o "$out" >/dev/null 2>>"$log"; then
         printf '%s grok-tts failed: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$out" >>"$log"
+        notify_failure 'grok-tts failed — see ~/.cache/note-on-turn/audio-note.log'
         exit 1
       fi
       ;;
     say)
       if ! say -o "$out" -- "$speech" >/dev/null 2>>"$log"; then
         printf '%s say failed: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$out" >>"$log"
+        notify_failure 'say failed — see ~/.cache/note-on-turn/audio-note.log'
         exit 1
       fi
       ;;
@@ -133,6 +182,9 @@ synth_and_sidecar() {
     '{audio:$audio, summary:$summary, agent:$agent, session_id:$session_id, cwd:$cwd, repo:$repo, repo_name:$repo_name, transcript_path:$transcript_path, created_at:$created_at, engine:$engine}
      + (if $structured == null then {} else {structured: $structured} end)' \
     > "$sidecar" 2>>"$log" || printf '%s sidecar write failed: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$sidecar" >>"$log"
+
+  # Rotate out old recordings now that the new one has landed.
+  prune_dir
 }
 
 if [ "$wait_mode" -eq 1 ]; then
