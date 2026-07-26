@@ -79,13 +79,11 @@ audio_base="${AGENT_AUDIO_BASE_DIR:-$HOME/Library/Mobile Documents/iCloud~is~wor
 dir="${AGENT_AUDIO_FILE_DIR:-$audio_base/tmp}"
 mkdir -p "$dir"
 
-# Rotation lives in agent-audio-prune (size-based, every audio extension, also
-# runs on a schedule so the dir shrinks while generation is off). Called here
-# too so a burst of turns can't overshoot the cap between scheduled runs.
-prune_dir() {
-  [ -x "$HOME/scripts/agent-audio-prune" ] || return 0
-  "$HOME/scripts/agent-audio-prune" >/dev/null 2>&1 || true
-}
+# Rotation lives entirely in agent-audio-prune, on an hourly LaunchAgent. It is
+# deliberately NOT called from here: writing a clip used to trigger a prune, which
+# made any synth potentially destructive — a single throwaway test clip on
+# 2026-07-25 deleted 170MB of dictation captures as a side effect. Writing is now
+# never a deletion, and the schedule alone enforces the cap.
 
 # File extension follows the engine.
 case "$engine" in
@@ -183,8 +181,6 @@ synth_and_sidecar() {
      + (if $structured == null then {} else {structured: $structured} end)' \
     > "$sidecar" 2>>"$log" || printf '%s sidecar write failed: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$sidecar" >>"$log"
 
-  # Rotate out old recordings now that the new one has landed.
-  prune_dir
 }
 
 if [ "$wait_mode" -eq 1 ]; then
