@@ -165,7 +165,15 @@ synth_and_sidecar() {
     structured="$(cat "$structured_file")"
   fi
 
+  # Stable id for the clip+sidecar pair. Filename is a slug of the summary with
+  # -2/-3 collision suffixes, so it is neither unique over time nor stable across
+  # a rename — anything keying on it loses the metadata when iCloud or a
+  # collision moves the file. Sortable prefix so ids order like the clips do,
+  # random suffix so two turns in the same second can't collide.
+  id="$(date -u +%Y%m%dT%H%M%SZ)-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
+
   jq -n \
+    --arg id "$id" \
     --arg audio "$(basename "$out")" \
     --arg summary "$summary" \
     --arg agent "${HOOK_AGENT:-}" \
@@ -177,7 +185,7 @@ synth_and_sidecar() {
     --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     --arg engine "$engine" \
     --argjson structured "$structured" \
-    '{audio:$audio, summary:$summary, agent:$agent, session_id:$session_id, cwd:$cwd, repo:$repo, repo_name:$repo_name, transcript_path:$transcript_path, created_at:$created_at, engine:$engine}
+    '{id:$id, audio:$audio, summary:$summary, agent:$agent, session_id:$session_id, cwd:$cwd, repo:$repo, repo_name:$repo_name, transcript_path:$transcript_path, created_at:$created_at, engine:$engine}
      + (if $structured == null then {} else {structured: $structured} end)' \
     > "$sidecar" 2>>"$log" || printf '%s sidecar write failed: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$sidecar" >>"$log"
 
