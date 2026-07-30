@@ -32,6 +32,8 @@
 #   spin-provider  AGENT_SPIN_CHECK_PROVIDER  agent-router provider
 #   spin-timeout   AGENT_SPIN_CHECK_TIMEOUT   seconds to wait on the reviewer
 #   cue-stale      AGENT_AUTOMATION_CUE_STALE minutes before a stranded cue clears
+#   contract       AGENT_RESPONSE_CONTRACT    off | check | require  (reply schema)
+#   contract-bounces AGENT_RESPONSE_CONTRACT_MAX_BOUNCES  rewrites before giving up
 set -eu
 
 local_dir="$HOME/.config/agent-hooks"
@@ -39,7 +41,7 @@ local_file="$local_dir/local.sh"
 profile_file="${AGENT_HOOKS_PROFILE:-$HOME/.dotfiles/zsh/profiles/agent-hooks.sh}"
 
 KNOBS="text audio spin-check speak write-guard auto-cue"
-VALUE_KNOBS="speak-engine audio-engine audio-ttl audio-host spin-every spin-model spin-provider spin-timeout cue-stale"
+VALUE_KNOBS="speak-engine audio-engine audio-ttl audio-host spin-every spin-model spin-provider spin-timeout cue-stale contract contract-bounces"
 
 # friendly name -> env key. Accepts the env key itself so callers can pass either.
 knob_key() {
@@ -59,6 +61,8 @@ knob_key() {
     spin-provider)         echo AGENT_SPIN_CHECK_PROVIDER ;;
     spin-timeout)          echo AGENT_SPIN_CHECK_TIMEOUT ;;
     cue-stale)             echo AGENT_AUTOMATION_CUE_STALE ;;
+    contract)              echo AGENT_RESPONSE_CONTRACT ;;
+    contract-bounces)      echo AGENT_RESPONSE_CONTRACT_MAX_BOUNCES ;;
     AGENT_*|AGY_*)         echo "$1" ;;
     *) return 1 ;;
   esac
@@ -195,7 +199,7 @@ fi
 
 case "${1:-}" in
   --json) list_json; exit 0 ;;
-  -h|--help|help) sed -n '2,34p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  -h|--help|help) sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
   set)
     [ "$#" -ge 3 ] || { echo "agent-toggle: usage: agent-toggle set <knob|KEY> VALUE" >&2; exit 2; }
     key="$(knob_key "$2")" || { echo "agent-toggle: unknown knob '$2'" >&2; exit 2; }
