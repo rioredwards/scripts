@@ -15,7 +15,7 @@
 # a real size while occupying zero blocks), so `du` wildly understates this dir.
 # Logical size is also what counts against the iCloud quota.
 #
-# Scope is the tmp/ half of the agent-audio dir and nothing else. Several
+# Scope is the recent/ half of the agent-audio dir and nothing else. Several
 # workflows write there — per-turn agent clips, the phone's dictation captures
 # (spoken-*.caf, 20-80MB apiece), one-off content-pipeline output — and putting
 # a file there is the statement that it's disposable, so every audio format
@@ -28,7 +28,7 @@
 set -eu
 
 audio_base="${AGENT_AUDIO_BASE_DIR:-$HOME/Library/Mobile Documents/iCloud~is~workflow~my~workflows/Documents/agent-audio}"
-dir="${AGENT_AUDIO_FILE_DIR:-$audio_base/tmp}"
+dir="${AGENT_AUDIO_FILE_DIR:-$audio_base/recent}"
 max_mb="${AGENT_AUDIO_FILE_MAX_MB:-300}"
 keep="${AGENT_AUDIO_FILE_KEEP:-200}"
 exts="${AGENT_AUDIO_FILE_PRUNE_EXTS:-mp3 aiff aif wav aac caf m4a}"

@@ -72,11 +72,14 @@ fi
 speech="$(printf '%s' "$summary" | sed 's/[*_`#>~|]//g')"
 [ -n "$speech" ] || exit 0
 
-# The agent-audio dir is split into tmp/ and stable/. Everything written here is
-# a regenerable per-turn clip, so it goes to tmp/, which is the only half the
-# size cap ever touches. Anything worth keeping gets moved to stable/ by hand.
+# The agent-audio dir is split into recent/ and stable/. Everything written here
+# is a regenerable per-turn clip, so it goes to recent/, which is the only half
+# the size cap ever touches. Anything worth keeping gets moved to stable/ by hand.
+#
+# Not named tmp/: iCloud Drive silently refuses to sync a dir called tmp, so
+# clips written there never reached any other machine.
 audio_base="${AGENT_AUDIO_BASE_DIR:-$HOME/Library/Mobile Documents/iCloud~is~workflow~my~workflows/Documents/agent-audio}"
-dir="${AGENT_AUDIO_FILE_DIR:-$audio_base/tmp}"
+dir="${AGENT_AUDIO_FILE_DIR:-$audio_base/recent}"
 mkdir -p "$dir"
 
 # Rotation lives entirely in agent-audio-prune, on an hourly LaunchAgent. It is
