@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+# scope-scan — derive a repo's scope vocabulary from its own commit history.
+#
+# The SUBSYSTEM field of the response contract is `type/scope`. Types are global
+# (~/.dotfiles/.agents/commit-types.md). Scopes are per-repo and live in that
+# repo's .agents/scopes.md.
+#
+# That scope list has to come from somewhere. Hand-inventing it produces a list
+# that describes an imagined codebase; generating it from the directory tree
+# produces a list that mirrors the folder structure, which is the exact altitude
+# failure the contract exists to prevent. So: read the commit history. It is the
+# only record of how the work was actually divided, written by the person who
+# did it, in their own words.
+#
+# Two modes:
+#   scope-scan            report — what's in history vs what's in the list
+#   scope-scan --seed     write .agents/scopes.md from history (won't clobber)
+#
+# The report mode is the one that keeps earning its keep: run it a few months
+# later and it shows drift in both directions — scopes you've started using that
+# aren't ratified, and ratified scopes nobody has touched.
+#
+# Flags:
+#   --seed          write .agents/scopes.md (refuses if it already exists)
+#   --min N         ignore scopes used fewer than N times (default 3)
+#   --since <date>  only consider commits after this date (default all)
+#   --repo <path>   operate on another repo (default: cwd)
+set -uo pipefail
+
+MIN=3
+SINCE=""
+SEED=0
+REPO="."
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --seed)  SEED=1; shift ;;
+    --min)   MIN="${2:-}"; shift 2 ;;
+    --since) SINCE="${2:-}"; shift 2 ;;
+    --repo)  REPO="${2:-}"; shift 2 ;;
+    -h|--help) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "scope-scan: unknown argument '$1'" >&2; exit 2 ;;
+  esac
+done
+
+cd "$REPO" 2>/dev/null || { echo "scope-scan: no such directory: $REPO" >&2; exit 2; }
+git rev-parse --git-dir >/dev/null 2>&1 || { echo "scope-scan: not a git repo: $(pwd)" >&2; exit 2; }
+
+ROOT="$(git rev-parse --show-toplevel)"
+NAME="$(basename "$ROOT")"
+LIST="$ROOT/.agents/scopes.md"
+
+LOG_ARGS=(--no-merges --pretty=%s)
+[ -z "$SINCE" ] || LOG_ARGS+=(--since "$SINCE")
+
+SUBJECTS="$(git log "${LOG_ARGS[@]}")"
+TOTAL="$(printf '%s\n' "$SUBJECTS" | grep -c . )"
+[ "$TOTAL" -gt 0 ] || { echo "scope-scan: no commits found" >&2; exit 2; }
+
+# type(scope): ... -> scope. Only conventional-shaped subjects contribute.
+SCOPED="$(printf '%s\n' "$SUBJECTS" | sed -n 's/^[a-z]\{2,\}(\([^)]\{1,\}\)).*/\1/p')"
+CONV="$(printf '%s\n' "$SUBJECTS" | grep -cE '^[a-z]{2,}(\([^)]+\))?!?:')"
+N_SCOPED="$(printf '%s\n' "$SCOPED" | grep -c . )"
+
+TALLY="$(printf '%s\n' "$SCOPED" | grep . | sort | uniq -c | sort -rn)"
+KEPT="$(printf '%s\n' "$TALLY" | awk -v m="$MIN" '$1 >= m')"
+DROPPED="$(printf '%s\n' "$TALLY" | awk -v m="$MIN" '$1 < m {print $2}' | tr '\n' ' ')"
+
+if [ "$SEED" -eq 0 ]; then
+  printf '📊 %s — %s commits, %s conventional, %s with a scope\n\n' "$NAME" "$TOTAL" "$CONV" "$N_SCOPED"
+  printf 'Scopes used at least %s times:\n' "$MIN"
+  printf '%s\n' "$KEPT" | sed 's/^ */  /'
+  [ -z "$DROPPED" ] || printf '\nBelow threshold (typos, one-offs): %s\n' "$DROPPED"
+
+  if [ -f "$LIST" ]; then
+    # Preamble only — same cut as `response-contract`, for the same reason: the
+    # prose below a `## ` heading discusses retired names and would re-admit them.
+    RATIFIED="$(awk '/^## /{exit} 1' "$LIST" | sed -n 's/^- `\([a-z0-9][a-z0-9-]*\)`.*/\1/p')"
+    USED="$(printf '%s\n' "$KEPT" | awk '{print $2}')"
+    DRIFT_NEW="$(comm -23 <(printf '%s\n' "$USED" | sort -u) <(printf '%s\n' "$RATIFIED" | sort -u) | tr '\n' ' ')"
+    DRIFT_OLD="$(comm -13 <(printf '%s\n' "$USED" | sort -u) <(printf '%s\n' "$RATIFIED" | sort -u) | tr '\n' ' ')"
+    printf '\n🔍 vs .agents/scopes.md\n'
+    [ -z "$DRIFT_NEW" ] && printf '  nothing unratified\n' || printf '  in use, not ratified: %s\n' "$DRIFT_NEW"
+    [ -z "$DRIFT_OLD" ] && printf '  none stale\n'         || printf '  ratified, unused:     %s\n' "$DRIFT_OLD"
+  else
+    printf '\nNo .agents/scopes.md yet. Seed one: scope-scan --seed\n'
+  fi
+  exit 0
+fi
+
+# --- seed ------------------------------------------------------------------
+# Never overwrite. A ratified list has curation in it that history cannot
+# reconstruct, and silently replacing it with raw tallies would throw that away.
+if [ -f "$LIST" ]; then
+  printf 'scope-scan: %s already exists — refusing to overwrite.\n' "$LIST" >&2
+  printf 'Run without --seed to see how it has drifted from history.\n' >&2
+  exit 2
+fi
+
+mkdir -p "$ROOT/.agents"
+{
+  printf '# Scopes — %s\n\n' "$NAME"
+  printf 'The **scope** half of `type/scope`, for both commit subjects and the\n'
+  printf '`SUBSYSTEM` field of agent reports. Types are global and live in\n'
+  printf '`~/.dotfiles/.agents/commit-types.md`.\n\n'
+  printf 'A scope names an area of the product someone could care about. If a name\n'
+  printf 'here only makes sense to whoever has the file open, it is the wrong name.\n\n'
+  printf 'Seeded from this repo'"'"'s own commit history (%s commits, scopes used %s+\n' "$TOTAL" "$MIN"
+  printf 'times). ⚠️ Seeded, not ratified — rename, merge, and delete freely, then\n'
+  printf 'drop this notice. Re-run `scope-scan` any time to see drift both ways.\n\n'
+  printf 'Machine-read by `response-contract`. Parser takes the backticked name at\n'
+  printf 'the start of each bullet — keep that shape.\n\n'
+  printf '%s\n' "$KEPT" | awk '{printf "- `%s` — TODO (%s commits)\n", $2, $1}'
+  [ -z "$DROPPED" ] || printf '\n<!-- below threshold, not included: %s -->\n' "$DROPPED"
+} > "$LIST"
+
+printf '✅ seeded %s\n' "$LIST"
+printf '▶️ edit it — the tallies are evidence, not a decision.\n'

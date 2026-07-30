@@ -16,7 +16,8 @@
 # past advice. It cannot rationalize past a non-zero exit code.
 #
 # THE CONTRACT
-#   SUBSYSTEM:    one name from the enum (see --enum). Not a path.
+#   SUBSYSTEM:    type/scope. The type is global; the scope is this repo's.
+#                 e.g. feat/qc-runs, docs/accelPay-reconciliation
 #   USER-VISIBLE: what a person using the thing would now experience
 #                 differently. "nothing" is a valid answer.
 #   FORK:         the one genuinely load-bearing choice, as A vs B, <=2
@@ -27,49 +28,74 @@
 #                 one, which for a solo dev is the whole point.
 #   COST TO UNDO: minutes | hours | days | can't. Required if FORK.
 #
+# WHY type/scope AND NOT ONE GLOBAL LIST
+# Rio always knows which repo he is in, so repo identity is free context and
+# spending a vocabulary slot on it is waste. What isn't free is *which part of
+# this product* and *what kind of change* — so the field carries exactly those.
+# It also matches the grammar already in his commit history, which means the
+# vocabulary is testable against real usage instead of being invented (see
+# `scope-scan`).
+#
 # Usage:
 #   response-contract < report.txt
-#   some-agent | response-contract --enum ./docs/subsystems.md
-#   response-contract --list-subsystems
+#   some-agent | response-contract --scopes ./.agents/scopes.md
+#   response-contract --list
 set -uo pipefail
 
-DEFAULT_ENUM="$HOME/.dotfiles/.agents/subsystems.md"
-ENUM_FILE="${RESPONSE_CONTRACT_ENUM:-$DEFAULT_ENUM}"
+DEFAULT_TYPES="$HOME/.dotfiles/.agents/commit-types.md"
+TYPES_FILE="${RESPONSE_CONTRACT_TYPES:-$DEFAULT_TYPES}"
+SCOPES_FILE="${RESPONSE_CONTRACT_SCOPES:-}"
 MAX_WORDS="${RESPONSE_CONTRACT_MAX_WORDS:-120}"
 LIST_ONLY=0
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --enum) ENUM_FILE="${2:-}"; shift 2 ;;
+    --types)  TYPES_FILE="${2:-}"; shift 2 ;;
+    --scopes) SCOPES_FILE="${2:-}"; shift 2 ;;
     --max-words) MAX_WORDS="${2:-}"; shift 2 ;;
-    --list-subsystems) LIST_ONLY=1; shift ;;
-    -h|--help) sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --list) LIST_ONLY=1; shift ;;
+    -h|--help) sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "response-contract: unknown argument '$1'" >&2; exit 2 ;;
   esac
 done
 
-# A repo may ship its own vocabulary; it wins over the global one when present.
-if [ -f "./docs/subsystems.md" ] && [ "$ENUM_FILE" = "$DEFAULT_ENUM" ]; then
-  ENUM_FILE="./docs/subsystems.md"
+# Scopes belong to the repo being worked in, so find them from the repo root
+# rather than the current directory — an agent working three levels deep is
+# still working on the same product.
+if [ -z "$SCOPES_FILE" ]; then
+  ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+  SCOPES_FILE="$ROOT/.agents/scopes.md"
 fi
 
-# No enum means the SUBSYSTEM field is unvalidatable, which means this whole
-# script is theater. Refuse loudly rather than pass everything.
-if [ ! -f "$ENUM_FILE" ]; then
-  printf 'response-contract: no subsystem enum at %s\n' "$ENUM_FILE" >&2
-  printf 'The SUBSYSTEM field cannot be checked without one. Write the list first.\n' >&2
-  exit 2
-fi
+# Bullets of the form: - `name` — description, in the preamble only.
+#
+# The cut at the first `## ` heading is load-bearing. Everything after one is
+# prose, and prose about a vocabulary is full of backticked names — "`dev`,
+# `dev-seed`, `seed` → `seed`" would otherwise re-admit the two names that
+# sentence exists to retire. The vocabulary is the list at the top; discussion
+# of the vocabulary is not part of it.
+names_in() { awk '/^## /{exit} 1' "$1" | sed -n 's/^- `\([a-z0-9][a-z0-9._/-]*\)`.*/\1/p'; }
 
-# Bullets of the form: - `name` — description
-SUBSYSTEMS="$(sed -n 's/^- `\([a-z0-9][a-z0-9-]*\)`.*/\1/p' "$ENUM_FILE")"
-if [ -z "$SUBSYSTEMS" ]; then
-  printf 'response-contract: %s has no `- `name`` bullets — nothing to validate against\n' "$ENUM_FILE" >&2
+# A missing vocabulary makes SUBSYSTEM unvalidatable, which makes this whole
+# script theater. Refuse loudly rather than pass everything.
+for f in "$TYPES_FILE" "$SCOPES_FILE"; do
+  [ -f "$f" ] && continue
+  printf 'response-contract: no vocabulary at %s\n' "$f" >&2
+  printf 'SUBSYSTEM is type/scope and cannot be checked without both halves.\n' >&2
+  [ "$f" = "$SCOPES_FILE" ] && printf 'Seed this repo'"'"'s list from its own history: scope-scan --seed\n' >&2
   exit 2
-fi
+done
+
+TYPES="$(names_in "$TYPES_FILE")"
+SCOPES="$(names_in "$SCOPES_FILE")"
+for pair in "types:$TYPES:$TYPES_FILE" "scopes:$SCOPES:$SCOPES_FILE"; do
+  what="${pair%%:*}"; rest="${pair#*:}"; vals="${rest%:*}"; src="${rest##*:}"
+  [ -n "$vals" ] || { printf 'response-contract: %s has no `- `name`` bullets — no %s to validate against\n' "$src" "$what" >&2; exit 2; }
+done
 
 if [ "$LIST_ONLY" -eq 1 ]; then
-  printf '%s\n' "$SUBSYSTEMS"
+  printf 'types  (%s)\n' "$TYPES_FILE";  printf '%s\n' "$TYPES"  | sed 's/^/  /'
+  printf 'scopes (%s)\n' "$SCOPES_FILE"; printf '%s\n' "$SCOPES" | sed 's/^/  /'
   exit 0
 fi
 
@@ -99,12 +125,20 @@ COST="$(field 'COST TO UNDO')"
 
 VIOLATIONS=()
 add() { VIOLATIONS+=("$1"); }
+oneline() { printf '%s' "$1" | tr '\n' ' '; }
 
-# --- required always ------------------------------------------------------
+# --- SUBSYSTEM: type/scope, both halves from a closed list -----------------
 if [ -z "$SUBSYSTEM" ]; then
-  add "SUBSYSTEM is missing or empty. One of: $(printf '%s' "$SUBSYSTEMS" | tr '\n' ' ')"
-elif ! printf '%s\n' "$SUBSYSTEMS" | grep -qxF "$SUBSYSTEM"; then
-  add "SUBSYSTEM '$SUBSYSTEM' is not in the enum ($ENUM_FILE). One of: $(printf '%s' "$SUBSYSTEMS" | tr '\n' ' ')"
+  add "SUBSYSTEM is missing. Shape is type/scope, e.g. feat/qc-runs."
+elif ! printf '%s' "$SUBSYSTEM" | grep -qE '^[a-z]+/[A-Za-z0-9][A-Za-z0-9._-]*$'; then
+  add "SUBSYSTEM '$SUBSYSTEM' is not type/scope (one slash, no spaces). e.g. feat/qc-runs."
+else
+  S_TYPE="${SUBSYSTEM%%/*}"
+  S_SCOPE="${SUBSYSTEM#*/}"
+  printf '%s\n' "$TYPES"  | grep -qxF "$S_TYPE" \
+    || add "Type '$S_TYPE' is not a known type. One of: $(oneline "$TYPES")"
+  printf '%s\n' "$SCOPES" | grep -qxF "$S_SCOPE" \
+    || add "Scope '$S_SCOPE' is not in this repo's list ($SCOPES_FILE). One of: $(oneline "$SCOPES")"
 fi
 
 [ -n "$USER_VISIBLE" ] || add "USER-VISIBLE is missing or empty. 'nothing' is a valid answer — say it explicitly."
@@ -136,20 +170,24 @@ fi
 # This is the check the prose version could never make. A path or a symbol in a
 # report means the agent chose the implementation layer before it started
 # writing, and no length cap fixes a layer choice.
-BODY="$(printf '%s\n%s\n%s\n%s\n%s\n%s\n' \
-  "$SUBSYSTEM" "$USER_VISIBLE" "$FORK" "$LEAN" "$IF_SILENT" "$COST")"
+#
+# SUBSYSTEM is deliberately excluded here: it contains a slash by design, and it
+# is already validated far more strictly than any regex below — against two
+# closed lists.
+BODY="$(printf '%s\n%s\n%s\n%s\n%s\n' \
+  "$USER_VISIBLE" "$FORK" "$LEAN" "$IF_SILENT" "$COST")"
 
 LEAK="$(printf '%s' "$BODY" | grep -oE '[^[:space:]]*\.(ts|tsx|js|jsx|mjs|sh|zsh|py|rb|go|rs|swift|json|ya?ml|md)\b' | head -3 | tr '\n' ' ')"
 [ -z "$LEAK" ] || add "Filenames in the report: ${LEAK}— name the capability, not the file."
 
 LEAK="$(printf '%s' "$BODY" | grep -oE '(^|[[:space:]])(~|\.{1,2})?/[A-Za-z0-9._~-]+/[^[:space:]]*' | head -3 | tr '\n' ' ')"
-[ -z "$LEAK" ] || add "Paths in the report:${LEAK}— name the subsystem, not the directory."
+[ -z "$LEAK" ] || add "Paths in the report:${LEAK}— name the scope, not the directory."
 
 LEAK="$(printf '%s' "$BODY" | grep -oE '[A-Za-z_][A-Za-z0-9_]*\(\)' | head -3 | tr '\n' ' ')"
 [ -z "$LEAK" ] || add "Function names in the report: ${LEAK}— Rio does not open the code."
 
 # --- total budget ----------------------------------------------------------
-WORDS="$(printf '%s' "$BODY" | wc -w | tr -d ' ')"
+WORDS="$(printf '%s %s' "$SUBSYSTEM" "$BODY" | wc -w | tr -d ' ')"
 [ "$WORDS" -le "$MAX_WORDS" ] || add "Contract is $WORDS words; the cap is $MAX_WORDS. Cut detail, not fields."
 
 if [ "${#VIOLATIONS[@]}" -eq 0 ]; then
@@ -159,5 +197,5 @@ fi
 printf '❌ RESPONSE CONTRACT VIOLATED (%s):\n' "${#VIOLATIONS[@]}" >&2
 for v in "${VIOLATIONS[@]}"; do printf '  • %s\n' "$v" >&2; done
 printf '\nRequired shape:\n' >&2
-printf '  SUBSYSTEM:    <one name from the enum>\n  USER-VISIBLE: <what changes for someone using it; "nothing" is valid>\n  FORK:         <the one load-bearing choice, A vs B, <=2 sentences>   (omit if none)\n  LEAN:         <which, and the single reason>                        (required if FORK)\n  IF SILENT:    <what you do if Rio never answers>                    (required if FORK)\n  COST TO UNDO: <minutes | hours | days | can'"'"'t>                       (required if FORK)\n' >&2
+printf '  SUBSYSTEM:    <type/scope, e.g. feat/qc-runs>\n  USER-VISIBLE: <what changes for someone using it; "nothing" is valid>\n  FORK:         <the one load-bearing choice, A vs B, <=2 sentences>   (omit if none)\n  LEAN:         <which, and the single reason>                        (required if FORK)\n  IF SILENT:    <what you do if Rio never answers>                    (required if FORK)\n  COST TO UNDO: <minutes | hours | days | can'"'"'t>                       (required if FORK)\n' >&2
 exit 1

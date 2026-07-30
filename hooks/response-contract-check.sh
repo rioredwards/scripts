@@ -73,7 +73,7 @@ RC=$?
 case "$RC" in
   0) : > "$BOUNCE_FILE"; exit 0 ;;                      # clean reply — reset the budget
   3) [ "$MODE" = "require" ] || exit 0 ;;               # no contract; only strict mode cares
-  2) # No enum, or a broken one. Say so once and get out of the way — a
+  2) # Missing or broken vocabulary. Say so once and get out of the way — a
      # misconfigured validator must not hold the session hostage.
      printf '⚠️ response-contract is misconfigured, so replies are NOT being checked:\n%s\n' "$VIOLATIONS" >&2
      exit 0 ;;
