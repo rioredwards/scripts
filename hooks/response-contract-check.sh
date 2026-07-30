@@ -64,7 +64,11 @@ STATE_DIR="${TMPDIR:-/tmp}/claude-response-contract"
 mkdir -p "$STATE_DIR"
 find "$STATE_DIR" -type f -mtime +1 -delete 2>/dev/null
 BOUNCE_FILE="$STATE_DIR/${SESSION_ID}.bounces"
-BOUNCES="$(cat "$BOUNCE_FILE" 2>/dev/null || echo 0)"
+# A clean reply resets the budget by truncating this file, so the common case is
+# an empty string rather than a missing file or a "0" — and empty is not an
+# integer as far as `[ -ge ]` is concerned.
+BOUNCES="$(cat "$BOUNCE_FILE" 2>/dev/null)"
+case "$BOUNCES" in ''|*[!0-9]*) BOUNCES=0 ;; esac
 MAX_BOUNCES="${AGENT_RESPONSE_CONTRACT_MAX_BOUNCES:-2}"
 
 VIOLATIONS="$(printf '%s' "$REPLY" | "$VALIDATOR" 2>&1 >/dev/null)"
