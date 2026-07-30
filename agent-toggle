@@ -18,7 +18,6 @@
 #   audio        AGENT_AUDIO_FILE   reply -> grok TTS mp3 -> iCloud   ($ grok)
 #   spin-check   AGENT_SPIN_CHECK   every-N-tool outside-model sanity ($ codex)
 #   speak        AGENT_SPEAK        speak reply aloud on this mac (say)
-#   perm-watch   AGENT_PERM_WATCH   watch for permission dialogs
 #   write-guard  AGY_WRITE_GUARD    block risky writes  (SAFETY RAIL)
 #   auto-cue     AGENT_AUTOMATION_CUE  fullscreen "hands off" cue while an agent
 #                                      drives the GUI (click/screenshot/app)
@@ -32,7 +31,6 @@
 #   spin-model     AGENT_SPIN_CHECK_MODEL     reviewer model
 #   spin-provider  AGENT_SPIN_CHECK_PROVIDER  agent-router provider
 #   spin-timeout   AGENT_SPIN_CHECK_TIMEOUT   seconds to wait on the reviewer
-#   perm-debounce  AGENT_PERM_WATCH_DEBOUNCE  seconds before repeating a dialog
 #   cue-stale      AGENT_AUTOMATION_CUE_STALE minutes before a stranded cue clears
 set -eu
 
@@ -40,8 +38,8 @@ local_dir="$HOME/.config/agent-hooks"
 local_file="$local_dir/local.sh"
 profile_file="${AGENT_HOOKS_PROFILE:-$HOME/.dotfiles/zsh/profiles/agent-hooks.sh}"
 
-KNOBS="text audio spin-check speak perm-watch write-guard auto-cue"
-VALUE_KNOBS="speak-engine audio-engine audio-ttl audio-host spin-every spin-model spin-provider spin-timeout perm-debounce cue-stale"
+KNOBS="text audio spin-check speak write-guard auto-cue"
+VALUE_KNOBS="speak-engine audio-engine audio-ttl audio-host spin-every spin-model spin-provider spin-timeout cue-stale"
 
 # friendly name -> env key. Accepts the env key itself so callers can pass either.
 knob_key() {
@@ -50,7 +48,6 @@ knob_key() {
     audio)                 echo AGENT_AUDIO_FILE ;;
     spin-check|spin)       echo AGENT_SPIN_CHECK ;;
     speak)                 echo AGENT_SPEAK ;;
-    perm-watch|perm)       echo AGENT_PERM_WATCH ;;
     write-guard|guard)     echo AGY_WRITE_GUARD ;;
     auto-cue|cue)          echo AGENT_AUTOMATION_CUE ;;
     speak-engine)          echo AGENT_SPEAK_ENGINE ;;
@@ -61,7 +58,6 @@ knob_key() {
     spin-model)            echo AGENT_SPIN_CHECK_MODEL ;;
     spin-provider)         echo AGENT_SPIN_CHECK_PROVIDER ;;
     spin-timeout)          echo AGENT_SPIN_CHECK_TIMEOUT ;;
-    perm-debounce)         echo AGENT_PERM_WATCH_DEBOUNCE ;;
     cue-stale)             echo AGENT_AUTOMATION_CUE_STALE ;;
     AGENT_*|AGY_*)         echo "$1" ;;
     *) return 1 ;;
@@ -199,7 +195,7 @@ fi
 
 case "${1:-}" in
   --json) list_json; exit 0 ;;
-  -h|--help|help) sed -n '2,35p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  -h|--help|help) sed -n '2,34p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
   set)
     [ "$#" -ge 3 ] || { echo "agent-toggle: usage: agent-toggle set <knob|KEY> VALUE" >&2; exit 2; }
     key="$(knob_key "$2")" || { echo "agent-toggle: unknown knob '$2'" >&2; exit 2; }

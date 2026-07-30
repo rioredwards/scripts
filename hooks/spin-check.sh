@@ -61,7 +61,7 @@ WAIT="${AGENT_SPIN_CHECK_TIMEOUT:-90}"
 STATE_DIR="${TMPDIR:-/tmp}/claude-spin-check"
 mkdir -p "$STATE_DIR"
 # opportunistic GC so count/log files don't accumulate forever in TMPDIR.
-find "$STATE_DIR" -type f -name '*.count' -mtime +1 -delete 2>/dev/null
+find "$STATE_DIR" -type f \( -name '*.count' -o -name '*.err' -o -name '*.failed' \) -mtime +1 -delete 2>/dev/null
 COUNT_FILE="$STATE_DIR/${SESSION_ID}.count"
 COUNT=$(( $(cat "$COUNT_FILE" 2>/dev/null || echo 0) + 1 ))
 printf '%s' "$COUNT" > "$COUNT_FILE"
@@ -180,19 +180,47 @@ elif command -v timeout >/dev/null 2>&1; then
   TIMEOUT_CMD=(timeout "$WAIT")
 fi
 
-VERDICT="$( ${TIMEOUT_CMD[@]+"${TIMEOUT_CMD[@]}"} agent-router delegate --provider "$PROVIDER" --model "$MODEL" --prompt "$PROMPT" 2>/dev/null || true )"
+# --- call the reviewer, capturing WHY it failed ---------------------------
+# This used to be `2>/dev/null || true`. Router outage, timeout, a bad model
+# name, and a genuine "nothing to report" all collapsed into the same empty
+# string, and the hook went quiet for the rest of the session with no signal.
+# A safety net that cannot report its own death is not a safety net. Capture
+# stderr and the exit code, classify the failure, log the reason, and tell the
+# session — once, so a broken router doesn't turn into an alert storm.
+ERR_FILE="$STATE_DIR/${SESSION_ID}.err"
+VERDICT="$( ${TIMEOUT_CMD[@]+"${TIMEOUT_CMD[@]}"} agent-router delegate --provider "$PROVIDER" --model "$MODEL" --prompt "$PROMPT" 2>"$ERR_FILE" )"
+RC=$?
 VERDICT="$(printf '%s' "$VERDICT" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+ERR_TAIL="$(tr '\n\t' '  ' < "$ERR_FILE" 2>/dev/null | sed 's/  */ /g' | cut -c1-300)"
+
+FAILURE=""
+case "$RC" in
+  0)       [ -n "$VERDICT" ] || FAILURE="reviewer returned an empty verdict (exit 0)" ;;
+  124|142) FAILURE="reviewer timed out after ${WAIT}s" ;;
+  *)       FAILURE="agent-router exited $RC" ;;
+esac
 
 # --- audit log (append one line per fire; disable with AGENT_SPIN_CHECK_LOG=off)
 if [ "$LOG" != "off" ]; then
-  { printf '%s\tsid=%s\tcount=%s\tmodel=%s\tverdict=%s\n' \
-      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$SESSION_ID" "$COUNT" "$MODEL" \
+  LOG_SUFFIX=""
+  [ -n "$FAILURE" ] && LOG_SUFFIX="$(printf '\tFAILED=%s\terr=%s' "$FAILURE" "${ERR_TAIL:-<no stderr>}")"
+  { printf '%s\tsid=%s\tcount=%s\tmodel=%s\trc=%s\tverdict=%s%s\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$SESSION_ID" "$COUNT" "$MODEL" "$RC" \
       "$(printf '%s' "${VERDICT:-<empty>}" | tr '\n' ' ' | cut -c1-200)" \
+      "$LOG_SUFFIX" \
       >> "$LOG"; } 2>/dev/null
 fi
 
-# Silent when fine or when the reviewer failed/empty.
-[ -n "$VERDICT" ] || exit 0
+# --- the reviewer is broken: say so, loudly, once per session -------------
+if [ -n "$FAILURE" ]; then
+  NOTICE_FILE="$STATE_DIR/${SESSION_ID}.failed"
+  [ -f "$NOTICE_FILE" ] && exit 0
+  : > "$NOTICE_FILE"
+  printf '⚠️ SPIN-CHECK IS BROKEN — %s.\nThe outside-view safety net is NOT running this session; nothing is watching for spin.\nstderr: %s\nLog: %s\nFix `agent-router delegate --provider %s --model %s`, or silence it with `agent-toggle spin-check off`.\n(Reported once per session.)\n' \
+    "$FAILURE" "${ERR_TAIL:-<no stderr>}" "$LOG" "$PROVIDER" "$MODEL" >&2
+  exit 2
+fi
+
 case "$VERDICT" in
   ON\ TRACK*|on\ track*|"ON TRACK") exit 0 ;;
 esac

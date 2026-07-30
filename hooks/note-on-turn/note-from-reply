@@ -13,7 +13,22 @@ AGENT_SPEAK="${AGENT_SPEAK:-off}"
 text="$(cat)"
 [ -n "$text" ] || exit 0
 
-summary="$(printf '%s' "$text" | "$scripts_root/summarize-for-note")"
+log_dir="$HOME/.cache/note-on-turn"
+mkdir -p "$log_dir"
+
+# Summarize strictly. A failed transform must NOT degrade into shipping the raw
+# reply — that is the exact silent failure this pipeline existed to prevent: Rio
+# gets a novel on his phone and no signal that the summarizer broke. Strict mode
+# fails; we then deliver a short, explicit failure notice instead of the text.
+degraded=""
+if summary="$(printf '%s' "$text" | "$scripts_root/summarize-for-note" --strict 2>>"$log_dir/summarize.err")"; then
+  :
+else
+  degraded=1
+  summary="⚠️ Summarizer failed this turn — no summary sent (raw reply withheld). Check aitt / $log_dir/summarize.err"
+  printf '%s\tsummarize-for-note --strict failed (origin=%s)\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${HOOK_ORIGIN:-unknown}" >>"$log_dir/summarize.err"
+fi
 
 # Text the summary to Rio's phone when the text toggle is on.
 AGENT_TEXT="${AGENT_TEXT:-on}"
@@ -22,7 +37,9 @@ case "$AGENT_TEXT" in
 esac
 
 # Speak the summary aloud when the voice toggle is on.
-case "$AGENT_SPEAK" in
+# Skipped when degraded: the phone text already carried the failure; there is no
+# reason to spend TTS on an error string.
+case "${degraded:+skip}${AGENT_SPEAK}" in
   on|1|true|yes) printf '%s' "$summary" | "$scripts_root/hooks/note-on-turn/speak-note" ;;
 esac
 
@@ -36,7 +53,8 @@ esac
 # profile default), we stamp it now so the cap always applies. TTL_MIN=0 disables.
 AGENT_AUDIO_FILE="${AGENT_AUDIO_FILE:-off}"
 synth_audio() { printf '%s' "$summary" | "$scripts_root/hooks/note-on-turn/audio-note-to-file"; }
-case "$AGENT_AUDIO_FILE" in
+# Same reasoning as speak-note: never synthesize audio of a failure string.
+case "${degraded:+skip}${AGENT_AUDIO_FILE}" in
   on|1|true|yes)
     ttl_min="${AGENT_AUDIO_FILE_TTL_MIN:-60}"
     case "$ttl_min" in ''|*[!0-9]*) ttl_min=60 ;; esac
@@ -57,6 +75,4 @@ case "$AGENT_AUDIO_FILE" in
     ;;
 esac
 
-log_dir="$HOME/.cache/note-on-turn"
-mkdir -p "$log_dir"
 "$HOME/dev/agent-sessions/bin/index-session" >>"$log_dir/index-session.log" 2>&1 &
