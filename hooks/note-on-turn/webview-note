@@ -1,0 +1,47 @@
+#!/bin/sh
+# stdin: sidecar-shaped JSON ({structured, summary, repo_name, agent,
+# created_at}). Renders the turn's summary page and pops it in the Hammerspoon
+# web view window.
+#
+# The page is rendered by render-summary-html.mjs, the same module the Raycast
+# audio player uses — an auto-popped page and a page opened from Raycast are
+# produced by identical code, so the two surfaces cannot drift.
+#
+# No player. The audio for a turn is synthesized on its own timeline (detached,
+# and host-gated to one machine), so it does not exist yet when this page opens
+# and may never exist on this machine at all. Binding them would mean either
+# blocking the turn on TTS or popping the window twice. The recording keeps its
+# own player in Raycast; this page is the transcript.
+#
+# Overwrites one stable path per machine rather than accumulating a file per
+# turn — nothing here is worth keeping, and the web view reloads from disk.
+set -eu
+
+renderer="${AGENT_WEBVIEW_RENDERER:-$HOME/dev/rio-raycast-toolbox/scripts/render-summary-html.mjs}"
+out_dir="${AGENT_WEBVIEW_DIR:-$HOME/.cache/agent-webview}"
+out="$out_dir/turn.html"
+
+log_dir="$HOME/.cache/note-on-turn"
+mkdir -p "$log_dir"
+log="$log_dir/webview-note.log"
+stamp() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+
+if [ ! -f "$renderer" ]; then
+  printf '%s renderer missing: %s\n' "$(stamp)" "$renderer" >>"$log"
+  exit 1
+fi
+
+payload="$(cat)"
+[ -n "$payload" ] || exit 0
+
+if ! printf '%s' "$payload" | node "$renderer" --out "$out" --title "Agent reply" >/dev/null 2>>"$log"; then
+  printf '%s render failed -> %s\n' "$(stamp)" "$out" >>"$log"
+  exit 1
+fi
+
+# Hammerspoon's WKWebView, not the browser: it renders the page without stealing
+# a browser tab, and unlike Quick Look's HTML sandbox it runs the page's JS.
+if ! open -g "hammerspoon://agent-audio-webview?file=$out" >/dev/null 2>>"$log"; then
+  printf '%s deeplink failed (Hammerspoon running?): %s\n' "$(stamp)" "$out" >>"$log"
+  exit 1
+fi

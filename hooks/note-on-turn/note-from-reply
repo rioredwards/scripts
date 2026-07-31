@@ -117,4 +117,63 @@ case "${degraded:+skip}${AGENT_AUDIO_FILE}" in
     ;;
 esac
 
+# Pop the turn's summary in a local web view window when the webview toggle is
+# on. Independent of the audio toggle: the page renders from the same structured
+# object, so what appears on screen and what the phone receives always agree.
+#
+# Deliberately NOT gated on `degraded` — the other surfaces skip a failure
+# because narrating an error string wastes TTS, but a page costs nothing and
+# putting the ⚠️ on screen is the fastest way for Rio to notice the summarizer
+# broke.
+#
+# Also not host-gated the way audio is: the window opens on whichever machine
+# ran the turn, which is by definition the machine Rio is looking at.
+AGENT_WEBVIEW="${AGENT_WEBVIEW:-off}"
+show_webview() {
+  wv_repo_name=""
+  if [ -n "${HOOK_CWD:-}" ] && [ -d "${HOOK_CWD:-}" ]; then
+    wv_repo="$(git -C "$HOOK_CWD" rev-parse --show-toplevel 2>/dev/null || true)"
+    [ -n "$wv_repo" ] && wv_repo_name="$(basename "$wv_repo")"
+  fi
+  # Build the payload HERE, before backgrounding. structured_tmp is deleted by
+  # this script's EXIT trap, which can fire before a detached child gets around
+  # to reading it — the same race that silently stripped structure off audio
+  # sidecars until it was hoisted out of the fork there.
+  wv_structured=null
+  [ -n "$structured_tmp" ] && wv_structured="$(cat "$structured_tmp")"
+  wv_payload="$(jq -n \
+    --arg summary "$summary" \
+    --arg agent "${HOOK_AGENT:-}" \
+    --arg repo_name "$wv_repo_name" \
+    --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --argjson structured "$wv_structured" \
+    '{summary:$summary, agent:$agent, repo_name:$repo_name, created_at:$created_at}
+     + (if $structured == null then {} else {structured: $structured} end)')"
+  printf '%s' "$wv_payload" | "$scripts_root/hooks/note-on-turn/webview-note" &
+}
+# Self-expiring on the same pattern as the audio toggle: a window that keeps
+# appearing on every turn a week after it was useful is noise. No phone text on
+# expiry (unlike audio, which is protecting spend) — this is a GUI surface, and
+# it stopping is self-evident to whoever is sitting in front of it.
+case "$AGENT_WEBVIEW" in
+  on|1|true|yes)
+    wv_ttl_min="${AGENT_WEBVIEW_TTL_MIN:-60}"
+    case "$wv_ttl_min" in ''|*[!0-9]*) wv_ttl_min=60 ;; esac
+    wv_since="${AGENT_WEBVIEW_SINCE:-}"
+    case "$wv_since" in *[!0-9]*) wv_since="" ;; esac
+    if [ "$wv_ttl_min" -eq 0 ]; then
+      show_webview
+    elif [ -z "$wv_since" ]; then
+      "$scripts_root/agent-toggle" webview on >/dev/null 2>&1 || true
+      show_webview
+    elif [ "$(( $(date +%s) - wv_since ))" -gt "$(( wv_ttl_min * 60 ))" ]; then
+      "$scripts_root/agent-toggle" webview off >/dev/null 2>&1 || true
+      printf '%s\twebview auto-off after %sm\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$wv_ttl_min" >>"$log_dir/webview-note.log"
+    else
+      show_webview
+    fi
+    ;;
+esac
+
 "$HOME/dev/agent-sessions/bin/index-session" >>"$log_dir/index-session.log" 2>&1 &
