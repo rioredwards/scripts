@@ -15,6 +15,9 @@
 #
 # Overwrites one stable path per machine rather than accumulating a file per
 # turn — nothing here is worth keeping, and the web view reloads from disk.
+#
+# Set AGENT_WEBVIEW_HOST to an ssh alias to display the page on a different mac
+# than the one that generated it (see the remote block below).
 set -eu
 
 renderer="${AGENT_WEBVIEW_RENDERER:-$HOME/dev/rio-raycast-toolbox/scripts/render-summary-html.mjs}"
@@ -56,6 +59,38 @@ payload="$(cat)"
 if ! printf '%s' "$payload" | "$node_bin" "$renderer" --out "$out" --title "Agent reply" >/dev/null 2>>"$log"; then
   printf '%s render failed -> %s\n' "$(stamp)" "$out" >>"$log"
   exit 1
+fi
+
+# Ship the page to another mac instead of opening it here, when one is named.
+#
+# The case this exists for: sitting at the MacBook, ssh'd into the mini, agents
+# running on the mini. The hook fires on the machine doing the work, which is
+# not the machine with a screen in front of it — so the window pops where nobody
+# can see it. AGENT_WEBVIEW_HOST is an ssh alias (`macbook`), set machine-locally
+# on the box that generates, never in the synced profile.
+#
+# One connection does all three steps: make the dir, stream the page in over
+# stdin, fire the deeplink. The page is self-contained (CSS and JS inline, no
+# player, no images), so a single file is the whole transfer.
+remote_host="${AGENT_WEBVIEW_HOST:-}"
+if [ -n "$remote_host" ]; then
+  # BatchMode so a missing key fails instead of blocking the turn on a password
+  # prompt forever; ServerAlive so a connection that dies mid-transfer gives up
+  # rather than hanging. A closed laptop is the expected case, not an error —
+  # log it and exit 0 so a sleeping MacBook never marks the turn as failed.
+  if ssh -o BatchMode=yes -o ConnectTimeout=5 \
+         -o ServerAliveInterval=3 -o ServerAliveCountMax=2 \
+         "$remote_host" \
+         'mkdir -p ~/.cache/agent-webview \
+          && cat > ~/.cache/agent-webview/turn.html \
+          && open -g "hammerspoon://agent-audio-webview?file=$HOME/.cache/agent-webview/turn.html"' \
+         < "$out" >/dev/null 2>>"$log"
+  then
+    exit 0
+  fi
+  printf '%s remote display skipped: %s unreachable or Hammerspoon down\n' \
+    "$(stamp)" "$remote_host" >>"$log"
+  exit 0
 fi
 
 # Hammerspoon's WKWebView, not the browser: it renders the page without stealing

@@ -29,6 +29,7 @@
 #   audio-ttl      AGENT_AUDIO_FILE_TTL_MIN   auto-off after N min (0 = never)
 #   audio-host     AGENT_AUDIO_FILE_HOST      only this `hostname -s` generates
 #   webview-ttl    AGENT_WEBVIEW_TTL_MIN      auto-off after N min (0 = never)
+#   webview-host   AGENT_WEBVIEW_HOST         ssh alias to display on (empty = here)
 #   spin-every     AGENT_SPIN_CHECK_EVERY     fire every Nth tool call
 #   spin-model     AGENT_SPIN_CHECK_MODEL     reviewer model
 #   spin-provider  AGENT_SPIN_CHECK_PROVIDER  agent-router provider
@@ -41,7 +42,7 @@ local_file="$local_dir/local.sh"
 profile_file="${AGENT_HOOKS_PROFILE:-$HOME/.dotfiles/zsh/profiles/agent-hooks.sh}"
 
 KNOBS="text audio webview spin-check speak write-guard auto-cue"
-VALUE_KNOBS="speak-engine audio-engine audio-ttl audio-host webview-ttl spin-every spin-model spin-provider spin-timeout cue-stale"
+VALUE_KNOBS="speak-engine audio-engine audio-ttl audio-host webview-ttl webview-host spin-every spin-model spin-provider spin-timeout cue-stale"
 
 # friendly name -> env key. Accepts the env key itself so callers can pass either.
 knob_key() {
@@ -58,6 +59,7 @@ knob_key() {
     audio-ttl)             echo AGENT_AUDIO_FILE_TTL_MIN ;;
     audio-host)            echo AGENT_AUDIO_FILE_HOST ;;
     webview-ttl)           echo AGENT_WEBVIEW_TTL_MIN ;;
+    webview-host)          echo AGENT_WEBVIEW_HOST ;;
     spin-every)            echo AGENT_SPIN_CHECK_EVERY ;;
     spin-model)            echo AGENT_SPIN_CHECK_MODEL ;;
     spin-provider)         echo AGENT_SPIN_CHECK_PROVIDER ;;
@@ -199,7 +201,7 @@ fi
 
 case "${1:-}" in
   --json) list_json; exit 0 ;;
-  -h|--help|help) sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  -h|--help|help) sed -n '2,37p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
   set)
     [ "$#" -ge 3 ] || { echo "agent-toggle: usage: agent-toggle set <knob|KEY> VALUE" >&2; exit 2; }
     key="$(knob_key "$2")" || { echo "agent-toggle: unknown knob '$2'" >&2; exit 2; }
