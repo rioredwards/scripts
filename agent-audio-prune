@@ -52,6 +52,18 @@ log_dir="$HOME/.cache/note-on-turn"
 mkdir -p "$log_dir"
 log="$log_dir/audio-prune.log"
 
+# An unreadable dir must fail loud, not read as empty. launchd-spawned zsh has
+# no TCC grant for iCloud Drive unless /bin/zsh is given Full Disk Access (see
+# the plist comment), and the resulting find failure looked like "nothing to
+# prune" — every hourly run from 2026-07-25 to -31 no-opped silently while the
+# dir sat 119MB over cap. -d passes (traversal is allowed), reading is not.
+if ! ls "$dir" >/dev/null 2>&1; then
+  printf '%s cannot read %s — TCC grant missing? see LaunchAgent plist comment\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$dir" >>"$log"
+  echo "agent-audio-prune: cannot read $dir (TCC grant missing?)" >&2
+  exit 1
+fi
+
 # These are regenerable rotation artifacts, but they live in iCloud alongside
 # files Rio may care about, so removal goes through Trash and stays recoverable.
 remove() {
