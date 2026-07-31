@@ -1,42 +1,38 @@
 #!/usr/bin/env bash
 # Dynamic agent context — emitted at SessionStart for Claude Code and Codex.
 #
-# Prints a single JSON object on stdout:
-#   {"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"..."}}
+# One rule: a fact is a provider script in providers/ that prints "Name: value"
+# lines on stdout. How it gets that value — computing it, reading a file an
+# Apple Shortcut wrote, calling an API — is that provider's own business.
+# There is no "derived" vs "declared" split to reason about.
 #
-# Two sources of context:
-#   1. Derived — facts the shell can see right now (machine, SSH).
-#   2. Declared — ~/scripts/agent-context/state.json, written by anything
-#      (Apple Shortcuts, a CLI, an automation). Every key/value is emitted as-is.
-#      Extension point: add a key there, no change needed here.
+#   Add a fact       drop an executable in providers/. Nothing else changes.
+#   Nothing to say   print nothing, exit 0. Normal (e.g. Shortcut hasn't run).
+#   Broken           exit non-zero. Fails the whole emit, loudly, by name.
+#
+# Providers run in filename order, hence the numeric prefixes.
 
 set -euo pipefail
+shopt -s nullglob
 
-STATE_FILE="${AGENT_CONTEXT_STATE:-$HOME/scripts/agent-context/state.json}"
+providers="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/providers"
 
-# --- 1. derived: which Mac, and is Rio driving it directly? ---------------
-host_id=$(scutil --get LocalHostName | tr '[:upper:]' '[:lower:]')
-case "$host_id" in
-  *mac-mini*) machine="Mac Mini" ;;
-  *macbook*)  machine="MacBook Air" ;;
-  *) echo "agent-context: unrecognized LocalHostName '$host_id'" >&2; exit 1 ;;
-esac
+facts=""
+for p in "$providers"/*; do
+  if [ ! -x "$p" ]; then
+    echo "agent-context: provider not executable: $p" >&2
+    exit 1
+  fi
+  if ! out=$("$p"); then
+    echo "agent-context: provider failed: $p" >&2
+    exit 1
+  fi
+  if [ -n "$out" ]; then
+    facts+="$out"$'\n'
+  fi
+done
 
-if [ -n "${SSH_CONNECTION:-}" ]; then
-  seat="SSH session from ${SSH_CONNECTION%% *}. Rio is NOT sitting at this Mac — \
-GUI side effects (open, screenshots, notifications, Reminders, Shortcuts) land \
-on $machine's screen, which he cannot see. Route anything visual to his machine."
-else
-  seat="Local session. Rio is sitting at this Mac — GUI side effects land on his screen."
-fi
+[ -n "$facts" ] || exit 0
 
-facts="Machine: $machine
-Seat: $seat"
-
-# --- 2. declared: whatever wrote state.json ------------------------------
-if [ -f "$STATE_FILE" ]; then
-  facts+=$'\n'$(jq -r 'to_entries[] | "\(.key): \(.value)"' "$STATE_FILE")
-fi
-
-jq -nc --arg c "$facts" \
+jq -nc --arg c "${facts%$'\n'}" \
   '{hookSpecificOutput:{hookEventName:"SessionStart",additionalContext:$c}}'
