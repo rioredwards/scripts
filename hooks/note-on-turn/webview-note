@@ -31,10 +31,29 @@ if [ ! -f "$renderer" ]; then
   exit 1
 fi
 
+# node lives under nvm on the MacBook, so a bare `node` resolves from a terminal
+# and disappears the moment this runs with a bare PATH (launchd, cron, an agent
+# started outside a login shell). Resolve it here so the failure names itself
+# instead of surfacing as an opaque "command not found" in the log.
+node_bin="${AGENT_WEBVIEW_NODE:-$(command -v node 2>/dev/null || true)}"
+if [ -z "$node_bin" ]; then
+  # Newest nvm install first, then the usual Homebrew prefixes.
+  node_bin="$(ls -1d "$HOME/.nvm/versions/node"/*/bin/node 2>/dev/null | sort -V | tail -1)"
+  if [ -z "$node_bin" ]; then
+    for candidate in /opt/homebrew/bin/node /usr/local/bin/node; do
+      [ -x "$candidate" ] && node_bin="$candidate" && break
+    done
+  fi
+fi
+if [ -z "$node_bin" ] || [ ! -x "$node_bin" ]; then
+  printf '%s node not found (PATH=%s) — set AGENT_WEBVIEW_NODE\n' "$(stamp)" "${PATH:-}" >>"$log"
+  exit 1
+fi
+
 payload="$(cat)"
 [ -n "$payload" ] || exit 0
 
-if ! printf '%s' "$payload" | node "$renderer" --out "$out" --title "Agent reply" >/dev/null 2>>"$log"; then
+if ! printf '%s' "$payload" | "$node_bin" "$renderer" --out "$out" --title "Agent reply" >/dev/null 2>>"$log"; then
   printf '%s render failed -> %s\n' "$(stamp)" "$out" >>"$log"
   exit 1
 fi
