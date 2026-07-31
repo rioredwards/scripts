@@ -122,6 +122,21 @@ cwd="${HOOK_CWD:-}"
 # nothing but a log line to show for it — XAI_API_KEY went missing on 2026-07-21
 # and ate a run of turns unnoticed. Text Rio instead, debounced so a sustained
 # outage sends one message rather than one per turn.
+# Optional structured summary (-s FILE): a JSON object merged into the sidecar
+# as .structured. Read HERE, before any fork, and kept in a variable — the
+# sidecar is written seconds later inside a backgrounded synth, by which time a
+# caller that passed a mktemp file has already exited and cleaned it up. Reading
+# it late meant the clip lost its structure silently and the web view quietly
+# degraded to plain prose.
+structured='null'
+if [ -n "$structured_file" ]; then
+  if [ -f "$structured_file" ]; then
+    structured="$(cat "$structured_file")"
+  else
+    printf '%s -s file missing: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$structured_file" >>"$log"
+  fi
+fi
+
 notify_failure() {
   stamp="$log_dir/audio-note-failed.stamp"
   now="$(date +%s)"
@@ -159,13 +174,6 @@ synth_and_sidecar() {
   if [ -n "$cwd" ] && [ -d "$cwd" ]; then
     repo="$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null || true)"
     [ -n "$repo" ] && repo_name="$(basename "$repo")"
-  fi
-
-  # Optional structured summary (-s FILE): a JSON object merged into the
-  # sidecar as .structured. Invalid JSON fails the jq call and is logged.
-  structured='null'
-  if [ -n "$structured_file" ] && [ -f "$structured_file" ]; then
-    structured="$(cat "$structured_file")"
   fi
 
   # Stable id for the clip+sidecar pair. Filename is a slug of the summary with

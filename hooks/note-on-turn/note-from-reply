@@ -16,17 +16,50 @@ text="$(cat)"
 log_dir="$HOME/.cache/note-on-turn"
 mkdir -p "$log_dir"
 
-# Summarize strictly. A failed transform must NOT degrade into shipping the raw
-# reply — that is the exact silent failure this pipeline existed to prevent: Rio
-# gets a novel on his phone and no signal that the summarizer broke. Strict mode
-# fails; we then deliver a short, explicit failure notice instead of the text.
+# Summarize once, into the structured shape. The phone text, the spoken audio,
+# and the web view all render from this single object, so they cannot drift
+# apart the way a separate narration field did.
+#
+# A failed transform must NOT degrade into shipping the raw reply — that is the
+# exact silent failure this pipeline existed to prevent: Rio gets a novel on his
+# phone and no signal that the summarizer broke. Any failure in the chain
+# (transform, malformed JSON, flatten) delivers a short explicit notice instead.
+#
+#   summary  display text, emoji kept    -> phone
+#   spoken   speech text, emoji stripped -> TTS
 degraded=""
-if summary="$(printf '%s' "$text" | "$scripts_root/summarize-for-note" --strict 2>>"$log_dir/summarize.err")"; then
-  :
+structured_tmp=""
+summary=""
+spoken=""
+# `return 0` is load-bearing: in sh the EXIT trap's last command sets the
+# script's exit status, so a falsy [ -n "" ] here made every degraded turn
+# exit 1.
+cleanup() { [ -n "$structured_tmp" ] && rm -f "$structured_tmp"; return 0; }
+trap cleanup EXIT
+
+if raw="$(printf '%s' "$text" | "$scripts_root/aitt" summarize-structured 2>>"$log_dir/summarize.err")" \
+  && [ -n "$raw" ] \
+  && summary="$(printf '%s' "$raw" | "$scripts_root/structured-to-text" 2>>"$log_dir/summarize.err")" \
+  && spoken="$(printf '%s' "$raw" | "$scripts_root/structured-to-text" --tts 2>>"$log_dir/summarize.err")"
+then
+  # Keep the object itself for the sidecar, so the web view renders regions
+  # rather than the flattened prose. Fences are stripped: models add them
+  # despite the prompt.
+  structured_tmp="$(mktemp)"
+  if ! printf '%s\n' "$raw" \
+    | sed -e 's/^[[:space:]]*```[a-zA-Z]*[[:space:]]*$//' \
+    | jq -c . > "$structured_tmp" 2>>"$log_dir/summarize.err"
+  then
+    printf '%s\tstructured JSON unparseable for sidecar (origin=%s)\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${HOOK_ORIGIN:-unknown}" >>"$log_dir/summarize.err"
+    rm -f "$structured_tmp"
+    structured_tmp=""
+  fi
 else
   degraded=1
   summary="⚠️ Summarizer failed this turn — no summary sent (raw reply withheld). Check aitt / $log_dir/summarize.err"
-  printf '%s\tsummarize-for-note --strict failed (origin=%s)\n' \
+  spoken="$summary"
+  printf '%s\tsummarize-structured failed (origin=%s)\n' \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${HOOK_ORIGIN:-unknown}" >>"$log_dir/summarize.err"
 fi
 
@@ -36,11 +69,12 @@ case "$AGENT_TEXT" in
   on|1|true|yes) printf '%s' "$summary" | "$scripts_root/sc" text-phone ;;
 esac
 
-# Speak the summary aloud when the voice toggle is on.
+# Speak the summary aloud when the voice toggle is on. Uses the emoji-stripped
+# text: a speech engine either skips an emoji or reads its name out loud.
 # Skipped when degraded: the phone text already carried the failure; there is no
 # reason to spend TTS on an error string.
 case "${degraded:+skip}${AGENT_SPEAK}" in
-  on|1|true|yes) printf '%s' "$summary" | "$scripts_root/hooks/note-on-turn/speak-note" ;;
+  on|1|true|yes) printf '%s' "$spoken" | "$scripts_root/hooks/note-on-turn/speak-note" ;;
 esac
 
 # Write a local audio file of the summary into the agent-audio dir when the
@@ -52,7 +86,15 @@ esac
 # AGENT_AUDIO_FILE_SINCE; if it's missing (enabled before this guard, or via the
 # profile default), we stamp it now so the cap always applies. TTL_MIN=0 disables.
 AGENT_AUDIO_FILE="${AGENT_AUDIO_FILE:-off}"
-synth_audio() { printf '%s' "$summary" | "$scripts_root/hooks/note-on-turn/audio-note-to-file"; }
+# Narrates the emoji-stripped text and attaches the structured object to the
+# sidecar, so the recording and the web view carry the same summary.
+synth_audio() {
+  if [ -n "$structured_tmp" ]; then
+    printf '%s' "$spoken" | "$scripts_root/hooks/note-on-turn/audio-note-to-file" -s "$structured_tmp"
+  else
+    printf '%s' "$spoken" | "$scripts_root/hooks/note-on-turn/audio-note-to-file"
+  fi
+}
 # Same reasoning as speak-note: never synthesize audio of a failure string.
 case "${degraded:+skip}${AGENT_AUDIO_FILE}" in
   on|1|true|yes)
