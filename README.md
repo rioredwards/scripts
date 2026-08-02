@@ -13,6 +13,7 @@ Small personal command wrappers and automation helpers. App-sized tools live in 
 - `process-text-for-speech` - prepares text for speech via `aitt`.
 - `summarize-for-note` - summarizes text for the note pipeline via `aitt`.
 - `grok-stt`, `grok-tts` - Grok speech helpers.
+- `agent-audio-prune` - signed Swift binary that caps disposable iCloud audio; source and tests live in `agent-audio-pruner/`.
 - `run-todaybar.sh`, `todaybar-watchdog.sh` - local daily-driver status helpers.
 
 ## Dotfiles Script Links

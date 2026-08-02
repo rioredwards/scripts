@@ -1,0 +1,18 @@
+#!/bin/sh
+set -eu
+
+root="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
+output="$root/../agent-audio-prune"
+identity="Developer ID Application: Rio Edwards (MZ35B6BV34)"
+login_keychain="$HOME/Library/Keychains/login.keychain-db"
+
+swift test --package-path "$root"
+swift build -c release --package-path "$root"
+if ! security show-keychain-info "$login_keychain" >/dev/null 2>&1; then
+  echo "agent-audio-pruner/build: login keychain is locked; unlock it before signing" >&2
+  exit 1
+fi
+codesign --force --options runtime --timestamp --sign "$identity" \
+  "$root/.build/release/agent-audio-prune"
+install -m 755 "$root/.build/release/agent-audio-prune" "$output"
+codesign --verify --strict --verbose=2 "$output"
