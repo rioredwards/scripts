@@ -52,11 +52,15 @@ log="$log_dir/audio-note.log"
 # becomes Rios-Mac-mini-3), which silently broke this gate and dropped two turns
 # on 2026-07-25. The suffix also flaps back on its own, so a gate that matches
 # the literal name works until it doesn't. Compare with any trailing collision
-# suffix stripped, case-insensitively, so neither a renumber nor a `scutil --set
-# HostName` (which lowercases) can quietly disable audio generation.
+# suffix stripped, case-insensitively. macOS can also report the same Mac as
+# `macbookair` or `Rios-MacBook-Air`, so ignore Rio's prefix and punctuation.
 want_host="${AGENT_AUDIO_FILE_HOST:-}"
 this_host="$(hostname -s 2>/dev/null)"
-host_base() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/-[0-9]+$//'; }
+host_base() {
+  printf '%s' "$1" \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed -E 's/-[0-9]+$//; s/^rios-//; s/[^a-z0-9]//g'
+}
 if [ -n "$want_host" ] && [ "$(host_base "$want_host")" != "$(host_base "$this_host")" ]; then
   printf '%s host gate: %s != AGENT_AUDIO_FILE_HOST=%s\n' \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$this_host" "$want_host" >>"$log"
