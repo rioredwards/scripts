@@ -29,19 +29,53 @@ mkdir -p "$log_dir"
 #   spoken   speech text, emoji stripped -> TTS
 degraded=""
 structured_tmp=""
+raw=""
 summary=""
 spoken=""
+err_tmp=""
+fail_stage=""
+fail_code=0
 # `return 0` is load-bearing: in sh the EXIT trap's last command sets the
 # script's exit status, so a falsy [ -n "" ] here made every degraded turn
 # exit 1.
-cleanup() { [ -n "$structured_tmp" ] && rm -f "$structured_tmp"; return 0; }
+cleanup() {
+  [ -n "$structured_tmp" ] && rm -f "$structured_tmp"
+  [ -n "$err_tmp" ] && rm -f "$err_tmp"
+  return 0
+}
 trap cleanup EXIT
 
-if raw="$(printf '%s' "$text" | "$scripts_root/aitt" summarize-structured 2>>"$log_dir/summarize.err")" \
-  && [ -n "$raw" ] \
-  && summary="$(printf '%s' "$raw" | "$scripts_root/structured-to-text" 2>>"$log_dir/summarize.err")" \
-  && spoken="$(printf '%s' "$raw" | "$scripts_root/structured-to-text" --tts 2>>"$log_dir/summarize.err")"
-then
+# Each stage runs on its own so a failure names itself. The old form chained
+# all three into one `if`, which recorded neither which stage broke nor why —
+# 13 skipped turns in a single day left 13 identical anonymous lines and
+# nothing to act on. Stderr goes to a scratch file and is flushed to the log
+# only on failure: on a good turn it is noise, and interleaving it with other
+# concurrent hooks made it unattributable anyway.
+#
+# `fail_code=$?` must come before `fail_stage=`, or the assignment overwrites
+# the status we are trying to capture.
+err_tmp="$(mktemp)"
+
+if [ -z "$fail_stage" ]; then
+  raw="$(printf '%s' "$text" | "$scripts_root/aitt" summarize-structured 2>"$err_tmp")" \
+    || { fail_code=$?; fail_stage="aitt summarize-structured"; }
+fi
+# Empty output with exit 0 is the common failure, and the one the old chain
+# hid completely: `[ -n "$raw" ]` failed silently and looked like every other
+# error. Name it distinctly.
+if [ -z "$fail_stage" ] && [ -z "$raw" ]; then
+  fail_stage="aitt summarize-structured (empty output, exit 0)"
+fi
+if [ -z "$fail_stage" ]; then
+  summary="$(printf '%s' "$raw" | "$scripts_root/structured-to-text" 2>>"$err_tmp")" \
+    || { fail_code=$?; fail_stage="structured-to-text"; }
+fi
+if [ -z "$fail_stage" ]; then
+  spoken="$(printf '%s' "$raw" | "$scripts_root/structured-to-text" --tts 2>>"$err_tmp")" \
+    || { fail_code=$?; fail_stage="structured-to-text --tts"; }
+fi
+
+if [ -z "$fail_stage" ]; then
   # Keep the object itself for the sidecar, so the web view renders regions
   # rather than the flattened prose. Fences are stripped: models add them
   # despite the prompt.
@@ -50,17 +84,31 @@ then
     | sed -e 's/^[[:space:]]*```[a-zA-Z]*[[:space:]]*$//' \
     | jq -c . > "$structured_tmp" 2>>"$log_dir/summarize.err"
   then
-    printf '%s\tstructured JSON unparseable for sidecar (origin=%s)\n' \
-      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${HOOK_ORIGIN:-unknown}" >>"$log_dir/summarize.err"
+    printf '%s\tstructured JSON unparseable for sidecar agent=%s session=%s\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${HOOK_AGENT:-unknown}" \
+      "${HOOK_SESSION_ID:-unknown}" >>"$log_dir/summarize.err"
     rm -f "$structured_tmp"
     structured_tmp=""
   fi
 else
   degraded=1
-  summary="⚠️ Summarizer failed this turn — no summary sent (raw reply withheld). Check aitt / $log_dir/summarize.err"
+  summary="⚠️ Summarizer failed this turn — no summary sent (raw reply withheld). Stage: $fail_stage. See $log_dir/summarize.err"
   spoken="$summary"
-  printf '%s\tsummarize-structured failed (origin=%s)\n' \
-    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${HOOK_ORIGIN:-unknown}" >>"$log_dir/summarize.err"
+  # One record per failure carrying everything needed to diagnose it without
+  # reproducing: which stage, its exit code, how much the model actually
+  # returned, who was running, and the stage's own stderr. `origin` was logged
+  # here before but nothing ever set HOOK_ORIGIN, so every line read
+  # "origin=unknown" — the adapters export HOOK_AGENT/HOOK_SESSION_ID.
+  {
+    printf '%s\tFAILED stage=%s exit=%s raw_bytes=%s agent=%s session=%s\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$fail_stage" "$fail_code" \
+      "${#raw}" "${HOOK_AGENT:-unknown}" "${HOOK_SESSION_ID:-unknown}"
+    if [ -s "$err_tmp" ]; then
+      sed -n '1,20s/^/          stderr: /p' "$err_tmp"
+    else
+      printf '          stderr: (none — stage produced no diagnostics)\n'
+    fi
+  } >>"$log_dir/summarize.err"
 fi
 
 # Text the summary to Rio's phone when the text toggle is on.
