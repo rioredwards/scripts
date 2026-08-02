@@ -148,7 +148,7 @@ notify_failure() {
   case "$last" in ''|*[!0-9]*) last=0 ;; esac
   [ "$(( now - last ))" -ge "${AGENT_AUDIO_FILE_ALERT_EVERY:-1800}" ] || return 0
   printf '%s' "$now" > "$stamp"
-  printf '🔴 Agent audio failed (%s): %s' "$engine" "$1" \
+  printf '🔴 Agent audio failed (%s on %s): %s' "$engine" "$(hostname -s)" "$1" \
     | "$HOME/scripts/sc" text-phone >/dev/null 2>&1 || true
 }
 

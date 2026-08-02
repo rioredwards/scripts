@@ -92,7 +92,7 @@ if [ -z "$fail_stage" ]; then
   fi
 else
   degraded=1
-  summary="⚠️ Summarizer failed this turn — no summary sent (raw reply withheld). Stage: $fail_stage. See $log_dir/summarize.err"
+  summary="⚠️ Summarizer failed this turn on $(hostname -s) — no summary sent (raw reply withheld). Stage: $fail_stage. See $log_dir/summarize.err"
   spoken="$summary"
   # One record per failure carrying everything needed to diagnose it without
   # reproducing: which stage, its exit code, how much the model actually
@@ -157,7 +157,7 @@ case "${degraded:+skip}${AGENT_AUDIO_FILE}" in
       synth_audio
     elif [ "$(( $(date +%s) - since ))" -gt "$(( ttl_min * 60 ))" ]; then
       "$scripts_root/agent-toggle" audio off >/dev/null 2>&1 || true
-      printf '🔇 Agent audio auto-off after %sm (forgotten toggle — TTS credits saved)' "$ttl_min" \
+      printf '🔇 Agent audio auto-off after %sm on %s (forgotten toggle — TTS credits saved)' "$ttl_min" "$(hostname -s)" \
         | "$scripts_root/sc" text-phone >/dev/null 2>&1 || true
     else
       synth_audio
