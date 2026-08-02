@@ -87,13 +87,18 @@ if [ -z "${text//[[:space:]]/}" ]; then
   exit 2
 fi
 
-# API key: env first, Keychain fallback for non-login shells.
+# API key: env first, Keychain fallback for non-login shells. SSH-launched
+# shells have neither (locked Keychain, no GUI env) — read the GUI launchd
+# domain, where the hourly keychain-env loader keeps it, as a last resort.
 key="${XAI_API_KEY:-}"
 if [ -z "$key" ]; then
   key="$(security find-generic-password -s com.rio.api.xai -a XAI_API_KEY -w 2>/dev/null || true)"
 fi
 if [ -z "$key" ]; then
-  echo "grok-tts: XAI_API_KEY not found in env or Keychain (com.rio.api.xai)" >&2
+  key="$(launchctl print "gui/$(id -u)" 2>/dev/null | sed -n 's/^[[:space:]]*XAI_API_KEY => //p' | head -1)"
+fi
+if [ -z "$key" ]; then
+  echo "grok-tts: XAI_API_KEY not found in env, Keychain (com.rio.api.xai), or GUI launchd env" >&2
   exit 1
 fi
 
