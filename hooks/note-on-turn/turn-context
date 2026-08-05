@@ -1,0 +1,160 @@
+#!/bin/sh
+# turn-context — print the verified facts that orient a turn's narration.
+#
+# stdout: a labelled block of `Key: value` lines, fed to the `narrate-turn`
+# transform ahead of the reply text. The model phrases these into a natural
+# lead-in; it is told everything absent here is unknown, so a fact we cannot
+# establish is simply omitted rather than guessed.
+#
+# Everything here is computed, never inferred by a model: Rio works across
+# several repos and worktrees at once, and a hallucinated branch name is worse
+# than no branch name. Facts come from the HOOK_* vars the per-agent adapter
+# exports plus the machine itself.
+#
+#   HOOK_AGENT            claude | codex | opencode | antigravity
+#   HOOK_SESSION_ID       used for the turn counter and the issue lookup
+#   HOOK_CWD              repo/branch/worktree are derived from this
+#   HOOK_TRANSCRIPT_PATH  the session's first user prompt becomes "Session goal"
+#
+# Per-session state (turn number, goal, resolved issue) is cached under
+# ~/.cache/note-on-turn/sessions/ so the transcript is parsed and the issue
+# looked up once, not on every turn.
+#
+# Never fails the caller. Any fact that cannot be established is dropped and
+# the block prints without it; a completely empty block prints nothing at all.
+set -u
+
+state_dir="$HOME/.cache/note-on-turn/sessions"
+sid="${HOOK_SESSION_ID:-}"
+cwd="${HOOK_CWD:-}"
+
+# ---------------------------------------------------------------- time/machine
+# Local time on the machine that ran the turn — which is the machine that did
+# the work, not necessarily the one Rio is sitting at, hence naming both.
+now="$(date '+%-I:%M %p, %A' 2>/dev/null || true)"
+
+host="$(hostname -s 2>/dev/null || true)"
+# Normalized the same way audio-note-to-file does: macOS renumbers LocalHostName
+# after a Bonjour collision (Rios-Mac-mini-2 -> -3), so match on a stripped base.
+host_base="$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]' | sed -E 's/-[0-9]+$//; s/^rios-//; s/[^a-z0-9]//g')"
+case "$host_base" in
+  macmini)    machine="the Mac Mini" ;;
+  macbookair) machine="the MacBook Air" ;;
+  '')         machine="" ;;
+  *)          machine="$host" ;;
+esac
+
+case "${HOOK_AGENT:-}" in
+  claude)      agent="Claude Code" ;;
+  codex)       agent="Codex" ;;
+  opencode)    agent="OpenCode" ;;
+  antigravity) agent="Antigravity" ;;
+  '')          agent="" ;;
+  *)           agent="${HOOK_AGENT}" ;;
+esac
+
+# ------------------------------------------------------------- repo/branch/tree
+project=""
+branch=""
+worktree=""
+if [ -n "$cwd" ] && [ -d "$cwd" ]; then
+  toplevel="$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null || true)"
+  if [ -n "$toplevel" ]; then
+    project="$(basename "$toplevel")"
+    branch="$(git -C "$cwd" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+    [ "$branch" = "HEAD" ] && branch="detached HEAD"
+    # A linked worktree has its own .git dir under the main repo's; the primary
+    # checkout has them equal. Only worth mentioning when it is a linked one,
+    # since that is exactly the case where Rio loses track of where he is.
+    gitdir="$(git -C "$cwd" rev-parse --absolute-git-dir 2>/dev/null || true)"
+    commondir="$(git -C "$cwd" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+    if [ -n "$gitdir" ] && [ -n "$commondir" ] && [ "$gitdir" != "$commondir" ]; then
+      worktree="$project"
+      # Report the repo by its main checkout, not the worktree directory —
+      # "scripts, worktree audio-fix" orients; "audio-fix" alone does not.
+      if [ "$(basename "$commondir")" = ".git" ]; then
+        project="$(basename "$(dirname "$commondir")")"
+      fi
+    fi
+  fi
+fi
+
+# -------------------------------------------------------------- session state
+turn=""
+goal=""
+issue=""
+if [ -n "$sid" ] && command -v jq >/dev/null 2>&1; then
+  mkdir -p "$state_dir" 2>/dev/null || true
+  # Session ids come from the agent, but this builds a path — refuse anything
+  # with a slash or dot-dot rather than writing outside the state dir.
+  case "$sid" in
+    */*|*..*) state_file="" ;;
+    *)        state_file="$state_dir/$sid.json" ;;
+  esac
+
+  if [ -n "$state_file" ]; then
+    prev="$(cat "$state_file" 2>/dev/null || true)"
+    printf '%s' "$prev" | jq -e . >/dev/null 2>&1 || prev='{}'
+    [ -n "$prev" ] || prev='{}'
+
+    turn="$(printf '%s' "$prev" | jq -r '(.turn // 0) + 1')"
+    goal="$(printf '%s' "$prev" | jq -r '.goal // ""')"
+    issue="$(printf '%s' "$prev" | jq -r '.issue // ""')"
+    issue_checked="$(printf '%s' "$prev" | jq -r '.issue_checked // 0')"
+
+    # The session's first user prompt is the closest thing to a stated goal, and
+    # it is already on disk — no model call, no guessing. Captured once.
+    if [ -z "$goal" ] && [ -n "${HOOK_TRANSCRIPT_PATH:-}" ] && [ -f "${HOOK_TRANSCRIPT_PATH:-}" ]; then
+      goal="$(jq -r '
+          select(.type == "user")
+          | .message.content
+          | if type == "string" then . else ([.[]? | select(.type == "text") | .text] | join(" ")) end
+        ' "$HOOK_TRANSCRIPT_PATH" 2>/dev/null \
+        | sed -e 's/<system-reminder>.*<\/system-reminder>//g' -e 's/<[^>]*>//g' \
+        | grep -v '^[[:space:]]*$' \
+        | head -1 \
+        | cut -c1-240)"
+    fi
+
+    # The issue for this session is findable because issue-session-footer.sh
+    # stamps `Session: <id>` into every issue this agent creates or edits. That
+    # makes the issue title the name of the larger effort — the "part 4 of an
+    # epic" context that is otherwise missing entirely. Looked up at most once
+    # every 10 turns until found, so a mid-session `gh issue create` is picked
+    # up without paying for a network call on every turn.
+    if [ -z "$issue" ] && [ -n "$project" ] && command -v gh >/dev/null 2>&1; then
+      if [ "$(( turn % 10 ))" -eq 1 ] || [ "$issue_checked" = "0" ]; then
+        issue_checked=1
+        found="$(cd "$cwd" 2>/dev/null && \
+          gh issue list --search "$sid" --state all --limit 1 \
+             --json number,title --jq '.[0] | select(.number) | "#\(.number) — \(.title)"' \
+             2>/dev/null || true)"
+        [ -n "$found" ] && issue="$found"
+      fi
+    fi
+
+    jq -n --argjson turn "${turn:-1}" --arg goal "$goal" --arg issue "$issue" \
+          --argjson checked "${issue_checked:-0}" \
+      '{turn:$turn, goal:$goal, issue:$issue, issue_checked:$checked}' \
+      > "$state_file" 2>/dev/null || true
+  fi
+fi
+
+# ---------------------------------------------------------------------- output
+out=""
+add() { [ -n "$2" ] && out="$out$1: $2
+"; }
+
+add "Time" "$now"
+add "Machine" "$machine"
+add "Agent" "$agent"
+add "Project" "$project"
+add "Branch" "$branch"
+add "Worktree" "$worktree"
+[ -n "$turn" ] && add "Turn" "number $turn of this session"
+add "Session goal" "$goal"
+add "Issue" "$issue"
+
+[ -n "$out" ] || exit 0
+
+printf 'MESSAGE CONTEXT — verified facts, use these for the lead-in. Anything not listed here is unknown; do not guess it.\n%s' "$out"
