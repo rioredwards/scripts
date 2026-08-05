@@ -1,0 +1,101 @@
+#!/bin/sh
+# narration-title — derive a short title from a turn narration.
+#
+# stdin:  the prose emitted by the aitt `narrate-turn` transform.
+# stdout: one line, the title.
+#
+#   -c FILE   the `turn-context` fact block used to generate the narration.
+#
+# Why this exists: the narration opens with an orientation lead-in ("It's 11:03
+# on Tuesday night, this is turn three in the scripts project…"). Naming a clip
+# after its first words would give every clip in the Raycast player a near
+# identical name that says nothing about the turn. So the title is the first
+# sentence that is *not* the lead-in.
+#
+# The lead-in is identifiable rather than guessed at: it is phrased from the
+# fact block, so a sentence mentioning the project, branch, worktree, agent,
+# machine, weekday or a clock time is lead-in and gets skipped. -c is optional;
+# without it only the clock-time and turn-number tests apply.
+#
+# Never fails the caller. A narration that is nothing but lead-in falls back to
+# its first sentence and logs, because a mediocre title is worth more than a
+# missing one.
+set -eu
+
+facts_file=""
+while getopts ":c:h" opt; do
+  case "$opt" in
+    c) facts_file="$OPTARG" ;;
+    h) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) : ;;
+  esac
+done
+shift $((OPTIND - 1))
+
+text="$(cat)"
+[ -n "$text" ] || exit 0
+
+facts=""
+[ -n "$facts_file" ] && [ -f "$facts_file" ] && facts="$(cat "$facts_file")"
+
+log_dir="$HOME/.cache/note-on-turn"
+mkdir -p "$log_dir" 2>/dev/null || true
+
+export NARRATION_FACTS="$facts"
+export NARRATION_LOG="$log_dir/narration-title.log"
+
+printf '%s' "$text" | perl -CSD -e '
+  my $EMOJI = qr/[\x{200D}\x{FE00}-\x{FE0F}\x{2190}-\x{21FF}\x{2300}-\x{23FF}\x{25A0}-\x{25FF}\x{2600}-\x{27BF}\x{2B00}-\x{2BFF}\x{1F000}-\x{1FAFF}]/;
+  local $/; my $t = <STDIN>;
+
+  # Annotations are markup, never title material.
+  $t =~ s/\[[^\[\]]*\]//g;
+  $t =~ s/$EMOJI//g;
+  $t =~ s/[*_`#>~|]//g;
+
+  # Words from the fact values that mark a sentence as lead-in. Short words are
+  # dropped: a project called "sc" would match half the prose.
+  my @marks;
+  for my $line (split /\n/, ($ENV{NARRATION_FACTS} // "")) {
+    next unless $line =~ /^(Project|Branch|Worktree|Agent|Machine|Time):\s*(.+)$/;
+    my ($key, $val) = ($1, $2);
+    # Time contributes only its weekday; the clock is matched by pattern below.
+    $val =~ s/^.*,\s*// if $key eq "Time";
+    for my $w (split /[^A-Za-z0-9-]+/, $val) {
+      push @marks, lc $w if length($w) >= 4;
+    }
+  }
+  my %seen; @marks = grep { !$seen{$_}++ } @marks;
+
+  my @sentences = grep { /\S/ } split /(?<=[.!?])\s+/, $t;
+  my $fallback = "";
+  my $pick = "";
+  for my $s (@sentences) {
+    $s =~ s/^\s+|\s+$//g;
+    next if $s eq "";
+    $fallback = $s unless $fallback;
+    next if $s =~ /\d{1,2}:\d{2}/;                 # a clock time
+    next if $s =~ /\bturn (number )?\w+ of\b/i;    # "turn three of this session"
+    next if grep { index(lc $s, $_) >= 0 } @marks;
+    $pick = $s;
+    last;
+  }
+
+  unless ($pick) {
+    $pick = $fallback;
+    if (open my $fh, ">>", ($ENV{NARRATION_LOG} // "/dev/null")) {
+      print $fh scalar(gmtime) . "\tno non-lead-in sentence; fell back to the first\n";
+      close $fh;
+    }
+  }
+  exit 0 unless $pick;
+
+  # Trim to a length that reads as a title, cutting at a word boundary.
+  if (length($pick) > 88) {
+    $pick = substr($pick, 0, 88);
+    $pick =~ s/\s+\S*$//;
+    $pick .= "\x{2026}";
+  }
+  $pick =~ s/\s{2,}/ /g;
+  print "$pick\n";
+'

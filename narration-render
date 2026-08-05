@@ -1,0 +1,70 @@
+#!/bin/sh
+# narration-render — render a turn narration for one surface.
+#
+# stdin:  the prose emitted by the aitt `narrate-turn` transform — connected
+#         sentences with inline annotations like `[❓ Decision]` written into
+#         them.
+# stdout: the same prose, adapted to the surface.
+#
+#   (none)     phone text. Annotations pass through exactly as written; the
+#              emoji is the whole point on a screen.
+#   --speech   spoken audio. `[❓ Decision]` becomes the cue `— decision —`
+#              and every emoji is removed, because a speech engine either
+#              skips an emoji or reads its name out loud ("question mark
+#              ornament").
+#
+# There is no schema here on purpose. The narration text *is* the artifact all
+# three surfaces render, so the phone, the audio and the page cannot say
+# different things — the failure mode of the structured summary this replaced.
+#
+# Fails loud. Empty input or input that renders to nothing exits non-zero with
+# a reason, rather than letting a caller text and narrate an empty message.
+set -eu
+
+speech=0
+for arg in "$@"; do
+  case "$arg" in
+    --speech) speech=1 ;;
+    -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "narration-render: unknown option '$arg'" >&2; exit 2 ;;
+  esac
+done
+
+text="$(cat)"
+[ -n "$text" ] || { echo "narration-render: empty input" >&2; exit 3; }
+
+if [ "$speech" -eq 1 ]; then
+  # An annotation is identified by containing an emoji, not by matching a list
+  # of names: the prompt offers 26 labels and models paraphrase them
+  # ("Important" for "Important detail"), so a closed list would silently miss
+  # some. Bracketed text with no emoji is ordinary prose and is left alone.
+  #
+  # Ranges match structured-to-text's, chosen to miss the punctuation the prose
+  # legitimately uses (em dash, middot).
+  text="$(printf '%s' "$text" | perl -CSD -e '
+    my $EMOJI = qr/[\x{200D}\x{FE00}-\x{FE0F}\x{2190}-\x{21FF}\x{2300}-\x{23FF}\x{25A0}-\x{25FF}\x{2600}-\x{27BF}\x{2B00}-\x{2BFF}\x{1F000}-\x{1FAFF}]/;
+    local $/; my $t = <STDIN>;
+    $t =~ s{\[([^\[\]]*)\]}{
+      my $in = $1;
+      if ($in =~ $EMOJI) {
+        my $l = $in;
+        $l =~ s/$EMOJI//g;
+        $l =~ s/^\s+|\s+$//g;
+        $l eq "" ? "" : " \x{2014} " . lc($l) . " \x{2014}";
+      } else {
+        "[$in]";
+      }
+    }ge;
+    $t =~ s/$EMOJI//g;
+    # An annotation next to prose that already uses an em dash leaves a run of
+    # them, which reads as a stutter aloud.
+    $t =~ s/\x{2014}(\s*\x{2014})+/\x{2014}/g;
+    $t =~ s/[ \t]{2,}/ /g;
+    $t =~ s/[ \t]+([,.;:!?])/$1/g;
+    $t =~ s/^[ \t]+//mg;
+    print $t;
+  ')"
+  [ -n "$text" ] || { echo "narration-render: --speech rendered to nothing" >&2; exit 3; }
+fi
+
+printf '%s\n' "$text"
