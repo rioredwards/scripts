@@ -56,7 +56,13 @@ fi
 payload="$(cat)"
 [ -n "$payload" ] || exit 0
 
-if ! printf '%s' "$payload" | "$node_bin" "$renderer" --out "$out" --title "Agent reply" >/dev/null 2>>"$log"; then
+# The narration path derives a title from the prose; without one (legacy
+# structured payloads, or a title step that failed) the page keeps its old
+# generic heading.
+title="$(printf '%s' "$payload" | jq -r '.title // "" | select(length > 0)' 2>/dev/null || true)"
+[ -n "$title" ] || title="Agent reply"
+
+if ! printf '%s' "$payload" | "$node_bin" "$renderer" --out "$out" --title "$title" >/dev/null 2>>"$log"; then
   printf '%s render failed -> %s\n' "$(stamp)" "$out" >>"$log"
   exit 1
 fi

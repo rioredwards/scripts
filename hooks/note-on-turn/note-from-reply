@@ -16,22 +16,32 @@ text="$(cat)"
 log_dir="$HOME/.cache/note-on-turn"
 mkdir -p "$log_dir"
 
-# Summarize once, into the structured shape. The phone text, the spoken audio,
-# and the web view all render from this single object, so they cannot drift
-# apart the way a separate narration field did.
+# Narrate once, as prose. The phone text, the spoken audio and the web view all
+# render from that one piece of text, so they cannot drift apart the way a
+# separate narration field did.
+#
+# This replaced a structured JSON summary ({headline, sections[]}) that every
+# surface was flattened out of. The schema kept the surfaces in sync but was
+# built for a page: spoken aloud it became a list of section titles, it forced
+# content into categories that often didn't fit, and it opened with no
+# orientation at all. Prose with inline annotations keeps the sync — the text
+# *is* the artifact — without any of that.
 #
 # A failed transform must NOT degrade into shipping the raw reply — that is the
 # exact silent failure this pipeline existed to prevent: Rio gets a novel on his
 # phone and no signal that the summarizer broke. Any failure in the chain
-# (transform, malformed JSON, flatten) delivers a short explicit notice instead.
+# delivers a short explicit notice instead.
 #
-#   summary  display text, emoji kept    -> phone
-#   spoken   speech text, emoji stripped -> TTS
+#   narration  prose with inline annotations -> web view
+#   summary    same text, annotations kept   -> phone
+#   spoken     annotations as spoken cues    -> TTS
 degraded=""
-structured_tmp=""
-raw=""
+ctx_tmp=""
+merge_tmp=""
+narration=""
 summary=""
 spoken=""
+title=""
 err_tmp=""
 fail_stage=""
 fail_code=0
@@ -39,11 +49,20 @@ fail_code=0
 # script's exit status, so a falsy [ -n "" ] here made every degraded turn
 # exit 1.
 cleanup() {
-  [ -n "$structured_tmp" ] && rm -f "$structured_tmp"
+  [ -n "$ctx_tmp" ] && rm -f "$ctx_tmp"
+  [ -n "$merge_tmp" ] && rm -f "$merge_tmp"
   [ -n "$err_tmp" ] && rm -f "$err_tmp"
   return 0
 }
 trap cleanup EXIT
+
+# The facts that orient the narration — time, machine, project, branch,
+# worktree, turn number, session goal, issue. Computed, never inferred: see
+# turn-context. Handed to the model as verified data so it phrases them into a
+# lead-in instead of guessing at them. Never fails; an empty block just means
+# the narration opens without orientation.
+ctx_tmp="$(mktemp)"
+"$scripts_root/hooks/note-on-turn/turn-context" > "$ctx_tmp" 2>>"$log_dir/summarize.err" || true
 
 # Each stage runs on its own so a failure names itself. The old form chained
 # all three into one `if`, which recorded neither which stage broke nor why —
@@ -56,40 +75,54 @@ trap cleanup EXIT
 # the status we are trying to capture.
 err_tmp="$(mktemp)"
 
+# Facts first, then the reply, with a header between them so the model can tell
+# which is which.
+if [ -s "$ctx_tmp" ]; then
+  transform_input="$(cat "$ctx_tmp")
+AGENT REPLY TO REWRITE
+
+$text"
+else
+  transform_input="$text"
+fi
+
+# Writing quality is the entire point of this pipeline, so it runs on a stronger
+# model than the aitt default. Overridable from the agent-hooks profile.
 if [ -z "$fail_stage" ]; then
-  raw="$(printf '%s' "$text" | "$scripts_root/aitt" summarize-structured 2>"$err_tmp")" \
-    || { fail_code=$?; fail_stage="aitt summarize-structured"; }
+  narration="$(printf '%s' "$transform_input" \
+    | LLM_MODEL="${AGENT_NARRATE_MODEL:-sonnet}" "$scripts_root/aitt" narrate-turn 2>"$err_tmp")" \
+    || { fail_code=$?; fail_stage="aitt narrate-turn"; }
 fi
 # Empty output with exit 0 is the common failure, and the one the old chain
 # hid completely: `[ -n "$raw" ]` failed silently and looked like every other
 # error. Name it distinctly.
-if [ -z "$fail_stage" ] && [ -z "$raw" ]; then
-  fail_stage="aitt summarize-structured (empty output, exit 0)"
+if [ -z "$fail_stage" ] && [ -z "$narration" ]; then
+  fail_stage="aitt narrate-turn (empty output, exit 0)"
 fi
 if [ -z "$fail_stage" ]; then
-  summary="$(printf '%s' "$raw" | "$scripts_root/structured-to-text" 2>>"$err_tmp")" \
-    || { fail_code=$?; fail_stage="structured-to-text"; }
+  summary="$(printf '%s' "$narration" | "$scripts_root/narration-render" 2>>"$err_tmp")" \
+    || { fail_code=$?; fail_stage="narration-render"; }
 fi
 if [ -z "$fail_stage" ]; then
-  spoken="$(printf '%s' "$raw" | "$scripts_root/structured-to-text" --tts 2>>"$err_tmp")" \
-    || { fail_code=$?; fail_stage="structured-to-text --tts"; }
+  spoken="$(printf '%s' "$narration" | "$scripts_root/narration-render" --speech 2>>"$err_tmp")" \
+    || { fail_code=$?; fail_stage="narration-render --speech"; }
 fi
 
 if [ -z "$fail_stage" ]; then
-  # Keep the object itself for the sidecar, so the web view renders regions
-  # rather than the flattened prose. Fences are stripped: models add them
-  # despite the prompt.
-  structured_tmp="$(mktemp)"
-  if ! printf '%s\n' "$raw" \
-    | sed -e 's/^[[:space:]]*```[a-zA-Z]*[[:space:]]*$//' \
-    | jq -c . > "$structured_tmp" 2>>"$log_dir/summarize.err"
-  then
-    printf '%s\tstructured JSON unparseable for sidecar agent=%s session=%s\n' \
-      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${HOOK_AGENT:-unknown}" \
-      "${HOOK_SESSION_ID:-unknown}" >>"$log_dir/summarize.err"
-    rm -f "$structured_tmp"
-    structured_tmp=""
-  fi
+  # A title that is not the narration's first words: every narration opens with
+  # the same shape of lead-in, so slugging that would name every clip in the
+  # Raycast player the same thing. Best-effort — a missing title costs a good
+  # filename, not the turn.
+  title="$(printf '%s' "$narration" | "$scripts_root/narration-title" -c "$ctx_tmp" 2>>"$err_tmp" || true)"
+
+  # Carried into the sidecar and the page payload so both surfaces show the
+  # prose (with its annotations intact) and the orientation facts, rather than
+  # the emoji-stripped speech text.
+  merge_tmp="$(mktemp)"
+  jq -n --arg narration "$narration" --arg title "$title" --arg context "$(cat "$ctx_tmp")" \
+    '{narration:$narration, title:$title, context:$context}' \
+    > "$merge_tmp" 2>>"$log_dir/summarize.err" \
+    || { rm -f "$merge_tmp"; merge_tmp=""; }
 else
   degraded=1
   summary="⚠️ Summarizer failed this turn on $(hostname -s) — no summary sent (raw reply withheld). Stage: $fail_stage. See $log_dir/summarize.err"
@@ -102,7 +135,7 @@ else
   {
     printf '%s\tFAILED stage=%s exit=%s raw_bytes=%s agent=%s session=%s\n' \
       "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$fail_stage" "$fail_code" \
-      "${#raw}" "${HOOK_AGENT:-unknown}" "${HOOK_SESSION_ID:-unknown}"
+      "${#narration}" "${HOOK_AGENT:-unknown}" "${HOOK_SESSION_ID:-unknown}"
     if [ -s "$err_tmp" ]; then
       sed -n '1,20s/^/          stderr: /p' "$err_tmp"
     else
@@ -134,11 +167,12 @@ esac
 # AGENT_AUDIO_FILE_SINCE; if it's missing (enabled before this guard, or via the
 # profile default), we stamp it now so the cap always applies. TTL_MIN=0 disables.
 AGENT_AUDIO_FILE="${AGENT_AUDIO_FILE:-off}"
-# Narrates the emoji-stripped text and attaches the structured object to the
-# sidecar, so the recording and the web view carry the same summary.
+# Speaks the cue-rendered text and attaches the narration, title and facts to
+# the sidecar, so the recording and the web view carry the same words.
 synth_audio() {
-  if [ -n "$structured_tmp" ]; then
-    printf '%s' "$spoken" | "$scripts_root/hooks/note-on-turn/audio-note-to-file" -s "$structured_tmp"
+  if [ -n "$merge_tmp" ]; then
+    printf '%s' "$spoken" | "$scripts_root/hooks/note-on-turn/audio-note-to-file" \
+      -m "$merge_tmp" -t "$title"
   else
     printf '%s' "$spoken" | "$scripts_root/hooks/note-on-turn/audio-note-to-file"
   fi
@@ -183,20 +217,19 @@ show_webview() {
     wv_repo="$(git -C "$HOOK_CWD" rev-parse --show-toplevel 2>/dev/null || true)"
     [ -n "$wv_repo" ] && wv_repo_name="$(basename "$wv_repo")"
   fi
-  # Build the payload HERE, before backgrounding. structured_tmp is deleted by
-  # this script's EXIT trap, which can fire before a detached child gets around
-  # to reading it — the same race that silently stripped structure off audio
+  # Build the payload HERE, before backgrounding. merge_tmp is deleted by this
+  # script's EXIT trap, which can fire before a detached child gets around to
+  # reading it — the same race that silently stripped structure off audio
   # sidecars until it was hoisted out of the fork there.
-  wv_structured=null
-  [ -n "$structured_tmp" ] && wv_structured="$(cat "$structured_tmp")"
+  wv_merge='{}'
+  [ -n "$merge_tmp" ] && wv_merge="$(cat "$merge_tmp")"
   wv_payload="$(jq -n \
     --arg summary "$summary" \
     --arg agent "${HOOK_AGENT:-}" \
     --arg repo_name "$wv_repo_name" \
     --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    --argjson structured "$wv_structured" \
-    '{summary:$summary, agent:$agent, repo_name:$repo_name, created_at:$created_at}
-     + (if $structured == null then {} else {structured: $structured} end)')"
+    --argjson merge "$wv_merge" \
+    '{summary:$summary, agent:$agent, repo_name:$repo_name, created_at:$created_at} + $merge')"
   printf '%s' "$wv_payload" | "$scripts_root/hooks/note-on-turn/webview-note" &
 }
 # Self-expiring on the same pattern as the audio toggle: a window that keeps
