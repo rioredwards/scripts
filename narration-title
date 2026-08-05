@@ -4,7 +4,7 @@
 # stdin:  the prose emitted by the aitt `narrate-turn` transform.
 # stdout: one line, the title.
 #
-#   -c FILE   the `turn-context` fact block used to generate the narration.
+#   -c FILE   the `narration-context` fact block used to generate the narration.
 #
 # Why this exists: the narration opens with an orientation lead-in ("It's 11:03
 # on Tuesday night, this is turn three in the scripts project…"). Naming a clip

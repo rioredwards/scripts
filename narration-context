@@ -1,15 +1,25 @@
 #!/bin/sh
-# turn-context — print the verified facts that orient a turn's narration.
+# narration-context — print the verified facts that orient a narration.
 #
 # stdout: a labelled block of `Key: value` lines, fed to the `narrate-turn`
-# transform ahead of the reply text. The model phrases these into a natural
-# lead-in; it is told everything absent here is unknown, so a fact we cannot
-# establish is simply omitted rather than guessed.
+# transform ahead of the text. The model phrases these into a natural lead-in;
+# it is told everything absent here is unknown, so a fact we cannot establish is
+# simply omitted rather than guessed.
 #
-# Everything here is computed, never inferred by a model: Rio works across
-# several repos and worktrees at once, and a hallucinated branch name is worse
-# than no branch name. Facts come from the HOOK_* vars the per-agent adapter
-# exports plus the machine itself.
+# The key set is deliberately open. Nothing downstream may assume which keys
+# appear — an agent turn has a project and a branch, a clipboard summarization
+# has neither, and both must produce a sensible lead-in. Order is the one thing
+# that carries meaning: the model reads the block top-down.
+#
+#   -f "Key: value"   append a caller's own fact. Repeatable. Callers that know
+#                     something this script cannot (the source of a document,
+#                     the requested depth) add it without knowing the format.
+#
+# Everything computed here is measured, never inferred by a model: Rio works
+# across several repos and worktrees at once, and a hallucinated branch name is
+# worse than no branch name. Facts come from the HOOK_* vars the per-agent
+# adapter exports plus the machine itself; with none of them set the block is
+# just the time and the machine, which is still worth saying.
 #
 #   HOOK_AGENT            claude | codex | opencode | antigravity
 #   HOOK_SESSION_ID       turn counter, issue lookup, and the session goal
@@ -25,6 +35,17 @@
 # Never fails the caller. Any fact that cannot be established is dropped and
 # the block prints without it; a completely empty block prints nothing at all.
 set -u
+
+extra=""
+while getopts ":f:h" opt; do
+  case "$opt" in
+    f) extra="$extra$OPTARG
+" ;;
+    h) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) : ;;
+  esac
+done
+shift $((OPTIND - 1))
 
 state_dir="$HOME/.cache/note-on-turn/sessions"
 sid="${HOOK_SESSION_ID:-}"
@@ -162,6 +183,12 @@ add "Worktree" "$worktree"
 [ -n "$turn" ] && add "Turn" "number $turn of this session"
 add "Session goal" "$goal"
 add "Issue" "$issue"
+
+# Caller facts come last: what this script measures is the coarse orientation
+# (when, where, which session), and the caller's fact is usually the specific
+# one — the document being read, the depth asked for. Read top-down, that puts
+# the general before the particular, which is the order a lead-in wants.
+out="$out$extra"
 
 [ -n "$out" ] || exit 0
 

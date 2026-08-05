@@ -58,11 +58,11 @@ trap cleanup EXIT
 
 # The facts that orient the narration — time, machine, project, branch,
 # worktree, turn number, session goal, issue. Computed, never inferred: see
-# turn-context. Handed to the model as verified data so it phrases them into a
+# narration-context. Handed to the model as verified data so it phrases them into a
 # lead-in instead of guessing at them. Never fails; an empty block just means
 # the narration opens without orientation.
 ctx_tmp="$(mktemp)"
-"$scripts_root/hooks/note-on-turn/turn-context" > "$ctx_tmp" 2>>"$log_dir/summarize.err" || true
+"$scripts_root/narration-context" > "$ctx_tmp" 2>>"$log_dir/summarize.err" || true
 
 # Each stage runs on its own so a failure names itself. The old form chained
 # all three into one `if`, which recorded neither which stage broke nor why —
