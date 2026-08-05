@@ -199,17 +199,18 @@ case "${degraded:+skip}${AGENT_AUDIO_FILE}" in
     ;;
 esac
 
-# Pop the turn's summary in a local web view window when the webview toggle is
-# on. Independent of the audio toggle: the page renders from the same structured
-# object, so what appears on screen and what the phone receives always agree.
+# Pop the turn's summary in a web view window when the webview toggle is on.
+# Independent of the audio toggle: the page renders the same narration the phone
+# and the audio are made from, so the surfaces always agree.
 #
 # Deliberately NOT gated on `degraded` — the other surfaces skip a failure
 # because narrating an error string wastes TTS, but a page costs nothing and
 # putting the ⚠️ on screen is the fastest way for Rio to notice the summarizer
 # broke.
 #
-# Also not host-gated the way audio is: the window opens on whichever machine
-# ran the turn, which is by definition the machine Rio is looking at.
+# Also not host-gated the way audio is: the window opens on whichever machine ran
+# the turn, unless AGENT_WEBVIEW_HOST names another one to ship the page to (the
+# ssh'd-into-the-mini case — webview-note handles it).
 AGENT_WEBVIEW="${AGENT_WEBVIEW:-off}"
 show_webview() {
   wv_repo_name=""
