@@ -79,7 +79,7 @@ err_tmp="$(mktemp)"
 # which is which.
 if [ -s "$ctx_tmp" ]; then
   transform_input="$(cat "$ctx_tmp")
-AGENT REPLY TO REWRITE
+TEXT TO REWRITE
 
 $text"
 else
