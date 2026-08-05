@@ -39,8 +39,8 @@ if [ "$speech" -eq 1 ]; then
   # ("Important" for "Important detail"), so a closed list would silently miss
   # some. Bracketed text with no emoji is ordinary prose and is left alone.
   #
-  # Ranges match structured-to-text's, chosen to miss the punctuation the prose
-  # legitimately uses (em dash, middot).
+  # Ranges chosen to miss the punctuation the prose legitimately uses (em dash,
+  # middot).
   text="$(printf '%s' "$text" | perl -CSD -e '
     my $EMOJI = qr/[\x{200D}\x{FE00}-\x{FE0F}\x{2190}-\x{21FF}\x{2300}-\x{23FF}\x{25A0}-\x{25FF}\x{2600}-\x{27BF}\x{2B00}-\x{2BFF}\x{1F000}-\x{1FAFF}]/;
     local $/; my $t = <STDIN>;
