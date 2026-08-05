@@ -53,30 +53,58 @@ printf '%s' "$text" | perl -CSD -e '
   $t =~ s/$EMOJI//g;
   $t =~ s/[*_`#>~|]//g;
 
-  # Words from the fact values that mark a sentence as lead-in. Short words are
-  # dropped: a project called "sc" would match half the prose.
+  # Strings from the fact values that mark a sentence as lead-in.
+  #
+  # Only the repo-ish facts contribute their individual words — those are
+  # distinctive identifiers. Agent and machine match as whole phrases: "Claude
+  # Code" split into words made every sentence containing "code" look like a
+  # lead-in, which in this prose is most of them. Short words are dropped
+  # either way: a project called "sc" would match half the narration.
   my @marks;
   for my $line (split /\n/, ($ENV{NARRATION_FACTS} // "")) {
     next unless $line =~ /^(Project|Branch|Worktree|Agent|Machine|Time):\s*(.+)$/;
     my ($key, $val) = ($1, $2);
-    # Time contributes only its weekday; the clock is matched by pattern below.
-    $val =~ s/^.*,\s*// if $key eq "Time";
+    $val =~ s/^\s+|\s+$//g;
+    if ($key eq "Time") {
+      # Only the weekday; the clock is matched by pattern below.
+      $val =~ s/^.*,\s*//;
+    } elsif ($key eq "Machine") {
+      $val =~ s/^the\s+//i;
+    }
+    push @marks, lc $val if length($val) >= 4;
+    next if $key eq "Agent" || $key eq "Machine";
     for my $w (split /[^A-Za-z0-9-]+/, $val) {
       push @marks, lc $w if length($w) >= 4;
     }
   }
   my %seen; @marks = grep { !$seen{$_}++ } @marks;
 
-  my @sentences = grep { /\S/ } split /(?<=[.!?])\s+/, $t;
-  my $fallback = "";
+  my $is_leadin = sub {
+    my ($s) = @_;
+    return 1 if $s =~ /\d{1,2}:\d{2}/;                 # a clock time
+    return 1 if $s =~ /\bturn (number )?\w+ of\b/i;    # "turn three of this session"
+    return 1 if grep { index(lc $s, $_) >= 0 } @marks;
+    return 0;
+  };
+  my $split_sentences = sub { grep { /\S/ } split /(?<=[.!?])\s+/, $_[0] };
+
+  my @paras = grep { /\S/ } split /\n\s*\n/, $t;
+  my $fallback = ($split_sentences->($t))[0] // "";
+
+  # The lead-in is a paragraph, not a sentence: the prompt asks for orientation
+  # first and the update after, and the orientation often runs on into a second
+  # sentence that names no fact ("This ties into the bigger effort around your
+  # agent tooling") — true of every turn, so useless as a title. Once any
+  # sentence in the opening paragraph is recognizably lead-in, drop the whole
+  # paragraph rather than fishing a sentence out of it.
+  if (@paras > 1 && grep { $is_leadin->($_) } $split_sentences->($paras[0])) {
+    shift @paras;
+  }
+
   my $pick = "";
-  for my $s (@sentences) {
+  for my $s ($split_sentences->(join "\n\n", @paras)) {
     $s =~ s/^\s+|\s+$//g;
-    next if $s eq "";
-    $fallback = $s unless $fallback;
-    next if $s =~ /\d{1,2}:\d{2}/;                 # a clock time
-    next if $s =~ /\bturn (number )?\w+ of\b/i;    # "turn three of this session"
-    next if grep { index(lc $s, $_) >= 0 } @marks;
+    next if $s eq "" || $is_leadin->($s);
     $pick = $s;
     last;
   }
