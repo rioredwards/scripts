@@ -13,9 +13,10 @@
 # sentence that is *not* the lead-in.
 #
 # The lead-in is identifiable rather than guessed at: it is phrased from the
-# fact block, so a sentence mentioning the project, branch, worktree, agent,
-# machine, weekday or a clock time is lead-in and gets skipped. -c is optional;
-# without it only the clock-time and turn-number tests apply.
+# fact block, so a sentence echoing one of those facts is lead-in and gets
+# skipped. Which facts exist is not this script's business — see the mark rules
+# below. -c is optional; without it only the clock-time and turn-number tests
+# apply.
 #
 # Never fails the caller. A narration that is nothing but lead-in falls back to
 # its first sentence and logs, because a mediocre title is worth more than a
@@ -55,26 +56,38 @@ printf '%s' "$text" | perl -CSD -e '
 
   # Strings from the fact values that mark a sentence as lead-in.
   #
-  # Only the repo-ish facts contribute their individual words — those are
-  # distinctive identifiers. Agent and machine match as whole phrases: "Claude
-  # Code" split into words made every sentence containing "code" look like a
-  # lead-in, which in this prose is most of them. Short words are dropped
-  # either way: a project called "sc" would match half the narration.
+  # Keys are never consulted: any producer may invent any key, so the rules read
+  # the shape of the value instead.
+  #
+  #   - A long value is prose, not an identifier — a session goal or an issue
+  #     title. Splitting one into words would mark most of the narration, so it
+  #     contributes nothing.
+  #   - A value of a few words is an identifier and contributes those words:
+  #     "narration-rewrite" has to match a lead-in that says "the narration
+  #     rewrite branch", and "7:13 AM, Wednesday" has to match "Wednesday".
+  #   - More words than that is a phrase, and only matches whole.
+  #
+  # Short words are dropped: a project called "sc" would match half the
+  # narration. So are a few common ones — "Claude Code" split naively made every
+  # sentence containing "code" look like a lead-in, which here is most of them.
+  #
+  # Over-marking is the safe direction: a wrongly marked sentence is skipped,
+  # and a narration with nothing left falls back to its first sentence and logs.
+  my %stop = map { $_ => 1 } qw(
+    code main this that with from work task file plan text note time turn
+  );
   my @marks;
   for my $line (split /\n/, ($ENV{NARRATION_FACTS} // "")) {
-    next unless $line =~ /^(Project|Branch|Worktree|Agent|Machine|Time):\s*(.+)$/;
-    my ($key, $val) = ($1, $2);
-    $val =~ s/^\s+|\s+$//g;
-    if ($key eq "Time") {
-      # Only the weekday; the clock is matched by pattern below.
-      $val =~ s/^.*,\s*//;
-    } elsif ($key eq "Machine") {
-      $val =~ s/^the\s+//i;
-    }
+    next unless $line =~ /^([A-Za-z][A-Za-z ]{0,30}):\s*(\S.*)$/;
+    my $val = $2;
+    $val =~ s/\s+$//;
+    $val =~ s/^the\s+//i;
+    next if length($val) > 40;
     push @marks, lc $val if length($val) >= 4;
-    next if $key eq "Agent" || $key eq "Machine";
+    my @words = split /\s+/, $val;
+    next if @words > 3;
     for my $w (split /[^A-Za-z0-9-]+/, $val) {
-      push @marks, lc $w if length($w) >= 4;
+      push @marks, lc $w if length($w) >= 4 && !$stop{lc $w};
     }
   }
   my %seen; @marks = grep { !$seen{$_}++ } @marks;
