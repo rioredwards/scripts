@@ -12,9 +12,11 @@
 # exports plus the machine itself.
 #
 #   HOOK_AGENT            claude | codex | opencode | antigravity
-#   HOOK_SESSION_ID       used for the turn counter and the issue lookup
+#   HOOK_SESSION_ID       turn counter, issue lookup, and the session goal
 #   HOOK_CWD              repo/branch/worktree are derived from this
-#   HOOK_TRANSCRIPT_PATH  the session's first user prompt becomes "Session goal"
+#
+# The session goal comes from `session-handoff peek` (agent-sessions), not from
+# parsing the transcript here — see the note at the call site.
 #
 # Per-session state (turn number, goal, resolved issue) is cached under
 # ~/.cache/note-on-turn/sessions/ so the transcript is parsed and the issue
@@ -102,18 +104,24 @@ if [ -n "$sid" ] && command -v jq >/dev/null 2>&1; then
     issue="$(printf '%s' "$prev" | jq -r '.issue // ""')"
     issue_checked="$(printf '%s' "$prev" | jq -r '.issue_checked // 0')"
 
-    # The session's first user prompt is the closest thing to a stated goal, and
-    # it is already on disk — no model call, no guessing. Captured once.
-    if [ -z "$goal" ] && [ -n "${HOOK_TRANSCRIPT_PATH:-}" ] && [ -f "${HOOK_TRANSCRIPT_PATH:-}" ]; then
-      goal="$(jq -r '
-          select(.type == "user")
-          | .message.content
-          | if type == "string" then . else ([.[]? | select(.type == "text") | .text] | join(" ")) end
-        ' "$HOOK_TRANSCRIPT_PATH" 2>/dev/null \
-        | sed -e 's/<system-reminder>.*<\/system-reminder>//g' -e 's/<[^>]*>//g' \
-        | grep -v '^[[:space:]]*$' \
-        | head -1 \
-        | cut -c1-240)"
+    # The session's first user prompt is the closest thing to a stated goal.
+    #
+    # Getting it right is not a `head -1` on the transcript: the first user
+    # record is usually a hook banner, a `<local-command-caveat>`, a slash
+    # command or a system-reminder preamble. agent-sessions already solved this
+    # — `peek`'s `.session.first` is wrapper-stripped and deduped, measured
+    # against a corpus rather than guessed at — and note-from-reply already
+    # refreshes its index after every turn, so the current session is in there.
+    # spin-check.sh reads the same field for the same reason.
+    #
+    # Costs ~60ms and is captured once per session. Unavailable or empty (turn 1
+    # can beat the indexer) leaves it blank, and the fact is simply dropped.
+    if [ -z "$goal" ] && [ -n "${HOOK_AGENT:-}" ] && command -v session-handoff >/dev/null 2>&1; then
+      goal="$(session-handoff peek "${HOOK_AGENT}:${sid}" \
+                --format json --messages 1 --chars 400 2>/dev/null \
+              | jq -r '.session.first // .session.title // ""' 2>/dev/null \
+              | tr '\n' ' ' | cut -c1-240)"
+      case "$goal" in '(no preview)'|null) goal="" ;; esac
     fi
 
     # The issue for this session is findable because issue-session-footer.sh
