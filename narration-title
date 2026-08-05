@@ -1,0 +1,142 @@
+#!/bin/sh
+# narration-title — derive a short title from a turn narration.
+#
+# stdin:  the prose emitted by the aitt `narrate-turn` transform.
+# stdout: one line, the title.
+#
+#   -c FILE   the `narration-context` fact block used to generate the narration.
+#
+# Why this exists: the narration opens with an orientation lead-in ("It's 11:03
+# on Tuesday night, this is turn three in the scripts project…"). Naming a clip
+# after its first words would give every clip in the Raycast player a near
+# identical name that says nothing about the turn. So the title is the first
+# sentence that is *not* the lead-in.
+#
+# The lead-in is identifiable rather than guessed at: it is phrased from the
+# fact block, so a sentence echoing one of those facts is lead-in and gets
+# skipped. Which facts exist is not this script's business — see the mark rules
+# below. -c is optional; without it only the clock-time and turn-number tests
+# apply.
+#
+# Never fails the caller. A narration that is nothing but lead-in falls back to
+# its first sentence and logs, because a mediocre title is worth more than a
+# missing one.
+set -eu
+
+facts_file=""
+while getopts ":c:h" opt; do
+  case "$opt" in
+    c) facts_file="$OPTARG" ;;
+    h) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) : ;;
+  esac
+done
+shift $((OPTIND - 1))
+
+text="$(cat)"
+[ -n "$text" ] || exit 0
+
+facts=""
+[ -n "$facts_file" ] && [ -f "$facts_file" ] && facts="$(cat "$facts_file")"
+
+log_dir="$HOME/.cache/note-on-turn"
+mkdir -p "$log_dir" 2>/dev/null || true
+
+export NARRATION_FACTS="$facts"
+export NARRATION_LOG="$log_dir/narration-title.log"
+
+printf '%s' "$text" | perl -CSD -e '
+  my $EMOJI = qr/[\x{200D}\x{FE00}-\x{FE0F}\x{2190}-\x{21FF}\x{2300}-\x{23FF}\x{25A0}-\x{25FF}\x{2600}-\x{27BF}\x{2B00}-\x{2BFF}\x{1F000}-\x{1FAFF}]/;
+  local $/; my $t = <STDIN>;
+
+  # Annotations are markup, never title material.
+  $t =~ s/\[[^\[\]]*\]//g;
+  $t =~ s/$EMOJI//g;
+  $t =~ s/[*_`#>~|]//g;
+
+  # Strings from the fact values that mark a sentence as lead-in.
+  #
+  # Keys are never consulted: any producer may invent any key, so the rules read
+  # the shape of the value instead.
+  #
+  #   - A long value is prose, not an identifier — a session goal or an issue
+  #     title. Splitting one into words would mark most of the narration, so it
+  #     contributes nothing.
+  #   - A value of a few words is an identifier and contributes those words:
+  #     "narration-rewrite" has to match a lead-in that says "the narration
+  #     rewrite branch", and "7:13 AM, Wednesday" has to match "Wednesday".
+  #   - More words than that is a phrase, and only matches whole.
+  #
+  # Short words are dropped: a project called "sc" would match half the
+  # narration. So are a few common ones — "Claude Code" split naively made every
+  # sentence containing "code" look like a lead-in, which here is most of them.
+  #
+  # Over-marking is the safe direction: a wrongly marked sentence is skipped,
+  # and a narration with nothing left falls back to its first sentence and logs.
+  my %stop = map { $_ => 1 } qw(
+    code main this that with from work task file plan text note time turn
+  );
+  my @marks;
+  for my $line (split /\n/, ($ENV{NARRATION_FACTS} // "")) {
+    next unless $line =~ /^([A-Za-z][A-Za-z ]{0,30}):\s*(\S.*)$/;
+    my $val = $2;
+    $val =~ s/\s+$//;
+    $val =~ s/^the\s+//i;
+    next if length($val) > 40;
+    push @marks, lc $val if length($val) >= 4;
+    my @words = split /\s+/, $val;
+    next if @words > 3;
+    for my $w (split /[^A-Za-z0-9-]+/, $val) {
+      push @marks, lc $w if length($w) >= 4 && !$stop{lc $w};
+    }
+  }
+  my %seen; @marks = grep { !$seen{$_}++ } @marks;
+
+  my $is_leadin = sub {
+    my ($s) = @_;
+    return 1 if $s =~ /\d{1,2}:\d{2}/;                 # a clock time
+    return 1 if $s =~ /\bturn (number )?\w+ of\b/i;    # "turn three of this session"
+    return 1 if grep { index(lc $s, $_) >= 0 } @marks;
+    return 0;
+  };
+  my $split_sentences = sub { grep { /\S/ } split /(?<=[.!?])\s+/, $_[0] };
+
+  my @paras = grep { /\S/ } split /\n\s*\n/, $t;
+  my $fallback = ($split_sentences->($t))[0] // "";
+
+  # The lead-in is a paragraph, not a sentence: the prompt asks for orientation
+  # first and the update after, and the orientation often runs on into a second
+  # sentence that names no fact ("This ties into the bigger effort around your
+  # agent tooling") — true of every turn, so useless as a title. Once any
+  # sentence in the opening paragraph is recognizably lead-in, drop the whole
+  # paragraph rather than fishing a sentence out of it.
+  if (@paras > 1 && grep { $is_leadin->($_) } $split_sentences->($paras[0])) {
+    shift @paras;
+  }
+
+  my $pick = "";
+  for my $s ($split_sentences->(join "\n\n", @paras)) {
+    $s =~ s/^\s+|\s+$//g;
+    next if $s eq "" || $is_leadin->($s);
+    $pick = $s;
+    last;
+  }
+
+  unless ($pick) {
+    $pick = $fallback;
+    if (open my $fh, ">>", ($ENV{NARRATION_LOG} // "/dev/null")) {
+      print $fh scalar(gmtime) . "\tno non-lead-in sentence; fell back to the first\n";
+      close $fh;
+    }
+  }
+  exit 0 unless $pick;
+
+  # Trim to a length that reads as a title, cutting at a word boundary.
+  if (length($pick) > 88) {
+    $pick = substr($pick, 0, 88);
+    $pick =~ s/\s+\S*$//;
+    $pick .= "\x{2026}";
+  }
+  $pick =~ s/\s{2,}/ /g;
+  print "$pick\n";
+'

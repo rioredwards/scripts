@@ -10,6 +10,10 @@
 # Origin metadata (session/cwd/repo/transcript) is read from HOOK_* env vars
 # that the per-agent wrapper exports. Missing fields are written as "".
 #
+#   -m FILE   JSON object merged into the sidecar at the top level (the
+#             narration path: narration, title, context).
+#   -t STR    what to slug the filename from, instead of the spoken text.
+#
 # Runs the synth detached so it never blocks the calling hook. Pass -w to wait
 # instead: synth runs in the foreground and the audio path is printed on
 # success (for callers like content-pipeline that need the file now). Failures
@@ -23,12 +27,14 @@ set -eu
 engine="${AGENT_AUDIO_FILE_ENGINE:-grok}"
 
 wait_mode=0
-structured_file=""
-while getopts ":e:ws:" opt; do
+merge_file=""
+title=""
+while getopts ":e:wm:t:" opt; do
   case "$opt" in
     e) engine="$OPTARG" ;;
     w) wait_mode=1 ;;
-    s) structured_file="$OPTARG" ;;
+    m) merge_file="$OPTARG" ;;
+    t) title="$OPTARG" ;;
     *) : ;;
   esac
 done
@@ -102,7 +108,13 @@ esac
 # Slug the summary into a filename that matches the existing convention:
 # leading dash, dash-joined words, capped. The Raycast extension prettifies
 # this back into a readable title.
-slug="$(printf '%s' "$summary" \
+#
+# -t overrides what gets slugged. A narration opens with an orientation lead-in
+# ("It's 11:03 on Tuesday night, this is turn three in the scripts project…"),
+# so slugging its first words would name every clip in the player the same
+# thing. `narration-title` picks a sentence that actually describes the turn.
+slug_source="${title:-$summary}"
+slug="$(printf '%s' "$slug_source" \
   | sed 's/[*_`#>~|]//g' \
   | tr '\n\t' '  ' \
   | sed -E 's/[^A-Za-z0-9]+/-/g; s/^-+//; s/-+$//' \
@@ -126,18 +138,19 @@ cwd="${HOOK_CWD:-}"
 # nothing but a log line to show for it — XAI_API_KEY went missing on 2026-07-21
 # and ate a run of turns unnoticed. Text Rio instead, debounced so a sustained
 # outage sends one message rather than one per turn.
-# Optional structured summary (-s FILE): a JSON object merged into the sidecar
-# as .structured. Read HERE, before any fork, and kept in a variable — the
-# sidecar is written seconds later inside a backgrounded synth, by which time a
-# caller that passed a mktemp file has already exited and cleaned it up. Reading
-# it late meant the clip lost its structure silently and the web view quietly
-# degraded to plain prose.
-structured='null'
-if [ -n "$structured_file" ]; then
-  if [ -f "$structured_file" ]; then
-    structured="$(cat "$structured_file")"
+
+# Optional merge object (-m FILE): narration, title and context, merged into the
+# sidecar at the top level. Read HERE, before any fork, and kept in a variable —
+# the sidecar is written seconds later inside a backgrounded synth, by which time
+# a caller that passed a mktemp file has already exited and cleaned it up.
+# Reading it late meant the clip lost its prose silently and the web view quietly
+# degraded to speech text with no annotations.
+merge='{}'
+if [ -n "$merge_file" ]; then
+  if [ -f "$merge_file" ]; then
+    merge="$(cat "$merge_file")"
   else
-    printf '%s -s file missing: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$structured_file" >>"$log"
+    printf '%s -m file missing: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$merge_file" >>"$log"
   fi
 fi
 
@@ -199,9 +212,9 @@ synth_and_sidecar() {
     --arg transcript_path "${HOOK_TRANSCRIPT_PATH:-}" \
     --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     --arg engine "$engine" \
-    --argjson structured "$structured" \
+    --argjson merge "$merge" \
     '{id:$id, audio:$audio, summary:$summary, agent:$agent, session_id:$session_id, cwd:$cwd, repo:$repo, repo_name:$repo_name, transcript_path:$transcript_path, created_at:$created_at, engine:$engine}
-     + (if $structured == null then {} else {structured: $structured} end)' \
+     + $merge' \
     > "$sidecar" 2>>"$log" || printf '%s sidecar write failed: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$sidecar" >>"$log"
 
 }

@@ -35,6 +35,10 @@ PROSE="$(printf '%s\n' "$REPLY" | awk '/^[[:space:]]*```/{f=!f; next} !f')"
 WORDS="$(printf '%s' "$PROSE" | wc -w | tr -d ' ')"
 [ "$WORDS" -le "$CAP" ] && exit 0
 
+# The instruction is Rio's own words, verbatim — it is what he types into a chat
+# window when an agent reply is too much to take in, and it works better on him
+# than any rule about what to cut. Shorter is a side effect; comprehension is the
+# goal, which is why this asks for a rewrite rather than a deletion.
 printf 'Reply is %s words of prose; the cap is %s.\n' "$WORDS" "$CAP" >&2
-printf 'Rio reads all of it, so length is his cost, not yours. Keep the outcome, what he would notice, and any decision that needs him. Cut everything else — options not taken, reasoning he did not ask for, restatements of what he just said. Then stop again.\n' >&2
+printf 'Rewrite this to be shorter and optimized for clarity & comprehension. Use plain language where appropriate and limit technical jargon. Then stop again.\n' >&2
 exit 2

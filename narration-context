@@ -1,0 +1,195 @@
+#!/bin/sh
+# narration-context — print the verified facts that orient a narration.
+#
+# stdout: a labelled block of `Key: value` lines, fed to the `narrate-turn`
+# transform ahead of the text. The model phrases these into a natural lead-in;
+# it is told everything absent here is unknown, so a fact we cannot establish is
+# simply omitted rather than guessed.
+#
+# The key set is deliberately open. Nothing downstream may assume which keys
+# appear — an agent turn has a project and a branch, a clipboard summarization
+# has neither, and both must produce a sensible lead-in. Order is the one thing
+# that carries meaning: the model reads the block top-down.
+#
+#   -f "Key: value"   append a caller's own fact. Repeatable. Callers that know
+#                     something this script cannot (the source of a document,
+#                     the requested depth) add it without knowing the format.
+#
+# Everything computed here is measured, never inferred by a model: Rio works
+# across several repos and worktrees at once, and a hallucinated branch name is
+# worse than no branch name. Facts come from the HOOK_* vars the per-agent
+# adapter exports plus the machine itself; with none of them set the block is
+# just the time and the machine, which is still worth saying.
+#
+#   HOOK_AGENT            claude | codex | opencode | antigravity
+#   HOOK_SESSION_ID       turn counter, issue lookup, and the session goal
+#   HOOK_CWD              repo/branch/worktree are derived from this
+#
+# The session goal comes from `session-handoff peek` (agent-sessions), not from
+# parsing the transcript here — see the note at the call site.
+#
+# Per-session state (turn number, goal, resolved issue) is cached under
+# ~/.cache/note-on-turn/sessions/ so the transcript is parsed and the issue
+# looked up once, not on every turn.
+#
+# Never fails the caller. Any fact that cannot be established is dropped and
+# the block prints without it; a completely empty block prints nothing at all.
+set -u
+
+extra=""
+while getopts ":f:h" opt; do
+  case "$opt" in
+    f) extra="$extra$OPTARG
+" ;;
+    h) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) : ;;
+  esac
+done
+shift $((OPTIND - 1))
+
+state_dir="$HOME/.cache/note-on-turn/sessions"
+sid="${HOOK_SESSION_ID:-}"
+cwd="${HOOK_CWD:-}"
+
+# ---------------------------------------------------------------- time/machine
+# Local time on the machine that ran the turn — which is the machine that did
+# the work, not necessarily the one Rio is sitting at, hence naming both.
+now="$(date '+%-I:%M %p, %A' 2>/dev/null || true)"
+
+host="$(hostname -s 2>/dev/null || true)"
+# Normalized the same way audio-note-to-file does: macOS renumbers LocalHostName
+# after a Bonjour collision (Rios-Mac-mini-2 -> -3), so match on a stripped base.
+host_base="$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]' | sed -E 's/-[0-9]+$//; s/^rios-//; s/[^a-z0-9]//g')"
+case "$host_base" in
+  macmini)    machine="the Mac Mini" ;;
+  macbookair) machine="the MacBook Air" ;;
+  '')         machine="" ;;
+  *)          machine="$host" ;;
+esac
+
+case "${HOOK_AGENT:-}" in
+  claude)      agent="Claude Code" ;;
+  codex)       agent="Codex" ;;
+  opencode)    agent="OpenCode" ;;
+  antigravity) agent="Antigravity" ;;
+  '')          agent="" ;;
+  *)           agent="${HOOK_AGENT}" ;;
+esac
+
+# ------------------------------------------------------------- repo/branch/tree
+project=""
+branch=""
+worktree=""
+if [ -n "$cwd" ] && [ -d "$cwd" ]; then
+  toplevel="$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null || true)"
+  if [ -n "$toplevel" ]; then
+    project="$(basename "$toplevel")"
+    branch="$(git -C "$cwd" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+    [ "$branch" = "HEAD" ] && branch="detached HEAD"
+    # A linked worktree has its own .git dir under the main repo's; the primary
+    # checkout has them equal. Only worth mentioning when it is a linked one,
+    # since that is exactly the case where Rio loses track of where he is.
+    gitdir="$(git -C "$cwd" rev-parse --absolute-git-dir 2>/dev/null || true)"
+    commondir="$(git -C "$cwd" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+    if [ -n "$gitdir" ] && [ -n "$commondir" ] && [ "$gitdir" != "$commondir" ]; then
+      worktree="$project"
+      # Report the repo by its main checkout, not the worktree directory —
+      # "scripts, worktree audio-fix" orients; "audio-fix" alone does not.
+      if [ "$(basename "$commondir")" = ".git" ]; then
+        project="$(basename "$(dirname "$commondir")")"
+      fi
+    fi
+  fi
+fi
+
+# -------------------------------------------------------------- session state
+turn=""
+goal=""
+issue=""
+if [ -n "$sid" ] && command -v jq >/dev/null 2>&1; then
+  mkdir -p "$state_dir" 2>/dev/null || true
+  # Session ids come from the agent, but this builds a path — refuse anything
+  # with a slash or dot-dot rather than writing outside the state dir.
+  case "$sid" in
+    */*|*..*) state_file="" ;;
+    *)        state_file="$state_dir/$sid.json" ;;
+  esac
+
+  if [ -n "$state_file" ]; then
+    prev="$(cat "$state_file" 2>/dev/null || true)"
+    printf '%s' "$prev" | jq -e . >/dev/null 2>&1 || prev='{}'
+    [ -n "$prev" ] || prev='{}'
+
+    turn="$(printf '%s' "$prev" | jq -r '(.turn // 0) + 1')"
+    goal="$(printf '%s' "$prev" | jq -r '.goal // ""')"
+    issue="$(printf '%s' "$prev" | jq -r '.issue // ""')"
+    issue_checked="$(printf '%s' "$prev" | jq -r '.issue_checked // 0')"
+
+    # The session's first user prompt is the closest thing to a stated goal.
+    #
+    # Getting it right is not a `head -1` on the transcript: the first user
+    # record is usually a hook banner, a `<local-command-caveat>`, a slash
+    # command or a system-reminder preamble. agent-sessions already solved this
+    # — `peek`'s `.session.first` is wrapper-stripped and deduped, measured
+    # against a corpus rather than guessed at — and note-from-reply already
+    # refreshes its index after every turn, so the current session is in there.
+    # spin-check.sh reads the same field for the same reason.
+    #
+    # Costs ~60ms and is captured once per session. Unavailable or empty (turn 1
+    # can beat the indexer) leaves it blank, and the fact is simply dropped.
+    if [ -z "$goal" ] && [ -n "${HOOK_AGENT:-}" ] && command -v session-handoff >/dev/null 2>&1; then
+      goal="$(session-handoff peek "${HOOK_AGENT}:${sid}" \
+                --format json --messages 1 --chars 400 2>/dev/null \
+              | jq -r '.session.first // .session.title // ""' 2>/dev/null \
+              | tr '\n' ' ' | cut -c1-240)"
+      case "$goal" in '(no preview)'|null) goal="" ;; esac
+    fi
+
+    # The issue for this session is findable because issue-session-footer.sh
+    # stamps `Session: <id>` into every issue this agent creates or edits. That
+    # makes the issue title the name of the larger effort — the "part 4 of an
+    # epic" context that is otherwise missing entirely. Looked up at most once
+    # every 10 turns until found, so a mid-session `gh issue create` is picked
+    # up without paying for a network call on every turn.
+    if [ -z "$issue" ] && [ -n "$project" ] && command -v gh >/dev/null 2>&1; then
+      if [ "$(( turn % 10 ))" -eq 1 ] || [ "$issue_checked" = "0" ]; then
+        issue_checked=1
+        found="$(cd "$cwd" 2>/dev/null && \
+          gh issue list --search "$sid" --state all --limit 1 \
+             --json number,title --jq '.[0] | select(.number) | "#\(.number) — \(.title)"' \
+             2>/dev/null || true)"
+        [ -n "$found" ] && issue="$found"
+      fi
+    fi
+
+    jq -n --argjson turn "${turn:-1}" --arg goal "$goal" --arg issue "$issue" \
+          --argjson checked "${issue_checked:-0}" \
+      '{turn:$turn, goal:$goal, issue:$issue, issue_checked:$checked}' \
+      > "$state_file" 2>/dev/null || true
+  fi
+fi
+
+# ---------------------------------------------------------------------- output
+out=""
+add() { [ -n "$2" ] && out="$out$1: $2
+"; }
+
+add "Time" "$now"
+add "Machine" "$machine"
+add "Agent" "$agent"
+add "Project" "$project"
+add "Branch" "$branch"
+add "Worktree" "$worktree"
+[ -n "$turn" ] && add "Turn" "number $turn of this session"
+add "Session goal" "$goal"
+add "Issue" "$issue"
+
+# Caller facts come last: what this script measures is the coarse orientation
+# (when, where, which session), and the caller's fact is usually the specific
+# one — the document being read, the depth asked for. Read top-down, that puts
+# the general before the particular, which is the order a lead-in wants.
+out="$out$extra"
+
+[ -n "$out" ] || exit 0
+
+printf 'MESSAGE CONTEXT — verified facts, use these for the lead-in. Anything not listed here is unknown; do not guess it.\n%s' "$out"
