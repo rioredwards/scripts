@@ -188,7 +188,10 @@ fi
 # stderr and the exit code, classify the failure, log the reason, and tell the
 # session — once, so a broken router doesn't turn into an alert storm.
 ERR_FILE="$STATE_DIR/${SESSION_ID}.err"
-VERDICT="$( ${TIMEOUT_CMD[@]+"${TIMEOUT_CMD[@]}"} agent-router delegate --provider "$PROVIDER" --model "$MODEL" --prompt "$PROMPT" 2>"$ERR_FILE" )"
+# AGENT_DELEGATE tells the reviewer's own turn-end hook that its reply is input
+# for this session, not a turn Rio asked for — without it every probe delivered
+# a phone text, a TTS clip and a web view page saying "on track".
+VERDICT="$( AGENT_DELEGATE=1 ${TIMEOUT_CMD[@]+"${TIMEOUT_CMD[@]}"} agent-router delegate --provider "$PROVIDER" --model "$MODEL" --prompt "$PROMPT" 2>"$ERR_FILE" )"
 RC=$?
 VERDICT="$(printf '%s' "$VERDICT" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
 ERR_TAIL="$(tr '\n\t' '  ' < "$ERR_FILE" 2>/dev/null | sed 's/  */ /g' | cut -c1-300)"

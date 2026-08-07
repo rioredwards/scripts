@@ -13,6 +13,23 @@ AGENT_SPEAK="${AGENT_SPEAK:-off}"
 text="$(cat)"
 [ -n "$text" ] || exit 0
 
+# A delegate's reply is not a turn Rio is waiting on. Spin-check probes,
+# agent-router delegates and MCP sub-agents all end their turn the same way a
+# real one does, and the parent agent's own hook already covers the real turn.
+# Unguarded, spin-check alone put a phone text, a TTS clip and a web view page
+# in front of Rio every ~20 tool calls per session, every one of them saying
+# "on track".
+#
+# Two markers, because the parent can be either agent:
+#   AGENT_DELEGATE  set by the caller (spin-check) — provider-agnostic.
+#   CLAUDECODE      Claude Code's own marker, inherited by everything it
+#                   spawns. Only meaningful for a non-claude agent: the claude
+#                   hook always runs inside Claude Code, so it is always set.
+if [ -n "${AGENT_DELEGATE:-}" ] ||
+   { [ "${HOOK_AGENT:-}" != claude ] && [ -n "${CLAUDECODE:-}" ]; }; then
+  exit 0
+fi
+
 log_dir="$HOME/.cache/note-on-turn"
 mkdir -p "$log_dir"
 
