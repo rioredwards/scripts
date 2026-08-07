@@ -16,6 +16,18 @@ text="$(cat)"
 log_dir="$HOME/.cache/note-on-turn"
 mkdir -p "$log_dir"
 
+# Perf markers. One line per stage into perf.log, seconds since the turn ended,
+# so the wait between Rio reading the reply and the audio/page landing can be
+# attributed instead of guessed at. Exported so the detached audio and webview
+# children stamp the same timeline. Deliberately crude: second resolution and no
+# rotation — every stage worth optimizing here is measured in seconds.
+PERF_LOG="$log_dir/perf.log"
+PERF_T0="$(date +%s)"
+PERF_RUN="$$"
+export PERF_LOG PERF_T0 PERF_RUN
+mark() { printf '%s +%ss %s\n' "$PERF_RUN" "$(( $(date +%s) - PERF_T0 ))" "$1" >>"$PERF_LOG" 2>/dev/null || true; }
+mark turn-start
+
 # Narrate once, as prose. The phone text, the spoken audio and the web view all
 # render from that one piece of text, so they cannot drift apart the way a
 # separate narration field did.
@@ -63,6 +75,7 @@ trap cleanup EXIT
 # the narration opens without orientation.
 ctx_tmp="$(mktemp)"
 "$scripts_root/narration-context" > "$ctx_tmp" 2>>"$log_dir/summarize.err" || true
+mark context
 
 # Each stage runs on its own so a failure names itself. The old form chained
 # all three into one `if`, which recorded neither which stage broke nor why —
@@ -92,6 +105,7 @@ if [ -z "$fail_stage" ]; then
   narration="$(printf '%s' "$transform_input" \
     | LLM_MODEL="${AGENT_NARRATE_MODEL:-sonnet}" "$scripts_root/aitt" narrate-turn 2>"$err_tmp")" \
     || { fail_code=$?; fail_stage="aitt narrate-turn"; }
+  mark narrate
 fi
 # Empty output with exit 0 is the common failure, and the one the old chain
 # hid completely: `[ -n "$raw" ]` failed silently and looked like every other
@@ -123,6 +137,7 @@ if [ -z "$fail_stage" ]; then
     '{narration:$narration, title:$title, context:$context}' \
     > "$merge_tmp" 2>>"$log_dir/summarize.err" \
     || { rm -f "$merge_tmp"; merge_tmp=""; }
+  mark render+title
 else
   degraded=1
   summary="⚠️ Summarizer failed this turn on $(hostname -s) — no summary sent (raw reply withheld). Stage: $fail_stage. See $log_dir/summarize.err"
@@ -149,6 +164,7 @@ AGENT_TEXT="${AGENT_TEXT:-on}"
 case "$AGENT_TEXT" in
   on|1|true|yes) printf '%s' "$summary" | "$scripts_root/sc" text-phone ;;
 esac
+mark text-phone
 
 # Speak the summary aloud when the voice toggle is on. Uses the emoji-stripped
 # text: a speech engine either skips an emoji or reads its name out loud.
@@ -198,6 +214,7 @@ case "${degraded:+skip}${AGENT_AUDIO_FILE}" in
     fi
     ;;
 esac
+mark audio-fork
 
 # Pop the turn's summary in a web view window when the webview toggle is on.
 # Independent of the audio toggle: the page renders the same narration the phone
@@ -257,5 +274,6 @@ case "$AGENT_WEBVIEW" in
     fi
     ;;
 esac
+mark webview-fork
 
 "$HOME/dev/agent-sessions/bin/index-session" >>"$log_dir/index-session.log" 2>&1 &

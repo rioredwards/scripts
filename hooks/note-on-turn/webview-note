@@ -29,6 +29,10 @@ mkdir -p "$log_dir"
 log="$log_dir/webview-note.log"
 stamp() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
+# Perf marker on the caller's timeline (PERF_T0/PERF_RUN exported by
+# note-from-reply); standalone runs just time themselves from now.
+mark() { printf '%s +%ss %s\n' "${PERF_RUN:-$$}" "$(( $(date +%s) - ${PERF_T0:-$(date +%s)} ))" "$1" >>"${PERF_LOG:-$log_dir/perf.log}" 2>/dev/null || true; }
+
 if [ ! -f "$renderer" ]; then
   printf '%s renderer missing: %s\n' "$(stamp)" "$renderer" >>"$log"
   exit 1
@@ -66,6 +70,7 @@ if ! printf '%s' "$payload" | "$node_bin" "$renderer" --out "$out" --title "$tit
   printf '%s render failed -> %s\n' "$(stamp)" "$out" >>"$log"
   exit 1
 fi
+mark html-rendered
 
 # Ship the page to another mac instead of opening it here, when one is named.
 #
@@ -92,10 +97,12 @@ if [ -n "$remote_host" ]; then
           && open -g "hammerspoon://agent-audio-webview?file=$HOME/.cache/agent-webview/turn.html"' \
          < "$out" >/dev/null 2>>"$log"
   then
+    mark html-shown
     exit 0
   fi
   printf '%s remote display skipped: %s unreachable or Hammerspoon down\n' \
     "$(stamp)" "$remote_host" >>"$log"
+  mark html-remote-failed
   exit 0
 fi
 
@@ -105,3 +112,4 @@ if ! open -g "hammerspoon://agent-audio-webview?file=$out" >/dev/null 2>>"$log";
   printf '%s deeplink failed (Hammerspoon running?): %s\n' "$(stamp)" "$out" >>"$log"
   exit 1
 fi
+mark html-shown

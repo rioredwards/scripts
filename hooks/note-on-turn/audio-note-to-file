@@ -47,6 +47,10 @@ log_dir="$HOME/.cache/note-on-turn"
 mkdir -p "$log_dir"
 log="$log_dir/audio-note.log"
 
+# Perf marker on the caller's timeline (PERF_T0/PERF_RUN exported by
+# note-from-reply); standalone runs just time themselves from now.
+mark() { printf '%s +%ss %s\n' "${PERF_RUN:-$$}" "$(( $(date +%s) - ${PERF_T0:-$(date +%s)} ))" "$1" >>"${PERF_LOG:-$log_dir/perf.log}" 2>/dev/null || true; }
+
 # Only generate on the designated host so a stowed profile doesn't make every
 # machine write to the same shared iCloud dir. Empty = any host.
 #
@@ -183,6 +187,7 @@ synth_and_sidecar() {
       fi
       ;;
   esac
+  mark tts-done
 
   # Origin metadata sidecar (written only after the audio exists so there are
   # no orphan sidecars). Migrates into the sessions store later.
@@ -216,7 +221,7 @@ synth_and_sidecar() {
     '{id:$id, audio:$audio, summary:$summary, agent:$agent, session_id:$session_id, cwd:$cwd, repo:$repo, repo_name:$repo_name, transcript_path:$transcript_path, created_at:$created_at, engine:$engine}
      + $merge' \
     > "$sidecar" 2>>"$log" || printf '%s sidecar write failed: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$sidecar" >>"$log"
-
+  mark audio-ready
 }
 
 if [ "$wait_mode" -eq 1 ]; then
