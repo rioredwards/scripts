@@ -2,14 +2,21 @@
 # grok-tts — synthesize speech with the xAI (Grok) TTS API.
 #
 # Reads text from -i FILE, args, or stdin and writes an MP3. Does not play by
-# default. Text over the API's 15000-char limit is auto-chunked on paragraph
-# (or sentence) boundaries and the parts are concatenated into one MP3.
+# default.
+#
+# Anything past a few sentences is split on sentence boundaries and synthesized
+# CONCURRENTLY, then rejoined — the API's latency tracks the length of the text
+# almost exactly, so N pieces at once cost roughly 1/N the wall clock. A typical
+# 1500-char narration went 26s -> 9s at -j 4. Text over the API's 15000-char
+# limit uses the same path; that used to be the only case that chunked, and it
+# ran serially.
 #
 # Usage:
 #   grok-tts "Hello there"                 # synth + save, print path
 #   echo "Hello" | grok-tts                # text from stdin
 #   grok-tts -i notes.md -o out.mp3        # read text from a file
 #   grok-tts -v Ara -l es "Hola"           # pick voice + language
+#   grok-tts -j 1 -i notes.md              # one request, no splitting
 #   grok-tts -i long.md -o out.mp3         # full voice polish (default)
 #   grok-tts -r -i long.md -o out.mp3      # raw, no post-processing
 #   grok-tts -c -i long.md -o out.mp3      # lighter compress only
@@ -21,12 +28,18 @@
 #   -l LANG     BCP-47 language code or "auto" (default: en)
 #   -o FILE     Output mp3 path (default: temp file in $TMPDIR)
 #   -f FORMAT   "sr:br" mp3 sample_rate:bit_rate (default: 44100:128000)
+#   -j N        Max concurrent requests / target chunk count (default 4).
+#               1 disables splitting.
 #   -P          Polish voice: heavy comp + HPF + de-esser + loudnorm,
 #               tuned for spoken TTS. This is the DEFAULT.
 #   -c          Lighter dynamic-range compress only (acompressor + loudnorm).
 #   -r          Raw: no post-processing, straight synth output.
 #   -p          Play the audio after saving (off by default)
 #   -h          Show this help
+#
+# Env: GROK_TTS_JOBS (same as -j), GROK_TTS_MIN_CHUNK (smallest chunk worth
+# making, default 300 chars), GROK_TTS_GAP (silence inserted at each join in
+# seconds, default 0.35; 0 for none).
 #
 # Auth: needs XAI_API_KEY in env (loaded from Keychain via launchd) or the
 # Keychain item service "com.rio.api.xai" account "XAI_API_KEY".
@@ -44,6 +57,16 @@ format="44100:128000"
 play=0
 mode="polish"   # polish (default) | compress | raw
 
+# Concurrency. 4 is where the curve flattens: the API has a fixed ~3-4s floor
+# per request no matter how short the text, so past this the chunks finish at
+# the floor and the extra calls buy nothing.
+jobs="${GROK_TTS_JOBS:-4}"
+# Don't make a chunk smaller than this — same floor, from the other direction.
+min_chunk="${GROK_TTS_MIN_CHUNK:-300}"
+# Each chunk is synthesized cold, so the breath a single long request would have
+# left at that boundary isn't in either half. This puts it back.
+gap="${GROK_TTS_GAP:-0.35}"
+
 # Voice-master chain for spoken TTS: heavy dynamic-range compression,
 # high-pass rumble cut, dynamic de-esser, loudness normalize. No EQ boost —
 # a presence boost was exciting a raspy top end, so it's left flat.
@@ -51,13 +74,14 @@ POLISH_CHAIN="acompressor=threshold=-30dB:ratio=8:attack=10:release=150,highpass
 
 usage() { sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; }
 
-while getopts ":i:v:l:o:f:cPrph" opt; do
+while getopts ":i:v:l:o:f:j:cPrph" opt; do
   case "$opt" in
     i) infile="$OPTARG" ;;
     v) voice="$OPTARG" ;;
     l) lang="$OPTARG" ;;
     o) outfile="$OPTARG" ;;
     f) format="$OPTARG" ;;
+    j) jobs="$OPTARG" ;;
     c) mode="compress" ;;
     P) mode="polish" ;;
     r) mode="raw" ;;
@@ -68,6 +92,10 @@ while getopts ":i:v:l:o:f:cPrph" opt; do
   esac
 done
 shift $((OPTIND - 1))
+
+case "$jobs" in ''|*[!0-9]*|0) echo "grok-tts: -j needs a positive integer, got '$jobs'" >&2; exit 2 ;; esac
+case "$min_chunk" in ''|*[!0-9]*|0) echo "grok-tts: GROK_TTS_MIN_CHUNK needs a positive integer, got '$min_chunk'" >&2; exit 2 ;; esac
+case "$gap" in ''|*[!0-9.]*) echo "grok-tts: GROK_TTS_GAP needs a number of seconds, got '$gap'" >&2; exit 2 ;; esac
 
 # Text source: -i FILE wins, then args, then stdin.
 if [ -n "$infile" ]; then
@@ -136,49 +164,106 @@ synth_one() {
   fi
 }
 
-# Split text into <=MAX_CHARS pieces, preferring paragraph then sentence breaks.
-# Writes chunk_NNN files into $workdir and prints the count.
+# Split text into exactly $nchunks near-equal pieces, cut on sentence
+# boundaries (paragraph breaks land here too — they follow a terminator).
+# Writes chunk_NNN.txt into $workdir and prints the count.
+#
+# Boundaries matter more here than they did when this only ran on 15000-char
+# text: at four chunks per turn a join lands every ~25 seconds of speech, so a
+# cut mid-sentence is audible. A run-on with no terminator at all still gets
+# cut at the API limit, because there is nothing better to do with it.
+#
+# Sizes are driven by cumulative position, not by a per-chunk budget: packing
+# sentences greedily until a budget is hit under-fills every chunk by most of a
+# sentence, which turned a requested 4 into an actual 6 — and 6 chunks at 4-way
+# concurrency is two batches, which is the whole cost this is trying to avoid.
 split_chunks() {
-  awk -v max="$MAX_CHARS" -v out="$workdir/chunk_" '
-    function flush(s,   f) {
-      if (length(s) == 0) return
-      n++; f = out sprintf("%03d", n); printf "%s", s > f; close(f)
+  awk -v nchunks="$nchunks" -v hard="$MAX_CHARS" -v out="$workdir/chunk_" '
+    function flush(   f) {
+      if (length(buf) == 0) return
+      n++; f = sprintf("%s%03d.txt", out, n); printf "%s", buf > f; close(f); buf = ""
     }
-    # Hard-split an oversized single unit (no paragraph/sentence breaks).
-    function emit(unit,   piece) {
-      while (length(unit) > max) {
-        piece = substr(unit, 1, max)
-        flush(piece)
-        unit = substr(unit, max + 1)
+    { text = text $0 "\n" }
+    END {
+      M = sprintf("%c", 1)
+      gsub(/[.!?][ \t\n]+/, "&" M, text)
+      nu = split(text, units, M)
+      for (u = 1; u <= nu; u++) total += length(units[u])
+      edge = total / nchunks
+      for (u = 1; u <= nu; u++) {
+        unit = units[u]
+        while (length(unit) > hard) {
+          flush(); buf = substr(unit, 1, hard); flush()
+          cum += hard; unit = substr(unit, hard + 1)
+        }
+        buf = buf unit
+        cum += length(unit)
+        if (n < nchunks - 1 && cum >= edge * (n + 1)) flush()
       }
-      if (length(buf) + length(unit) > max) { flush(buf); buf = "" }
-      buf = buf unit
+      flush()
+      print n
     }
-    { para = para $0 "\n" }
-    /^[[:space:]]*$/ { emit(para); para = "" }
-    END { emit(para); flush(buf); print n }
   ' <<< "$text"
 }
 
 char_count=${#text}
+raw="$workdir/full.mp3"
 
-if [ "$char_count" -le "$MAX_CHARS" ]; then
-  # Single request straight to the (possibly pre-compress) target.
-  raw="$workdir/full.mp3"
+# How many pieces: $jobs, unless that would make them smaller than min_chunk —
+# and always enough that no piece exceeds the API limit.
+nchunks="$jobs"
+fewest_useful=$(( char_count / min_chunk ))
+if [ "$nchunks" -gt "$fewest_useful" ]; then nchunks="$fewest_useful"; fi
+needed_for_limit=$(( (char_count + MAX_CHARS - 1) / MAX_CHARS ))
+if [ "$nchunks" -lt "$needed_for_limit" ]; then nchunks="$needed_for_limit"; fi
+
+if [ "$nchunks" -le 1 ]; then
   synth_one "$text" "$raw"
 else
   count="$(split_chunks)"
-  echo "grok-tts: input ${char_count} chars > ${MAX_CHARS}, split into ${count} chunks" >&2
-  i=0
-  for chunk in "$workdir"/chunk_*; do
-    i=$((i + 1))
-    echo "grok-tts: synth chunk ${i}/${count}..." >&2
-    synth_one "$(cat "$chunk")" "$chunk.mp3"
+  echo "grok-tts: ${char_count} chars -> ${count} chunks, up to ${jobs} at a time" >&2
+
+  # Fan out. Batches of $jobs rather than a rolling window: `wait -n` needs
+  # bash 4.3 and this file has to keep running under whatever bash a hook with
+  # a bare PATH resolves. Chunk count is normally <= jobs, so it is one batch.
+  running=0
+  for chunk in "$workdir"/chunk_*.txt; do
+    ( synth_one "$(cat "$chunk")" "${chunk%.txt}.mp3" && : > "${chunk%.txt}.ok" ) &
+    running=$((running + 1))
+    if [ "$running" -ge "$jobs" ]; then wait; running=0; fi
   done
-  # Concatenate chunk MP3s (re-encode for a clean join).
+  wait
+
+  # `wait` reports nothing about the jobs it waited on, so each success leaves a
+  # marker. A missing one means a silent hole in the middle of the clip — fail
+  # rather than ship audio with a sentence missing.
+  for chunk in "$workdir"/chunk_*.txt; do
+    if [ ! -f "${chunk%.txt}.ok" ]; then
+      echo "grok-tts: chunk $(basename "$chunk") failed to synthesize" >&2
+      exit 1
+    fi
+  done
+
+  # Silence between chunks, matched to the synth output's own layout so the
+  # concat demuxer accepts it without a re-decode.
+  gap_file=""
+  if [ "$gap" != "0" ]; then
+    layout="$(ffprobe -v error -select_streams a:0 -show_entries stream=channel_layout \
+      -of csv=p=0 "$workdir/chunk_001.mp3")"
+    gap_file="$workdir/gap.mp3"
+    ffmpeg -y -f lavfi -i "anullsrc=r=${sample_rate}:cl=${layout}" -t "$gap" \
+      -c:a libmp3lame -b:a "${bit_rate%000}k" "$gap_file" >/dev/null 2>&1
+  fi
+
   list="$workdir/list.txt"; : > "$list"
-  for m in "$workdir"/chunk_*.mp3; do printf "file '%s'\n" "$m" >> "$list"; done
-  raw="$workdir/full.mp3"
+  first=1
+  for m in "$workdir"/chunk_*.mp3; do
+    if [ "$first" -eq 0 ] && [ -n "$gap_file" ]; then
+      printf "file '%s'\n" "$gap_file" >> "$list"
+    fi
+    printf "file '%s'\n" "$m" >> "$list"
+    first=0
+  done
   ffmpeg -y -f concat -safe 0 -i "$list" -c:a libmp3lame -b:a "${bit_rate%000}k" "$raw" \
     >/dev/null 2>&1
 fi
