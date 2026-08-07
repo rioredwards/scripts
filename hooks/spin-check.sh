@@ -32,8 +32,12 @@
 #   AGENT_SPIN_CHECK_MODEL     reviewer model                  (default gpt-5.6-luna)
 #   AGENT_SPIN_CHECK_PROVIDER  agent-router provider           (default codex)
 #   AGENT_SPIN_CHECK_TIMEOUT   seconds to wait on the reviewer (default 90)
-#   AGENT_SPIN_CHECK_LOG       audit log path (default $STATE_DIR/fires.log;
+#   AGENT_SPIN_CHECK_LOG       audit log path (default ~/.cache/spin-check/fires.log;
 #                              set to "off" to disable)
+#
+# The log lives outside TMPDIR on purpose: it is the ONLY evidence of whether the
+# reviewer's judgement is any good. Counters are throwaway and stay in TMPDIR;
+# the log is the eval corpus. One line per fire, verdict captured whole.
 #
 # Enable for one run:  AGENT_SPIN_CHECK=on claude ...
 
@@ -50,12 +54,18 @@ command -v jq >/dev/null 2>&1 || exit 0
 INPUT="$(cat)"
 SESSION_ID="$(printf '%s' "$INPUT" | jq -r '.session_id // "unknown"')"
 TRANSCRIPT="$(printf '%s' "$INPUT" | jq -r '.transcript_path // empty')"
+CWD="$(printf '%s' "$INPUT" | jq -r '.cwd // "?"')"
 [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ] || exit 0
 
 EVERY="${AGENT_SPIN_CHECK_EVERY:-20}"
 PROVIDER="${AGENT_SPIN_CHECK_PROVIDER:-codex}"
 MODEL="${AGENT_SPIN_CHECK_MODEL:-gpt-5.6-luna}"
 WAIT="${AGENT_SPIN_CHECK_TIMEOUT:-90}"
+
+# Canonical source-priority and don't-hand-roll rules live in the explore skill;
+# the prompt cites these paths instead of restating them, so the rules can evolve
+# in one place. The reviewer runs under `codex exec` and can read them.
+EXPLORE_REF="${SKILLS:-$HOME/dev/agent-skills}/plugins/core/skills/explore/ref"
 
 # --- per-session tool-call counter ----------------------------------------
 STATE_DIR="${TMPDIR:-/tmp}/claude-spin-check"
@@ -67,7 +77,9 @@ COUNT=$(( $(cat "$COUNT_FILE" 2>/dev/null || echo 0) + 1 ))
 printf '%s' "$COUNT" > "$COUNT_FILE"
 [ $(( COUNT % EVERY )) -eq 0 ] || exit 0
 
-LOG="${AGENT_SPIN_CHECK_LOG:-$STATE_DIR/fires.log}"
+LOG_DIR="$HOME/.cache/spin-check"
+mkdir -p "$LOG_DIR"
+LOG="${AGENT_SPIN_CHECK_LOG:-$LOG_DIR/fires.log}"
 
 # --- ORIGINAL TASK + NARRATIVE via session-handoff peek -------------------
 # Reuse the /session-handoff extraction: wrapper-stripped, deduped, indexed.
@@ -132,28 +144,30 @@ TRACE="$(tail -n 200 "$TRANSCRIPT" 2>/dev/null | jq -rc '
 
 # --- ask the outside model ------------------------------------------------
 read -r -d '' PROMPT <<EOF || true
-You are a skeptical senior engineer doing a quick sanity check on another AI
-coding agent's live session. You see a KEYHOLE view: only its recent actions,
-trimmed. You do NOT see the full context, the files, or the complete results.
+You are a skeptical senior engineer checking another AI coding agent's live
+session through a KEYHOLE: recent actions only, trimmed. You cannot see the files
+or full context.
 
-Your job is to catch ONLY clear, high-confidence failure. Default to silence.
-A false alarm is WORSE than a miss: it derails an agent that was working fine.
+Catch only clear, high-confidence failure — a false alarm is WORSE than a miss.
+Reply "ON TRACK" (nothing else) unless you are highly confident; slow or messy
+progress is still progress.
 
-Reply "ON TRACK" (nothing else) if ANY of these hold:
-  - You are not highly confident it is stuck.
-  - You lack the context to judge what it is doing or why.
-  - It is making forward progress, even if slow or messy.
-  - The apparent "problem" could be a normal mid-task step whose payoff is
-    outside this keyhole.
+COURSE-CORRECT only on unmistakable evidence of:
+- LOOP — same failing action 3+ times, or thrashing one file.
+- DRIFT — abandoned the ORIGINAL TASK for something unrelated.
+- WRONG SOURCE — spelunking vendor code, system files or huge logs when docs,
+  \`--help\` or the web rank higher on the §4 ladder in
+  $EXPLORE_REF/explore-core.md.
+- HAND-ROLLING — writing what a library already does (parsing, env, auth,
+  validation, icons/SVG, UI). Rio prefers third-party; see
+  $EXPLORE_REF/tool-scout.md.
+- CONSTRAINT TAX — an elaborate workaround serving a constraint Rio or the docs
+  set; the constraint may be what's wrong. Ask Rio.
+- OVERRUN — effort far past what the ORIGINAL TASK implies. Ask Rio.
+- PING-PONG — trading turns with another agent without converging.
 
-Reply "COURSE-CORRECT" ONLY on UNMISTAKABLE evidence of being stuck:
-  - the SAME failing action repeated 3+ times (see RECENT TOOL CALLS), or
-  - thrashing the same file back and forth with no progress, or
-  - clearly abandoning the ORIGINAL TASK below for something unrelated.
-Then output: COURSE-CORRECT: <=2 sentences naming the specific repeated failure
-and the concrete alternative. Cite the evidence you saw. No generic advice.
-
-When in doubt, ON TRACK. No praise, no summary, no preamble.
+Output \`COURSE-CORRECT: <=2 sentences\` citing evidence and one concrete
+alternative. No generic advice or preamble. When in doubt, ON TRACK.
 
 ORIGINAL TASK:
 $TASK
@@ -207,9 +221,11 @@ esac
 if [ "$LOG" != "off" ]; then
   LOG_SUFFIX=""
   [ -n "$FAILURE" ] && LOG_SUFFIX="$(printf '\tFAILED=%s\terr=%s' "$FAILURE" "${ERR_TAIL:-<no stderr>}")"
-  { printf '%s\tsid=%s\tcount=%s\tmodel=%s\trc=%s\tverdict=%s%s\n' \
-      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$SESSION_ID" "$COUNT" "$MODEL" "$RC" \
-      "$(printf '%s' "${VERDICT:-<empty>}" | tr '\n' ' ' | cut -c1-200)" \
+  # cwd and the WHOLE verdict, not a 200-char stub: a truncated COURSE-CORRECT
+  # is exactly the line an eval needs to read in full.
+  { printf '%s\tsid=%s\tcount=%s\tcwd=%s\tmodel=%s\trc=%s\tverdict=%s%s\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$SESSION_ID" "$COUNT" "$CWD" "$MODEL" "$RC" \
+      "$(printf '%s' "${VERDICT:-<empty>}" | tr '\n\t' '  ')" \
       "$LOG_SUFFIX" \
       >> "$LOG"; } 2>/dev/null
 fi
