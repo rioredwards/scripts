@@ -7,11 +7,13 @@
 # audio player uses — an auto-popped page and a page opened from Raycast are
 # produced by identical code, so the two surfaces cannot drift.
 #
-# No player. The audio for a turn is synthesized on its own timeline (detached,
-# and host-gated to one machine), so it does not exist yet when this page opens
-# and may never exist on this machine at all. Binding them would mean either
-# blocking the turn on TTS or popping the window twice. The recording keeps its
-# own player in Raycast; this page is the transcript.
+#   -a FILE   the turn's audio clip. The page gets a player for it; without it
+#             the page is transcript-only, with no dead transport.
+#
+# The player exists because the caller now waits for the synth before invoking
+# this. It used to fire alongside the synth and reach the screen ~25s early, so
+# binding the two would have meant either blocking the turn on TTS or popping
+# the window twice; the chain in note-from-reply removed that constraint.
 #
 # Overwrites one stable path per machine rather than accumulating a file per
 # turn — nothing here is worth keeping, and the web view reloads from disk.
@@ -19,6 +21,15 @@
 # Set AGENT_WEBVIEW_HOST to an ssh alias to display the page on a different mac
 # than the one that generated it (see the remote block below).
 set -eu
+
+audio_src=""
+while getopts ":a:" opt; do
+  case "$opt" in
+    a) audio_src="$OPTARG" ;;
+    *) : ;;
+  esac
+done
+shift $((OPTIND - 1))
 
 renderer="${AGENT_WEBVIEW_RENDERER:-$HOME/dev/rio-raycast-toolbox/scripts/render-summary-html.mjs}"
 out_dir="${AGENT_WEBVIEW_DIR:-$HOME/.cache/agent-webview}"
@@ -66,7 +77,28 @@ payload="$(cat)"
 title="$(printf '%s' "$payload" | jq -r '.title // "" | select(length > 0)' 2>/dev/null || true)"
 [ -n "$title" ] || title="Agent reply"
 
-if ! printf '%s' "$payload" | "$node_bin" "$renderer" --out "$out" --title "$title" >/dev/null 2>>"$log"; then
+# The clip has to sit NEXT TO the page: it is referenced relatively, and
+# WKWebView will not read a sibling outside the page's own directory. A copy,
+# not a symlink — the source lives in iCloud and can be evicted, at which point
+# a link resolves to nothing and the player is silently dead.
+#
+# Last turn's clip is cleared either way, so a transcript-only page never leaves
+# a stale mp3 behind for the next one to find.
+mkdir -p "$out_dir"
+rm -f "$out_dir/turn.mp3" "$out_dir/turn.aiff" 2>/dev/null || true
+audio_name=""
+if [ -n "$audio_src" ]; then
+  if [ -f "$audio_src" ]; then
+    audio_name="turn.${audio_src##*.}"
+    cp -f "$audio_src" "$out_dir/$audio_name" 2>>"$log" || audio_name=""
+  else
+    printf '%s audio missing, page will be transcript-only: %s\n' "$(stamp)" "$audio_src" >>"$log"
+  fi
+fi
+
+set -- --out "$out" --title "$title"
+[ -n "$audio_name" ] && set -- "$@" --audio "$audio_name"
+if ! printf '%s' "$payload" | "$node_bin" "$renderer" "$@" >/dev/null 2>>"$log"; then
   printf '%s render failed -> %s\n' "$(stamp)" "$out" >>"$log"
   exit 1
 fi
@@ -80,22 +112,27 @@ mark html-rendered
 # can see it. AGENT_WEBVIEW_HOST is an ssh alias (`macbook`), set machine-locally
 # on the box that generates, never in the synced profile.
 #
-# One connection does all three steps: make the dir, stream the page in over
+# One connection does all three steps: make the dir, stream the files in over
 # stdin, fire the deeplink. The page is self-contained (CSS and JS inline, no
-# player, no images), so a single file is the whole transfer.
+# images), so page plus clip is the whole transfer — tar rather than plain `cat`
+# because the player needs the mp3 to land beside the page, not instead of it.
 remote_host="${AGENT_WEBVIEW_HOST:-}"
 if [ -n "$remote_host" ]; then
+  set -- "$(basename "$out")"
+  [ -n "$audio_name" ] && set -- "$@" "$audio_name"
   # BatchMode so a missing key fails instead of blocking the turn on a password
   # prompt forever; ServerAlive so a connection that dies mid-transfer gives up
   # rather than hanging. A closed laptop is the expected case, not an error —
   # log it and exit 0 so a sleeping MacBook never marks the turn as failed.
-  if ssh -o BatchMode=yes -o ConnectTimeout=5 \
+  if tar -cf - -C "$out_dir" "$@" \
+     | ssh -o BatchMode=yes -o ConnectTimeout=5 \
          -o ServerAliveInterval=3 -o ServerAliveCountMax=2 \
          "$remote_host" \
          'mkdir -p ~/.cache/agent-webview \
-          && cat > ~/.cache/agent-webview/turn.html \
+          && rm -f ~/.cache/agent-webview/turn.mp3 ~/.cache/agent-webview/turn.aiff \
+          && tar -xf - -C ~/.cache/agent-webview \
           && open -g "hammerspoon://agent-audio-webview?file=$HOME/.cache/agent-webview/turn.html"' \
-         < "$out" >/dev/null 2>>"$log"
+         >/dev/null 2>>"$log"
   then
     mark html-shown
     exit 0

@@ -49,7 +49,7 @@ mark turn-start
 #   spoken     annotations as spoken cues    -> TTS
 degraded=""
 ctx_tmp=""
-merge_tmp=""
+merge_json='{}'
 narration=""
 summary=""
 spoken=""
@@ -62,7 +62,6 @@ fail_code=0
 # exit 1.
 cleanup() {
   [ -n "$ctx_tmp" ] && rm -f "$ctx_tmp"
-  [ -n "$merge_tmp" ] && rm -f "$merge_tmp"
   [ -n "$err_tmp" ] && rm -f "$err_tmp"
   return 0
 }
@@ -156,11 +155,15 @@ if [ -z "$fail_stage" ]; then
   # Carried into the sidecar and the page payload so both surfaces show the
   # prose (with its annotations intact) and the orientation facts, rather than
   # the emoji-stripped speech text.
-  merge_tmp="$(mktemp)"
-  jq -n --arg narration "$narration" --arg title "$title" --arg context "$(cat "$ctx_tmp")" \
-    '{narration:$narration, title:$title, context:$context}' \
-    > "$merge_tmp" 2>>"$log_dir/summarize.err" \
-    || { rm -f "$merge_tmp"; merge_tmp=""; }
+  #
+  # Held as a string, not a temp file. Both consumers now run inside a detached
+  # chain that can outlive this script, and a mktemp path handed across that
+  # boundary is deleted by the EXIT trap before the child reads it — the race
+  # that silently stripped structure off sidecars once already.
+  merge_json="$(jq -n --arg narration "$narration" --arg title "$title" --arg context "$(cat "$ctx_tmp")" \
+    '{narration:$narration, title:$title, context:$context}' 2>>"$log_dir/summarize.err")" \
+    || merge_json='{}'
+  [ -n "$merge_json" ] || merge_json='{}'
   mark render+title
 else
   degraded=1
@@ -199,17 +202,11 @@ esac
 # burns TTS credits all day. The switch-on time is stamped by `agent-toggle` as
 # AGENT_AUDIO_FILE_SINCE; if it's missing (enabled before this guard, or via the
 # profile default), we stamp it now so the cap always applies. TTL_MIN=0 disables.
+#
+# This block only DECIDES. The synth itself runs in the detached chain below,
+# because the web view now waits on its result.
 AGENT_AUDIO_FILE="${AGENT_AUDIO_FILE:-off}"
-# Speaks the cue-rendered text and attaches the narration, title and facts to
-# the sidecar, so the recording and the web view carry the same words.
-synth_audio() {
-  if [ -n "$merge_tmp" ]; then
-    printf '%s' "$spoken" | "$scripts_root/hooks/note-on-turn/audio-note-to-file" \
-      -m "$merge_tmp" -t "$title"
-  else
-    printf '%s' "$spoken" | "$scripts_root/hooks/note-on-turn/audio-note-to-file"
-  fi
-}
+audio_wanted=""
 # Same reasoning as speak-note: never synthesize audio of a failure string.
 case "${degraded:+skip}${AGENT_AUDIO_FILE}" in
   on|1|true|yes)
@@ -218,24 +215,24 @@ case "${degraded:+skip}${AGENT_AUDIO_FILE}" in
     since="${AGENT_AUDIO_FILE_SINCE:-}"
     case "$since" in *[!0-9]*) since="" ;; esac
     if [ "$ttl_min" -eq 0 ]; then
-      synth_audio
+      audio_wanted=1
     elif [ -z "$since" ]; then
       "$scripts_root/agent-toggle" audio on >/dev/null 2>&1 || true
-      synth_audio
+      audio_wanted=1
     elif [ "$(( $(date +%s) - since ))" -gt "$(( ttl_min * 60 ))" ]; then
       "$scripts_root/agent-toggle" audio off >/dev/null 2>&1 || true
       printf '🔇 Agent audio auto-off after %sm on %s (forgotten toggle — TTS credits saved)' "$ttl_min" "$(hostname -s)" \
         | "$scripts_root/sc" text-phone >/dev/null 2>&1 || true
     else
-      synth_audio
+      audio_wanted=1
     fi
     ;;
 esac
-mark audio-fork
 
 # Pop the turn's summary in a web view window when the webview toggle is on.
-# Independent of the audio toggle: the page renders the same narration the phone
-# and the audio are made from, so the surfaces always agree.
+# The page renders the same narration the phone and the audio are made from, so
+# the surfaces always agree — and now carries the turn's clip in a player, so
+# reading it and listening to it are one window instead of two arrivals.
 #
 # Deliberately NOT gated on `degraded` — the other surfaces skip a failure
 # because narrating an error string wastes TTS, but a page costs nothing and
@@ -245,28 +242,10 @@ mark audio-fork
 # Also not host-gated the way audio is: the window opens on whichever machine ran
 # the turn, unless AGENT_WEBVIEW_HOST names another one to ship the page to (the
 # ssh'd-into-the-mini case — webview-note handles it).
+#
+# Decision only, same as the audio block; the chain below does the work.
 AGENT_WEBVIEW="${AGENT_WEBVIEW:-off}"
-show_webview() {
-  wv_repo_name=""
-  if [ -n "${HOOK_CWD:-}" ] && [ -d "${HOOK_CWD:-}" ]; then
-    wv_repo="$(git -C "$HOOK_CWD" rev-parse --show-toplevel 2>/dev/null || true)"
-    [ -n "$wv_repo" ] && wv_repo_name="$(basename "$wv_repo")"
-  fi
-  # Build the payload HERE, before backgrounding. merge_tmp is deleted by this
-  # script's EXIT trap, which can fire before a detached child gets around to
-  # reading it — the same race that silently stripped structure off audio
-  # sidecars until it was hoisted out of the fork there.
-  wv_merge='{}'
-  [ -n "$merge_tmp" ] && wv_merge="$(cat "$merge_tmp")"
-  wv_payload="$(jq -n \
-    --arg summary "$summary" \
-    --arg agent "${HOOK_AGENT:-}" \
-    --arg repo_name "$wv_repo_name" \
-    --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    --argjson merge "$wv_merge" \
-    '{summary:$summary, agent:$agent, repo_name:$repo_name, created_at:$created_at} + $merge')"
-  printf '%s' "$wv_payload" | "$scripts_root/hooks/note-on-turn/webview-note" &
-}
+webview_wanted=""
 # Self-expiring on the same pattern as the audio toggle: a window that keeps
 # appearing on every turn a week after it was useful is noise. No phone text on
 # expiry (unlike audio, which is protecting spend) — this is a GUI surface, and
@@ -278,20 +257,82 @@ case "$AGENT_WEBVIEW" in
     wv_since="${AGENT_WEBVIEW_SINCE:-}"
     case "$wv_since" in *[!0-9]*) wv_since="" ;; esac
     if [ "$wv_ttl_min" -eq 0 ]; then
-      show_webview
+      webview_wanted=1
     elif [ -z "$wv_since" ]; then
       "$scripts_root/agent-toggle" webview on >/dev/null 2>&1 || true
-      show_webview
+      webview_wanted=1
     elif [ "$(( $(date +%s) - wv_since ))" -gt "$(( wv_ttl_min * 60 ))" ]; then
       "$scripts_root/agent-toggle" webview off >/dev/null 2>&1 || true
       printf '%s\twebview auto-off after %sm\n' \
         "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$wv_ttl_min" >>"$log_dir/webview-note.log"
     else
-      show_webview
+      webview_wanted=1
     fi
     ;;
 esac
-mark webview-fork
+
+# The page payload, built here rather than in the chain: HOOK_CWD's repo lookup
+# and the timestamp belong to the turn, not to whenever the synth happens to
+# finish.
+wv_payload=""
+if [ -n "$webview_wanted" ]; then
+  wv_repo_name=""
+  if [ -n "${HOOK_CWD:-}" ] && [ -d "${HOOK_CWD:-}" ]; then
+    wv_repo="$(git -C "$HOOK_CWD" rev-parse --show-toplevel 2>/dev/null || true)"
+    [ -n "$wv_repo" ] && wv_repo_name="$(basename "$wv_repo")"
+  fi
+  wv_payload="$(jq -n \
+    --arg summary "$summary" \
+    --arg agent "${HOOK_AGENT:-}" \
+    --arg repo_name "$wv_repo_name" \
+    --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --argjson merge "$merge_json" \
+    '{summary:$summary, agent:$agent, repo_name:$repo_name, created_at:$created_at} + $merge')"
+fi
+
+# Synthesize, then show the page — one detached chain, so the hook still returns
+# immediately but the two surfaces of a turn arrive together.
+#
+# They used to fork side by side. The page won that race by ~25s and sat there
+# silent and playerless while the clip was still being synthesized, so a single
+# turn interrupted twice and neither surface knew about the other. Chained, the
+# window opens once, with the clip already in it.
+#
+# When no audio is coming — toggle off, host-gated to the mini, a degraded turn,
+# or a synth that failed — the page opens immediately, transcript-only. There is
+# nothing to wait for, and a page is still the fastest way to see a ⚠️.
+if [ -n "$audio_wanted" ] || [ -n "$webview_wanted" ]; then
+  {
+    audio_path=""
+    if [ -n "$audio_wanted" ]; then
+      # -w: run the synth in the foreground of THIS chain and print the path.
+      # The merge object becomes a file only here, inside the chain that owns it.
+      merge_file=""
+      if [ "$merge_json" != '{}' ]; then
+        merge_file="$(mktemp)"
+        printf '%s' "$merge_json" > "$merge_file"
+      fi
+      if [ -n "$merge_file" ]; then
+        audio_path="$(printf '%s' "$spoken" \
+          | "$scripts_root/hooks/note-on-turn/audio-note-to-file" -w -m "$merge_file" -t "$title")" \
+          || audio_path=""
+        rm -f "$merge_file"
+      else
+        audio_path="$(printf '%s' "$spoken" \
+          | "$scripts_root/hooks/note-on-turn/audio-note-to-file" -w)" || audio_path=""
+      fi
+    fi
+    if [ -n "$webview_wanted" ]; then
+      if [ -n "$audio_path" ] && [ -f "$audio_path" ]; then
+        printf '%s' "$wv_payload" \
+          | "$scripts_root/hooks/note-on-turn/webview-note" -a "$audio_path"
+      else
+        printf '%s' "$wv_payload" | "$scripts_root/hooks/note-on-turn/webview-note"
+      fi
+    fi
+  } &
+fi
+mark fork
 
 # Text the summary to Rio's phone when the text toggle is on.
 #
