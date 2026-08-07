@@ -24,6 +24,7 @@
 #                                      drives the GUI (click/screenshot/app)
 #
 # Settings (free-value knobs, same precedence):
+#   narrate-depth  AGENT_NARRATE_DEPTH        brief | balanced | deep
 #   speak-engine   AGENT_SPEAK_ENGINE         say | grok
 #   audio-engine   AGENT_AUDIO_FILE_ENGINE    grok | say
 #   audio-ttl      AGENT_AUDIO_FILE_TTL_MIN   auto-off after N min (0 = never)
@@ -42,7 +43,7 @@ local_file="$local_dir/local.sh"
 profile_file="${AGENT_HOOKS_PROFILE:-$HOME/.dotfiles/zsh/profiles/agent-hooks.sh}"
 
 KNOBS="text audio webview spin-check speak write-guard auto-cue"
-VALUE_KNOBS="speak-engine audio-engine audio-ttl audio-host webview-ttl webview-host spin-every spin-model spin-provider spin-timeout cue-stale"
+VALUE_KNOBS="narrate-depth speak-engine audio-engine audio-ttl audio-host webview-ttl webview-host spin-every spin-model spin-provider spin-timeout cue-stale"
 
 # friendly name -> env key. Accepts the env key itself so callers can pass either.
 knob_key() {
@@ -54,6 +55,7 @@ knob_key() {
     speak)                 echo AGENT_SPEAK ;;
     write-guard|guard)     echo AGY_WRITE_GUARD ;;
     auto-cue|cue)          echo AGENT_AUTOMATION_CUE ;;
+    narrate-depth|depth)   echo AGENT_NARRATE_DEPTH ;;
     speak-engine)          echo AGENT_SPEAK_ENGINE ;;
     audio-engine)          echo AGENT_AUDIO_FILE_ENGINE ;;
     audio-ttl)             echo AGENT_AUDIO_FILE_TTL_MIN ;;

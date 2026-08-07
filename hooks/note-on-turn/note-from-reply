@@ -73,8 +73,32 @@ trap cleanup EXIT
 # narration-context. Handed to the model as verified data so it phrases them into a
 # lead-in instead of guessing at them. Never fails; an empty block just means
 # the narration opens without orientation.
+#
+# Depth rides in as one more fact — the same brief|balanced|deep level the
+# Raycast summarizer and content-pipeline already pass. The `narrate-turn`
+# prompt has always honored a `Depth` fact; this hook was the only producer
+# never sending one. Length is not just a reading cost: synthesis time tracks
+# it, measured at 41s for a long turn against 6s for a short one.
+#
+# `balanced` and unset are the same instruction to the prompt (use the length
+# the content deserves), so only brief and deep are worth a fact. An unknown
+# value is dropped and logged rather than passed through as a fact the model
+# would quietly ignore.
+depth="${AGENT_NARRATE_DEPTH:-}"
+case "$depth" in
+  brief|deep) : ;;
+  ''|balanced) depth="" ;;
+  *) printf '%s\tignoring AGENT_NARRATE_DEPTH=%s (want brief|balanced|deep)\n' \
+       "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$depth" >>"$log_dir/summarize.err"
+     depth="" ;;
+esac
+
 ctx_tmp="$(mktemp)"
-"$scripts_root/narration-context" > "$ctx_tmp" 2>>"$log_dir/summarize.err" || true
+if [ -n "$depth" ]; then
+  "$scripts_root/narration-context" -f "Depth: $depth" > "$ctx_tmp" 2>>"$log_dir/summarize.err" || true
+else
+  "$scripts_root/narration-context" > "$ctx_tmp" 2>>"$log_dir/summarize.err" || true
+fi
 mark context
 
 # Each stage runs on its own so a failure names itself. The old form chained
@@ -158,13 +182,6 @@ else
     fi
   } >>"$log_dir/summarize.err"
 fi
-
-# Text the summary to Rio's phone when the text toggle is on.
-AGENT_TEXT="${AGENT_TEXT:-on}"
-case "$AGENT_TEXT" in
-  on|1|true|yes) printf '%s' "$summary" | "$scripts_root/sc" text-phone ;;
-esac
-mark text-phone
 
 # Speak the summary aloud when the voice toggle is on. Uses the emoji-stripped
 # text: a speech engine either skips an emoji or reads its name out loud.
@@ -275,5 +292,23 @@ case "$AGENT_WEBVIEW" in
     ;;
 esac
 mark webview-fork
+
+# Text the summary to Rio's phone when the text toggle is on.
+#
+# Last, and detached. It used to run first and in the foreground — a leftover
+# from when the phone was the only surface, kept by nobody's decision. That cost
+# every turn a second of `shortcuts run` before the audio synth and the page
+# were even started, and worse: under `set -e` a flaky Shortcuts run aborted the
+# script right there, so a failed text silently took the audio and the web view
+# with it. A background job's failure cannot do that.
+AGENT_TEXT="${AGENT_TEXT:-on}"
+case "$AGENT_TEXT" in
+  on|1|true|yes)
+    { printf '%s' "$summary" \
+        | "$scripts_root/sc" text-phone >/dev/null 2>>"$log_dir/summarize.err" \
+        || printf '%s\ttext-phone failed\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>"$log_dir/summarize.err"
+      mark text-phone; } &
+    ;;
+esac
 
 "$HOME/dev/agent-sessions/bin/index-session" >>"$log_dir/index-session.log" 2>&1 &
