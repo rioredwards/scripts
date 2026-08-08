@@ -1,0 +1,38 @@
+#!/bin/sh
+# narration-body — the narration with the model's title line removed.
+#
+# stdin:  the output of the aitt `narrate-turn` transform: a `TITLE:` line, a
+#         blank line, then the prose.
+# stdout: the prose alone.
+#
+# Every surface renders the body — the phone text, the spoken audio, the web
+# view, the sidecar — and none of them should show the title line. Both callers
+# (note-from-reply, content-pipeline) have to strip it the same way, so the rule
+# lives here instead of as a sed copied into each of them.
+#
+# Input with no title line passes through untouched: clips predate the prompt
+# that asks for one, and a model may skip it. `narration-title` handles the same
+# absence on the other side.
+#
+# Fails loud on empty input, and on input that is nothing but a title, rather
+# than handing a caller an empty narration to synthesize.
+set -eu
+
+case "${1:-}" in
+  -h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+esac
+
+text="$(cat)"
+[ -n "$text" ] || { echo "narration-body: empty input" >&2; exit 3; }
+
+case "$text" in
+  TITLE:*)
+    # Drop the title line, then any blank lines it left at the top.
+    body="$(printf '%s\n' "$text" | sed '1d' | sed '/./,$!d')"
+    [ -n "$body" ] || { echo "narration-body: title line with no narration after it" >&2; exit 4; }
+    printf '%s\n' "$body"
+    ;;
+  *)
+    printf '%s\n' "$text"
+    ;;
+esac

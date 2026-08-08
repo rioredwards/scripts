@@ -6,11 +6,14 @@
 #
 #   -c FILE   the `narration-context` fact block used to generate the narration.
 #
-# Why this exists: the narration opens with an orientation lead-in ("It's 11:03
-# on Tuesday night, this is turn three in the scripts project…"). Naming a clip
-# after its first words would give every clip in the Raycast player a near
-# identical name that says nothing about the turn. So the title is the first
-# sentence that is *not* the lead-in.
+# The narration's own `TITLE:` line wins when it has one — see below. The rest
+# of this script is the fallback for narrations that don't.
+#
+# Why the fallback exists: the narration opens with an orientation lead-in
+# ("It's 11:03 on Tuesday night, this is turn three in the scripts project…").
+# Naming a clip after its first words would give every clip in the Raycast
+# player a near identical name that says nothing about the turn. So the title is
+# the first sentence that is *not* the lead-in.
 #
 # The lead-in is identifiable rather than guessed at: it is phrased from the
 # fact block, so a sentence echoing one of those facts is lead-in and gets
@@ -35,6 +38,20 @@ shift $((OPTIND - 1))
 
 text="$(cat)"
 [ -n "$text" ] || exit 0
+
+# The model names its own turn now: the narrate-turn prompt asks for a `TITLE:`
+# line ahead of the prose. It is the only thing in the chain that knows what the
+# turn was about, so when it answers, take the answer.
+#
+# Everything below is the fallback for when it doesn't — a model that skipped
+# the line, and every clip made before the prompt asked for one. Lifting a
+# sentence out of spoken prose gives a conversational opener ("Good news…")
+# rather than a description, which is why it stopped being the primary path.
+model_title="$(printf '%s\n' "$text" | sed -n '1s/^TITLE:[[:space:]]*//p' | sed 's/[[:space:]]*$//')"
+if [ -n "$model_title" ]; then
+  printf '%s\n' "$model_title"
+  exit 0
+fi
 
 facts=""
 [ -n "$facts_file" ] && [ -f "$facts_file" ] && facts="$(cat "$facts_file")"

@@ -153,6 +153,14 @@ fi
 if [ -z "$fail_stage" ] && [ -z "$narration" ]; then
   fail_stage="aitt narrate-turn (empty output, exit 0)"
 fi
+# The transform's first line is the model's title for the turn. Keep the raw
+# output for narration-title to read it from, and strip it out of the narration
+# every surface renders — the phone, the audio, the web view, the sidecar.
+narration_raw="$narration"
+if [ -z "$fail_stage" ]; then
+  narration="$(printf '%s' "$narration_raw" | "$scripts_root/narration-body" 2>>"$err_tmp")" \
+    || { fail_code=$?; fail_stage="narration-body"; }
+fi
 if [ -z "$fail_stage" ]; then
   summary="$(printf '%s' "$narration" | "$scripts_root/narration-render" 2>>"$err_tmp")" \
     || { fail_code=$?; fail_stage="narration-render"; }
@@ -163,11 +171,11 @@ if [ -z "$fail_stage" ]; then
 fi
 
 if [ -z "$fail_stage" ]; then
-  # A title that is not the narration's first words: every narration opens with
-  # the same shape of lead-in, so slugging that would name every clip in the
-  # Raycast player the same thing. Best-effort — a missing title costs a good
-  # filename, not the turn.
-  title="$(printf '%s' "$narration" | "$scripts_root/narration-title" -c "$ctx_tmp" 2>>"$err_tmp" || true)"
+  # The model's own title for the turn, read off the raw output's first line.
+  # Fed the raw text, not the stripped body, because that line is the answer —
+  # narration-title falls back to picking a sentence only when it is missing.
+  # Best-effort either way: a missing title costs a good filename, not the turn.
+  title="$(printf '%s' "$narration_raw" | "$scripts_root/narration-title" -c "$ctx_tmp" 2>>"$err_tmp" || true)"
 
   # Carried into the sidecar and the page payload so both surfaces show the
   # prose (with its annotations intact) and the orientation facts, rather than
