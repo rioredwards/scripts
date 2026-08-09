@@ -110,8 +110,17 @@ case "$depth" in
 esac
 
 ctx_tmp="$(mktemp)"
-if [ -n "$depth" ]; then
+# Adapters that know something narration-context can't (e.g. the ExitPlanMode
+# hook framing a plan as "awaiting approval") pass it through this var. Same
+# -f mechanism as Depth; unset on ordinary turns, so behavior there is
+# unchanged.
+extra_fact="${AGENT_NARRATE_EXTRA_FACT:-}"
+if [ -n "$depth" ] && [ -n "$extra_fact" ]; then
+  "$scripts_root/narration-context" -f "Depth: $depth" -f "$extra_fact" > "$ctx_tmp" 2>>"$log_dir/summarize.err" || true
+elif [ -n "$depth" ]; then
   "$scripts_root/narration-context" -f "Depth: $depth" > "$ctx_tmp" 2>>"$log_dir/summarize.err" || true
+elif [ -n "$extra_fact" ]; then
+  "$scripts_root/narration-context" -f "$extra_fact" > "$ctx_tmp" 2>>"$log_dir/summarize.err" || true
 else
   "$scripts_root/narration-context" > "$ctx_tmp" 2>>"$log_dir/summarize.err" || true
 fi

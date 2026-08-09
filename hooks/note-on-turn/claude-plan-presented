@@ -1,0 +1,19 @@
+#!/bin/sh
+set -eu
+
+scripts_root="${SCRIPTS:-$HOME/scripts}"
+payload="$(cat)"
+
+# Export origin metadata so downstream hooks (audio-note-to-file sidecar) can
+# record where this turn came from. Empty when a field is absent.
+HOOK_AGENT=claude
+HOOK_SESSION_ID="$(printf '%s' "$payload" | jq -r '.session_id // empty')"
+HOOK_CWD="$(printf '%s' "$payload" | jq -r '.cwd // empty')"
+HOOK_TRANSCRIPT_PATH="$(printf '%s' "$payload" | jq -r '.transcript_path // empty')"
+export HOOK_AGENT HOOK_SESSION_ID HOOK_CWD HOOK_TRANSCRIPT_PATH
+
+# Frames the narration as a plan awaiting approval rather than a finished turn.
+AGENT_NARRATE_EXTRA_FACT="Type: a plan awaiting Rio's approval — narrate it as something he needs to review and decide on, not a completed task."
+export AGENT_NARRATE_EXTRA_FACT
+
+printf '%s' "$payload" | jq -r '.tool_input.plan // empty' | "$scripts_root/hooks/note-on-turn/note-from-reply"
