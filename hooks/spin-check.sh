@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # spin-check.sh — periodic outside-perspective sanity check for long agent runs.
 #
-# Fires from a global PostToolUse hook. Every Nth tool call it sends a digest of
+# Fires from a global PostToolUse hook. Every Nth tool call SINCE RIO LAST SPOKE
+# it sends a digest of
 # the recent transcript to a DIFFERENT model (gpt-5.6-luna via agent-router) and asks
 # the one question a stuck agent never asks itself: "am I spinning or tunnel-
 # visioned?" If the outside model says yes, its course-correction is injected
@@ -9,6 +10,15 @@
 #
 # Rationale: a tunnel-visioned agent will not volunteer to ask for help, so the
 # check must be involuntary. This hook is that involuntary safety net.
+#
+# WHY THE COUNTER RESETS ON EVERY USER MESSAGE (UserPromptSubmit registration):
+# spin is a function of UNATTENDED runtime, not lifetime tool calls. A session
+# where Rio steers every few calls is by definition not tunnel-visioned — he just
+# corrected it. Counting from session start meant a chatty, healthy session got
+# probed on a fixed clock while its own evidence said "supervised", and a fresh
+# 19-call-deep runaway right after a reply was invisible until the arbitrary
+# boundary happened to land. Resetting on each user turn makes the trigger mean
+# what it should: "this agent has taken N actions since a human last touched it."
 #
 # CONTEXT the reviewer sees (two complementary sources — this is the whole point):
 #   1. session-handoff `peek` — the SAME clean extraction /session-handoff uses.
@@ -28,7 +38,8 @@
 # already set in the environment overrides the profile (opt-in per run).
 #
 #   AGENT_SPIN_CHECK           on | off   (default off — dormant until enabled)
-#   AGENT_SPIN_CHECK_EVERY     fire every Nth tool call        (default 20)
+#   AGENT_SPIN_CHECK_EVERY     fire every Nth tool call since Rio's last
+#                              message                         (default 20)
 #   AGENT_SPIN_CHECK_MODEL     reviewer model                  (default gpt-5.6-luna)
 #   AGENT_SPIN_CHECK_PROVIDER  agent-router provider           (default codex)
 #   AGENT_SPIN_CHECK_TIMEOUT   seconds to wait on the reviewer (default 90)
@@ -53,8 +64,25 @@ command -v jq >/dev/null 2>&1 || exit 0
 
 INPUT="$(cat)"
 SESSION_ID="$(printf '%s' "$INPUT" | jq -r '.session_id // "unknown"')"
+EVENT="$(printf '%s' "$INPUT" | jq -r '.hook_event_name // empty')"
 TRANSCRIPT="$(printf '%s' "$INPUT" | jq -r '.transcript_path // empty')"
 CWD="$(printf '%s' "$INPUT" | jq -r '.cwd // "?"')"
+
+# --- per-session tool-call counter ----------------------------------------
+STATE_DIR="${TMPDIR:-/tmp}/claude-spin-check"
+mkdir -p "$STATE_DIR"
+# opportunistic GC so count/log files don't accumulate forever in TMPDIR.
+find "$STATE_DIR" -type f \( -name '*.count' -o -name '*.err' -o -name '*.failed' \) -mtime +1 -delete 2>/dev/null
+COUNT_FILE="$STATE_DIR/${SESSION_ID}.count"
+
+# --- UserPromptSubmit: Rio just spoke, so the clock restarts ---------------
+# Registered on UserPromptSubmit as well as PostToolUse. Deleting the counter is
+# the whole job here; the next tool call starts again at 1.
+if [ "$EVENT" = "UserPromptSubmit" ]; then
+  rm -f "$COUNT_FILE"
+  exit 0
+fi
+
 [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ] || exit 0
 
 EVERY="${AGENT_SPIN_CHECK_EVERY:-20}"
@@ -67,12 +95,7 @@ WAIT="${AGENT_SPIN_CHECK_TIMEOUT:-90}"
 # in one place. The reviewer runs under `codex exec` and can read them.
 EXPLORE_REF="${SKILLS:-$HOME/dev/agent-skills}/plugins/core/skills/explore/ref"
 
-# --- per-session tool-call counter ----------------------------------------
-STATE_DIR="${TMPDIR:-/tmp}/claude-spin-check"
-mkdir -p "$STATE_DIR"
-# opportunistic GC so count/log files don't accumulate forever in TMPDIR.
-find "$STATE_DIR" -type f \( -name '*.count' -o -name '*.err' -o -name '*.failed' \) -mtime +1 -delete 2>/dev/null
-COUNT_FILE="$STATE_DIR/${SESSION_ID}.count"
+# --- tool calls since Rio last spoke --------------------------------------
 COUNT=$(( $(cat "$COUNT_FILE" 2>/dev/null || echo 0) + 1 ))
 printf '%s' "$COUNT" > "$COUNT_FILE"
 [ $(( COUNT % EVERY )) -eq 0 ] || exit 0
@@ -248,6 +271,6 @@ esac
 # PostToolUse: stderr + exit 2 is fed back to the main agent as feedback.
 # Framed as a heuristic, not a command: a cheap outside model on a keyhole view
 # is often wrong. The main agent should weigh it, not obey it.
-printf '🔍 SPIN-CHECK (heuristic outside view via %s, after %s tool calls — it sees only a trimmed keyhole and is often wrong; if it misreads your state, note why in one line and carry on):\n%s\n' \
+printf '🔍 SPIN-CHECK (heuristic outside view via %s, after %s tool calls with no input from Rio — it sees only a trimmed keyhole and is often wrong; if it misreads your state, note why in one line and carry on):\n%s\n' \
   "$MODEL" "$COUNT" "$VERDICT" >&2
 exit 2
