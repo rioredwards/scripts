@@ -36,8 +36,8 @@ REPO_URL="$(gh repo view --json url -q .url 2>/dev/null)"
 
 while IFS= read -r url; do
   case "$url" in
-    */pull/*) kind=pr ;;
-    */issues/*) kind=issue ;;
+    */pull/*) kind="pr" ;;
+    */issues/*) kind="issue" ;;
     *) continue ;;
   esac
 
