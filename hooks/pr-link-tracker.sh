@@ -3,13 +3,13 @@
 #
 # Fires from a Stop hook. Scans `last_assistant_message` (the reply just shown
 # to Rio) for bare "PR #N" mentions and resolves each to this repo's GitHub
-# pull URL, then writes the list to a session-scoped marker file the
+# pull URL, writing "[PR #N](url)" lines to a session-scoped marker file the
 # statusline script reads:
 #   /tmp/claude-pr-links-<session_id>
 #
-# Modern terminals (iTerm2, Warp, kitty, ...) auto-linkify bare URLs, so the
-# statusline just needs to print the URL text — no OSC-8 hyperlink hack
-# required (and Claude Code doesn't reliably pass those through anyway).
+# Modern terminals (iTerm2, Warp, kitty, ...) auto-linkify bare URLs even
+# inside markdown-style brackets, so no OSC-8 hyperlink hack is needed (and
+# Claude Code doesn't reliably pass those through anyway).
 #
 # Overwrites every turn — empty file when the reply mentions no PRs — so the
 # statusline never shows a stale link from an earlier turn. Never blocks the
@@ -43,7 +43,7 @@ case "$REPO_URL" in
 esac
 
 while IFS= read -r n; do
-  printf 'PR #%s %s/pull/%s\n' "$n" "$REPO_URL" "$n"
+  printf '[PR #%s](%s/pull/%s)\n' "$n" "$REPO_URL" "$n"
 done <<< "$PR_NUMS" > "$OUT"
 
 exit 0
