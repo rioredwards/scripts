@@ -16,4 +16,10 @@ export HOOK_AGENT HOOK_SESSION_ID HOOK_CWD HOOK_TRANSCRIPT_PATH
 AGENT_NARRATE_EXTRA_FACT="Type: a plan awaiting Rio's approval — narrate it as something he needs to review and decide on, not a completed task."
 export AGENT_NARRATE_EXTRA_FACT
 
+# Plans need the reasoning/detail Rio is about to decide on, not the "outcome
+# only" brief treatment routine turns get. An explicit override (env var
+# already set before this hook ran) still wins — see agent-hooks-env.sh.
+AGENT_NARRATE_DEPTH="${AGENT_NARRATE_DEPTH:-deep}"
+export AGENT_NARRATE_DEPTH
+
 printf '%s' "$payload" | jq -r '.tool_input.plan // empty' | "$scripts_root/hooks/note-on-turn/note-from-reply"
