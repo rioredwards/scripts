@@ -50,9 +50,23 @@ env_name_for() {
 lookup() {
   local env_name="$1" service secret
   service="com.rio.api.$(slug_for "$env_name")"
-  secret="$(security find-generic-password -w -s "$service" -a "$env_name" 2>/dev/null)" \
-    || die "no Keychain item: service=$service account=$env_name
+
+  # Distinguish "item missing" from "item there but unreadable". The metadata
+  # query below works on a locked Keychain; only reading the value (-w) needs
+  # it unlocked. Over SSH to a Mac nobody is logged into at the GUI, the login
+  # Keychain stays locked and -w fails with "User interaction is not allowed".
+  if ! security find-generic-password -s "$service" -a "$env_name" >/dev/null 2>&1; then
+    die "no Keychain item: service=$service account=$env_name
      add it with: ~/.dotfiles/scripts/setup-keychain-api-key.sh $env_name"
+  fi
+
+  if ! secret="$(security find-generic-password -w -s "$service" -a "$env_name" 2>&1)"; then
+    die "Keychain item exists but could not be read: service=$service
+     $secret
+     if this is an SSH session, the login Keychain is locked — log in at that
+     Mac's screen, or run: security unlock-keychain ~/Library/Keychains/login.keychain-db"
+  fi
+
   [[ -n "$secret" ]] || die "empty Keychain item: service=$service account=$env_name"
   print -r -- "$secret"
 }
