@@ -44,6 +44,16 @@
       "text": "This writes a hardcoded home path. Rio works on two Macs with two usernames (`rioredwards`, `rioedwards`), so an absolute path here is broken on the other machine. Use `$HOME`, `~`, or one of his dir handles ($DEV, $SCRIPTS, $DOTFILES, $SKILLS). Keep the literal path only if it must name one specific machine — and say why."
     },
     {
+      "id": "no-hardcoded-home-bash",
+      "on": "tool",
+      "match": {
+        "tool": "^Bash$",
+        "input": "(?s)^(?=.*/Users/rio(redwards|edwards)/).*(<<|sed[[:space:]]+-i|perl[[:space:]]+-[a-z]*i|(echo|printf)[^|>]*>)"
+      },
+      "do": "remind",
+      "text": "This shell command writes a hardcoded home path into a file (heredoc, redirect, or in-place edit). The command runs, but the file it leaves behind is broken on Rio's other Mac — two machines, two usernames (`rioredwards`, `rioedwards`). Write `$HOME`, `~`, or a dir handle ($DEV, $SCRIPTS, $DOTFILES, $SKILLS) into the file instead. Keep the literal path only if it must name one specific machine — and say why."
+    },
+    {
       "id": "never-merge-pr",
       "on": "tool",
       "match": {
