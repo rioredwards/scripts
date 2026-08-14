@@ -1,0 +1,92 @@
+#!/bin/zsh
+#
+# keyfor — fetch one API key from the macOS Keychain, on demand.
+#
+# Replaces the old "shove every key into the launchd session env" approach
+# (keychain-to-launchd-env.sh + the com.rio.keychain-env.* agents). That made
+# all 9 secrets readable by every process you run, and — the part that actually
+# bit — got written to disk by anything that serializes its environment:
+# turbopack build caches, Codex shell snapshots, agent transcripts.
+#
+# This does not gate access: any process running as you can call it, same as
+# before. What it changes is that a secret now exists only inside the one
+# process that asked for it, for the length of one command.
+#
+# Usage:
+#   keyfor ANTHROPIC_API_KEY            # print the key to stdout
+#   keyfor anthropic                    # short slug works too
+#   keyfor --list                       # names only, never values
+#   keyfor --run OPENAI_API_KEY -- cmd  # run cmd with just that var set
+#
+# Naming convention: service "com.rio.api.<slug>", account "<ENV_NAME>",
+# where <slug> is the env name minus a trailing _API_KEY, lowercased, with
+# underscores as dashes. Falls back to a bare "<slug>" service, because
+# BRAVE_SEARCH_API_KEY was stored without the com.rio.api. prefix.
+#
+# Add a key:  ~/.dotfiles/scripts/setup-keychain-api-key.sh <ENV_NAME>
+
+set -euo pipefail
+
+die() { print -u2 -- "keyfor: $*"; exit 1; }
+
+slug_for() {
+  local name="${1:u}"
+  name="${name%_API_KEY}"
+  print -- "${${name:l}//_/-}"
+}
+
+env_name_for() {
+  # Accept either ANTHROPIC_API_KEY or anthropic; normalize to the account name
+  # actually stored in the Keychain.
+  local input="$1"
+  [[ "$input" == *[a-z]* && "$input" != *[A-Z]* ]] || { print -- "${input:u}"; return }
+  local upper="${${input:u}//-/_}"
+  case "$upper" in
+    QBO_*) print -- "$upper" ;;
+    *)     print -- "${upper}_API_KEY" ;;
+  esac
+}
+
+lookup() {
+  local env_name="$1" service secret
+  service="com.rio.api.$(slug_for "$env_name")"
+  secret="$(security find-generic-password -w -s "$service" -a "$env_name" 2>/dev/null)" \
+    || die "no Keychain item: service=$service account=$env_name
+     add it with: ~/.dotfiles/scripts/setup-keychain-api-key.sh $env_name"
+  [[ -n "$secret" ]] || die "empty Keychain item: service=$service account=$env_name"
+  print -r -- "$secret"
+}
+
+list_keys() {
+  security dump-keychain 2>/dev/null \
+    | grep -o '"acct"<blob>="[A-Z0-9_]*"' \
+    | sed 's/.*="\(.*\)"/\1/' \
+    | grep -E '_API_KEY$|^QBO_' \
+    | sort -u
+}
+
+[[ $# -ge 1 ]] || die "usage: keyfor <ENV_NAME> | --list | --run <ENV_NAME> -- <cmd>..."
+
+case "$1" in
+  --list|-l)
+    list_keys
+    ;;
+  --run|-r)
+    shift
+    [[ $# -ge 1 ]] || die "--run needs a key name"
+    local_name="$(env_name_for "$1")"; shift
+    [[ "${1:-}" == "--" ]] || die "--run <ENV_NAME> -- <cmd>...  (missing --)"
+    shift
+    [[ $# -ge 1 ]] || die "--run needs a command"
+    exec env "${local_name}=$(lookup "$local_name")" "$@"
+    ;;
+  -h|--help)
+    sed -n '3,28p' "$0" | sed 's/^# \{0,1\}//'
+    ;;
+  -*)
+    die "unknown flag: $1"
+    ;;
+  *)
+    lookup "$(env_name_for "$1")"
+    ;;
+esac

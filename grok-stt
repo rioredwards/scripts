@@ -62,15 +62,8 @@ if [[ ! -s "$audio_file" ]]; then
   exit 1
 fi
 
-# --- API key ---
-key="${XAI_API_KEY:-}"
-if [[ -z "$key" ]]; then
-  key="$(security find-generic-password -s com.rio.api.xai -a XAI_API_KEY -w 2>/dev/null || true)"
-fi
-if [[ -z "$key" ]]; then
-  echo "grok-stt: XAI_API_KEY not found in env or Keychain (com.rio.api.xai)" >&2
-  exit 1
-fi
+# --- API key (per-run Keychain fetch; see keyfor) ---
+key="$("$HOME/scripts/keyfor" XAI_API_KEY)" || exit 1
 
 # --- convert to mp3 if needed ---
 workdir="$(mktemp -d)"
