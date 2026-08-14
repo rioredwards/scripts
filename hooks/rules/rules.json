@@ -34,6 +34,16 @@
       "text": "Your reply mentions a fallback. Rio's code style is FAIL FAST AND LOUD, no fallbacks. If you added one, remove it and let the failure surface. If you were only describing or rejecting a fallback, say so plainly and stop."
     },
     {
+      "id": "no-hardcoded-home",
+      "on": "tool",
+      "match": {
+        "tool": "^(Write|Edit|NotebookEdit)$",
+        "input": "/Users/rio(redwards|edwards)/"
+      },
+      "do": "remind",
+      "text": "This writes a hardcoded home path. Rio works on two Macs with two usernames (`rioredwards`, `rioedwards`), so an absolute path here is broken on the other machine. Use `$HOME`, `~`, or one of his dir handles ($DEV, $SCRIPTS, $DOTFILES, $SKILLS). Keep the literal path only if it must name one specific machine — and say why."
+    },
+    {
       "id": "never-merge-pr",
       "on": "tool",
       "match": {
