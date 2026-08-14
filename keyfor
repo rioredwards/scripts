@@ -53,8 +53,10 @@ lookup() {
 
   # Distinguish "item missing" from "item there but unreadable". The metadata
   # query below works on a locked Keychain; only reading the value (-w) needs
-  # it unlocked. Over SSH to a Mac nobody is logged into at the GUI, the login
-  # Keychain stays locked and -w fails with "User interaction is not allowed".
+  # it unlocked. An SSH session runs in its own security session, separate from
+  # the GUI login session — so the login Keychain reads as locked over SSH even
+  # when you are sitting at that Mac logged in. -w then fails with
+  # "User interaction is not allowed".
   if ! security find-generic-password -s "$service" -a "$env_name" >/dev/null 2>&1; then
     die "no Keychain item: service=$service account=$env_name
      add it with: ~/.dotfiles/scripts/setup-keychain-api-key.sh $env_name"
@@ -63,8 +65,9 @@ lookup() {
   if ! secret="$(security find-generic-password -w -s "$service" -a "$env_name" 2>&1)"; then
     die "Keychain item exists but could not be read: service=$service
      $secret
-     if this is an SSH session, the login Keychain is locked — log in at that
-     Mac's screen, or run: security unlock-keychain ~/Library/Keychains/login.keychain-db"
+     SSH sessions get their own security session, so the login Keychain reads as
+     locked even if you're logged in at that Mac's screen. Unlock it for this
+     session: security unlock-keychain ~/Library/Keychains/login.keychain-db"
   fi
 
   [[ -n "$secret" ]] || die "empty Keychain item: service=$service account=$env_name"
