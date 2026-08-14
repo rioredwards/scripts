@@ -4,6 +4,17 @@ set -eu
 scripts_root="${SCRIPTS:-$HOME/scripts}"
 payload="$(cat)"
 
+# A reply over the length cap is about to be bounced and rewritten, and the
+# rewrite fires Stop again. Narrating both passes would put two phone texts and
+# two audio clips in front of Rio for one turn. Skip this pass; the rewrite is
+# the turn he actually reads.
+if [ -f "$scripts_root/hooks/lib/reply-cap-lib.sh" ]; then
+  . "$scripts_root/hooks/lib/reply-cap-lib.sh"
+  # `if`, not `&&` — this script runs under `set -e`, where a falsy `&&` list
+  # would abort the hook on every reply that is *under* the cap.
+  if reply_will_bounce "$payload"; then exit 0; fi
+fi
+
 # Export origin metadata so downstream hooks (audio-note-to-file sidecar) can
 # record where this turn came from. Empty when a field is absent.
 HOOK_AGENT=claude
