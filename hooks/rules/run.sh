@@ -31,7 +31,13 @@ PAYLOAD="$(cat)"
 TOOL=""; INPUT=""; TEXT=""
 if [ "$KIND" = "tool" ]; then
   TOOL="$(printf '%s' "$PAYLOAD" | jq -r '.tool_name // empty' 2>/dev/null)"
-  INPUT="$(printf '%s' "$PAYLOAD" | jq -r '(.tool_input.command // (.tool_input | tostring)) // empty' 2>/dev/null)"
+  # Drop the path keys before matching. Write/Edit always carry an absolute
+  # file_path, so leaving them in makes any path rule fire on every single call.
+  # Rules care what gets *written*, not where.
+  INPUT="$(printf '%s' "$PAYLOAD" | jq -r '
+    (.tool_input.command
+     // ((.tool_input | if type == "object" then del(.file_path, .notebook_path) else . end) | tostring)
+    ) // empty' 2>/dev/null)"
   [ -n "$TOOL" ] || exit 0
 else
   # A bounced reply gets rewritten, and the rewrite fires Stop again. Let the

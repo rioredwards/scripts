@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# hooklog — wrap any hook command and record what it did.
+#
+# Rio has ~25 hooks across Claude and Codex and no way to tell which ones are
+# earning their keep. This wraps each registered command instead of editing each
+# script, so logging is uniform and a hook author never has to remember it.
+#
+#   usage:  hooklog <event> <shell command string>      payload on stdin
+#
+# Transparent: the child gets the same stdin, its stdout is replayed byte-for-
+# byte, and its exit code is passed through. A hook that denies, nudges, or
+# bounces behaves exactly as it did unwrapped.
+#
+#   AGENT_HOOK_LOG    log path (default ~/.local/state/agent-hooks/hooks.jsonl).
+#                     Machine-local on purpose: ~/.agents is a symlink into the
+#                     dotfiles repo, which auto-commits every 60s and syncs to the
+#                     other Mac. Hook activity is per-machine and must not go there.
+#   AGENT_HOOK_LOG=off   disable
+#
+# Read it with `hooklog-stats`.
+set -uo pipefail
+
+EVENT="${1:-?}"
+CMD="${2:-}"
+[ -n "$CMD" ] || exit 0
+
+PAYLOAD="$(cat)"
+
+start="${EPOCHREALTIME:-0}"
+err="$(mktemp -t hooklog)"
+OUT="$(printf '%s' "$PAYLOAD" | sh -c "$CMD" 2>"$err")"
+CODE=$?
+end="${EPOCHREALTIME:-0}"
+
+# Replay first, log second — never make a hook slower to observe it.
+[ -n "$OUT" ] && printf '%s\n' "$OUT"
+ERRTXT="$(cat "$err" 2>/dev/null)"
+[ -n "$ERRTXT" ] && printf '%s' "$ERRTXT" >&2
+rm -f "$err"
+
+log_and_exit() { exit "$CODE"; }
+LOG="${AGENT_HOOK_LOG:-$HOME/.local/state/agent-hooks/hooks.jsonl}"
+[ "$LOG" = "off" ] && log_and_exit
+command -v jq >/dev/null 2>&1 || log_and_exit
+mkdir -p "$(dirname "$LOG")" 2>/dev/null || log_and_exit
+
+# Name the hook by its script, so the log reads like the hooks dir looks.
+NAME="$(printf '%s' "$CMD" | grep -oE 'rules/run\.sh|note-on-turn/[a-z-]+|agent-context/[a-z]+\.sh|[A-Za-z0-9_.-]+\.(sh|js)' | head -1)"
+NAME="${NAME:-$(printf '%s' "$CMD" | awk '{print $1}' | sed 's#.*/##')}"
+
+MS=0
+if [ "$start" != "0" ]; then
+  MS="$(awk -v a="$start" -v b="$end" 'BEGIN{printf "%d", (b-a)*1000}' 2>/dev/null || echo 0)"
+fi
+
+# Rotate before the log outgrows the tools that read it.
+if [ -f "$LOG" ]; then
+  size="$(wc -c < "$LOG" 2>/dev/null | tr -d ' ')"
+  [ "${size:-0}" -gt 10000000 ] && mv -f "$LOG" "$LOG.1" 2>/dev/null
+fi
+
+jq -nc \
+  --arg event "$EVENT" --arg hook "$NAME" --arg cmd "$CMD" \
+  --argjson code "$CODE" --argjson ms "${MS:-0}" \
+  --arg out "$OUT" --arg err "$ERRTXT" \
+  --arg payload "$PAYLOAD" '
+  ($payload | try fromjson catch {}) as $p
+  | ($out | try fromjson catch null) as $o
+  | {
+      ts:      (now | todate),
+      event:   $event,
+      hook:    $hook,
+      exit:    $code,
+      ms:      $ms,
+      session: ($p.session_id // null),
+      cwd:     ($p.cwd // null),
+      tool:    ($p.tool_name // null),
+      # What the hook actually did, not just that it ran.
+      decision: ($o.hookSpecificOutput.permissionDecision // $o.permissionDecision
+                 // $o.decision // (if $code == 2 then "block" else null end)),
+      nudged:  (($o.hookSpecificOutput.additionalContext // $o.additionalContext // "") != ""),
+      # Why it blocked — the line Rio needs when judging a false positive.
+      # No `select` here: an empty result inside object construction silently
+      # drops the entire record, which is how the first version lost every
+      # quiet hook.
+      reason:  (((($o.hookSpecificOutput.permissionDecisionReason // $o.permissionDecisionReason
+                   // $o.hookSpecificOutput.additionalContext // $o.additionalContext // "")
+                  + (if $code == 2 then $err else "" end)) | .[0:400]) as $r
+                | if $r == "" then null else $r end),
+      cmd:     ($cmd | .[0:200])
+    }' >> "$LOG" 2>/dev/null
+
+log_and_exit
