@@ -11,13 +11,13 @@
 # payload, so there is no marker file to coordinate, no ordering requirement,
 # and nothing to clean up when a turn dies mid-flight.
 #
-#   AGENT_REPLY_MAX_WORDS   word cap, or `off` to disable (default 250)
+#   AGENT_REPLY_MAX_WORDS   word cap, or `off` to disable (default 200)
 set -u
 
 # The cap, or empty when disabled / nonsense / jq missing.
 reply_cap_value() {
   [ -f "$HOME/scripts/agent-hooks-env.sh" ] && . "$HOME/scripts/agent-hooks-env.sh"
-  cap="${AGENT_REPLY_MAX_WORDS:-250}"
+  cap="${AGENT_REPLY_MAX_WORDS:-200}"
   [ "$cap" = "off" ] && return 1
   case "$cap" in ''|*[!0-9]*) return 1 ;; esac
   command -v jq >/dev/null 2>&1 || return 1

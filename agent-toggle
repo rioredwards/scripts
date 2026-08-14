@@ -36,6 +36,7 @@
 #   spin-provider  AGENT_SPIN_CHECK_PROVIDER  agent-router provider
 #   spin-timeout   AGENT_SPIN_CHECK_TIMEOUT   seconds to wait on the reviewer
 #   cue-stale      AGENT_AUTOMATION_CUE_STALE minutes before a stranded cue clears
+#   reply-cap      AGENT_REPLY_MAX_WORDS      prose-word ceiling on a reply (`off` = none)
 set -eu
 
 local_dir="$HOME/.config/agent-hooks"
@@ -43,7 +44,7 @@ local_file="$local_dir/local.sh"
 profile_file="${AGENT_HOOKS_PROFILE:-$HOME/.dotfiles/zsh/profiles/agent-hooks.sh}"
 
 KNOBS="text audio webview spin-check speak write-guard auto-cue"
-VALUE_KNOBS="narrate-depth speak-engine audio-engine audio-ttl audio-host webview-ttl webview-host spin-every spin-model spin-provider spin-timeout cue-stale"
+VALUE_KNOBS="narrate-depth speak-engine audio-engine audio-ttl audio-host webview-ttl webview-host spin-every spin-model spin-provider spin-timeout cue-stale reply-cap"
 
 # friendly name -> env key. Accepts the env key itself so callers can pass either.
 knob_key() {
@@ -67,6 +68,7 @@ knob_key() {
     spin-provider)         echo AGENT_SPIN_CHECK_PROVIDER ;;
     spin-timeout)          echo AGENT_SPIN_CHECK_TIMEOUT ;;
     cue-stale)             echo AGENT_AUTOMATION_CUE_STALE ;;
+    reply-cap|words)       echo AGENT_REPLY_MAX_WORDS ;;
     AGENT_*|AGY_*)         echo "$1" ;;
     *) return 1 ;;
   esac

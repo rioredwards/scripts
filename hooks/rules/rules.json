@@ -54,6 +54,17 @@
       "text": "This shell command writes a hardcoded home path into a file (heredoc, redirect, or in-place edit). The command runs, but the file it leaves behind is broken on Rio's other Mac — two machines, two usernames (`rioredwards`, `rioedwards`). Write `$HOME`, `~`, or a dir handle ($DEV, $SCRIPTS, $DOTFILES, $SKILLS) into the file instead. Keep the literal path only if it must name one specific machine — and say why."
     },
     {
+      "id": "gh-body-cap",
+      "on": "tool",
+      "match": {
+        "tool": "^Bash$",
+        "input": "(?s)gh[[:space:]]+(pr|issue|api)[[:space:]].*(\\S+[[:space:]]+){200,}"
+      },
+      "unless": "RIO_LONG_OK=1",
+      "do": "deny",
+      "text": "BLOCKED: this writes 200+ words to GitHub. A PR body, issue body, or review comment is something Rio has to read, and length there costs him exactly what a long chat reply does — the same 200-word ceiling applies. Scale it to the diff: a two-line docs change gets two sentences, not a document. Keep what changed, why, and anything he must decide; cut the narration, the options you rejected, and the restated context. Do not route around this with --body-file. If the length is genuinely earned, re-run prefixed with `RIO_LONG_OK=1 ` and say in your reply why it was."
+    },
+    {
       "id": "never-merge-pr",
       "on": "tool",
       "match": {

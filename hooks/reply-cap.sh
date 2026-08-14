@@ -11,7 +11,7 @@
 # lib/reply-cap-lib.sh and skip the pass that is about to be rewritten. The
 # chain still fires twice; each side effect happens once.
 #
-#   AGENT_REPLY_MAX_WORDS   word cap, or `off` to disable (default 250)
+#   AGENT_REPLY_MAX_WORDS   word cap, or `off` to disable (default 200)
 #
 # Register in the Stop array of ~/.dotfiles/.claude/settings.json:
 #   { "hooks": [ { "type": "command",
