@@ -1,0 +1,48 @@
+{
+  "_comment": [
+    "Rio's agent rules. One entry per rule Rio wants enforced mechanically",
+    "instead of hoping prose in AGENTS.md lands. See README.md for the schema.",
+    "",
+    "  on     'tool'     — checked before a tool runs  (Claude PreToolUse)",
+    "         'response' — checked on the final reply   (Claude/Codex Stop)",
+    "  match  regexes. 'tool'/'input' for on=tool, 'text' for on=response.",
+    "         Omitted keys match anything. All present keys must match.",
+    "  unless regex escape hatch; matches -> rule is skipped this time.",
+    "  do     'remind' — non-blocking nudge into the agent's context",
+    "         'deny'   — block the tool call outright (on=tool only)",
+    "  text   what the agent is told. Say the rule AND what to do instead."
+  ],
+
+  "rules": [
+    {
+      "id": "prefer-trash",
+      "on": "tool",
+      "match": {
+        "tool": "^Bash$",
+        "input": "(^|[[:space:];&|(){}`/])rm([[:space:]]|$)"
+      },
+      "do": "remind",
+      "text": "Rio prefers `trash` over `rm` — deletions stay recoverable. This command is allowed and will run. Use `rm` only when it is genuinely right: CI cleanup, temp/build artifacts, or a path Trash cannot handle."
+    },
+    {
+      "id": "no-fallbacks",
+      "on": "response",
+      "match": {
+        "text": "(?i)\\bfall[ -]?backs?\\b"
+      },
+      "do": "remind",
+      "text": "Your reply mentions a fallback. Rio's code style is FAIL FAST AND LOUD, no fallbacks. If you added one, remove it and let the failure surface. If you were only describing or rejecting a fallback, say so plainly and stop."
+    },
+    {
+      "id": "never-merge-pr",
+      "on": "tool",
+      "match": {
+        "tool": "^Bash$",
+        "input": "gh[[:space:]]+pr[[:space:]]+merge"
+      },
+      "unless": "RIO_MERGE_OK=1",
+      "do": "deny",
+      "text": "BLOCKED: Rio never lets an agent merge a PR without his explicit, in-conversation permission. Ask him, in your reply, whether to merge. Only if he says yes, re-run the command prefixed with `RIO_MERGE_OK=1 `. This is an automated gate, not a denial from Rio."
+    }
+  ]
+}
