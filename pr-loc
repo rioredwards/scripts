@@ -1,7 +1,7 @@
 #!/bin/sh
-# pr-loc — cloc-style breakdown of a branch's diff for PR bodies: lines changed
-# by kind (🧠 logic · 🧪 tests · 📝 docs · ⚙️ config · 📦 generated · 🖼️ assets) and
-# rolled up by subsystem. Markdown out, ~50 words, paste at the top of the PR body.
+# pr-loc — one-table breakdown of a branch's diff for PR bodies: lines changed per
+# subsystem, with the dominant kind (🧠 logic · 🧪 tests · 📝 docs · ⚙️ config ·
+# 📦 generated · 🖼️ assets) and a total row. Markdown out, paste at the top of the PR body.
 #
 #   pr-loc            # diff vs merge-base with the PR base (gh) or origin/<default>
 #   pr-loc <base>     # explicit base ref, e.g. pr-loc HEAD~5 / pr-loc origin/main
@@ -25,10 +25,10 @@ function kind(p,  f) {
   if (p ~ /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|Cargo\.lock|poetry\.lock|uv\.lock|Gemfile\.lock|go\.sum|composer\.lock)$/ ||
       p ~ /(^|\/)(vendor|node_modules|dist|build|coverage|__snapshots__|migrations)\// ||
       p ~ /-snapshots\// || f ~ /\.(min\.[a-z]+|snap|generated\.[a-z]+)$/) return "📦 generated"
+  if (f ~ /\.(png|jpe?g|gif|svg|webp|ico|woff2?|ttf|otf|mp[34]|wav|pdf)$/) return "🖼️ assets"
   if (p ~ /(^|\/)(test|tests|__tests__|spec|specs|e2e|fixtures|__mocks__)\// ||
       f ~ /\.(test|spec)\.[a-z]+$/ || f ~ /^test_.*\.py$/ || f ~ /_test\.(go|py|rb)$/) return "🧪 tests"
   if (f ~ /\.(md|mdx|rst|txt|adoc)$/ || p ~ /(^|\/)docs?\// || f ~ /^(LICENSE|CHANGELOG|README)/) return "📝 docs"
-  if (f ~ /\.(png|jpe?g|gif|svg|webp|ico|woff2?|ttf|otf|mp[34]|wav|pdf)$/) return "🖼️ assets"
   if (f ~ /^\./ || p ~ /(^|\/)\.github\// || f ~ /\.(json|ya?ml|toml|ini|cfg|conf|env|plist|xml|lock)$/ ||
       f ~ /\.config\.[a-z]+$/ || f ~ /^(Makefile|justfile|Dockerfile|Procfile|Brewfile)$/) return "⚙️ config"
   return "🧠 logic"
@@ -50,23 +50,17 @@ function subsystem(p,  n, a) {
 }
 END {
   if (F == 0) { print "📊 no changes vs base"; exit }
-  T = A + D; if (T == 0) T = 1
-  printf "📊 **+%d / −%d across %d file%s** —", A, D, F, (F == 1 ? "" : "s")
   n = split("🧠 logic|🧪 tests|📝 docs|⚙️ config|📦 generated|🖼️ assets", order, "|")
-  sep = " "
-  for (i = 1; i <= n; i++) { k = order[i]; if (kf[k]) { printf "%s%s %d%%", sep, k, int((ka[k] + kd[k]) * 100 / T + 0.5); sep = " · " } }
-  print ""; print ""
-  print "| Kind | Files | + | − |"; print "|---|---:|---:|---:|"
-  for (i = 1; i <= n; i++) { k = order[i]; if (kf[k]) printf "| %s | %d | %d | %d |\n", k, kf[k], ka[k], kd[k] }
   # Subsystems, biggest churn first (insertion sort — POSIX awk has no asort).
   ns = 0; for (s in sa) { ns++; j = ns
     while (j > 1 && sa[name[j-1]] + sd[name[j-1]] < sa[s] + sd[s]) { name[j] = name[j-1]; j-- }
     name[j] = s }
-  if (ns < 2) exit
-  print ""; print "| Subsystem | Files | + | − | Mostly |"; print "|---|---:|---:|---:|---|"
+  print "| Subsystem | Files | + | − | Mostly |"; print "|---|---:|---:|---:|---|"
   for (i = 1; i <= ns && i <= 10; i++) { s = name[i]; best = ""; bv = -1
     for (j = 1; j <= n; j++) if ((s, order[j]) in sk && sk[s, order[j]] > bv) { bv = sk[s, order[j]]; best = order[j] }
-    sub(/ .*/, "", best)
     printf "| `%s` | %d | %d | %d | %s |\n", s, sf[s], sa[s], sd[s], best }
   if (ns > 10) printf "| … %d more | | | | |\n", ns - 10
+  best = ""; bv = -1
+  for (j = 1; j <= n; j++) if (kf[order[j]] && ka[order[j]] + kd[order[j]] > bv) { bv = ka[order[j]] + kd[order[j]]; best = order[j] }
+  printf "| **Total** | **%d** | **%d** | **%d** | %s |\n", F, A, D, best
 }'
