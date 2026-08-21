@@ -1,0 +1,70 @@
+#!/bin/sh
+# pr-loc — cloc-style breakdown of a branch's diff for PR bodies: lines changed
+# by kind (🧠 logic · 🧪 tests · 📝 docs · ⚙️ config · 📦 generated · 🖼️ assets) and
+# rolled up by subsystem. Markdown out, ~50 words, paste at the top of the PR body.
+#
+#   pr-loc            # diff vs merge-base with the PR base (gh) or origin/<default>
+#   pr-loc <base>     # explicit base ref, e.g. pr-loc HEAD~5 / pr-loc origin/main
+set -u
+case "${1:-}" in -h|--help) sed -n '2,7p' "$0" | cut -c3-; exit 0 ;; esac
+git rev-parse --git-dir >/dev/null 2>&1 || { echo "pr-loc: not a git repo" >&2; exit 2; }
+
+base="${1:-}"
+if [ -z "$base" ]; then
+  base=$(gh pr view --json baseRefName -q '.baseRefName' 2>/dev/null || true)
+  [ -n "$base" ] && base="origin/$base"
+fi
+[ -n "$base" ] || base=$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || true)
+[ -n "$base" ] || { echo "pr-loc: no base found — pass one: pr-loc origin/main" >&2; exit 2; }
+mb=$(git merge-base "$base" HEAD 2>/dev/null) || { echo "pr-loc: no merge-base with $base" >&2; exit 2; }
+
+git diff --numstat "$mb" HEAD | awk -F'\t' '
+function kind(p,  f) {
+  f = p; sub(/.*\//, "", f)
+  if (p ~ /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|Cargo\.lock|poetry\.lock|uv\.lock|Gemfile\.lock|go\.sum|composer\.lock)$/ ||
+      p ~ /(^|\/)(vendor|node_modules|dist|build|coverage|__snapshots__|migrations)\// ||
+      p ~ /-snapshots\// || f ~ /\.(min\.[a-z]+|snap|generated\.[a-z]+)$/) return "📦 generated"
+  if (p ~ /(^|\/)(test|tests|__tests__|spec|specs|e2e|fixtures|__mocks__)\// ||
+      f ~ /\.(test|spec)\.[a-z]+$/ || f ~ /^test_.*\.py$/ || f ~ /_test\.(go|py|rb)$/) return "🧪 tests"
+  if (f ~ /\.(md|mdx|rst|txt|adoc)$/ || p ~ /(^|\/)docs?\// || f ~ /^(LICENSE|CHANGELOG|README)/) return "📝 docs"
+  if (f ~ /\.(png|jpe?g|gif|svg|webp|ico|woff2?|ttf|otf|mp[34]|wav|pdf)$/) return "🖼️ assets"
+  if (f ~ /^\./ || p ~ /(^|\/)\.github\// || f ~ /\.(json|ya?ml|toml|ini|cfg|conf|env|plist|xml|lock)$/ ||
+      f ~ /\.config\.[a-z]+$/ || f ~ /^(Makefile|justfile|Dockerfile|Procfile|Brewfile)$/) return "⚙️ config"
+  return "🧠 logic"
+}
+function subsystem(p,  n, a) {
+  n = split(p, a, "/")
+  if (n == 1) return "(root)"
+  if (a[1] ~ /^(src|apps|packages|plugins|lib|app)$/ && n > 2) return a[1] "/" a[2]
+  return a[1]
+}
+{
+  path = $3; a = ($1 == "-") ? 0 : $1; d = ($2 == "-") ? 0 : $2
+  if (path ~ /=>/) { sub(/.*=> /, "", path); gsub(/[{}]/, "", path) }   # renames: keep new path
+  k = kind(path); s = subsystem(path)
+  ka[k] += a; kd[k] += d; kf[k]++
+  sa[s] += a; sd[s] += d; sf[s]++; sk[s, k] += a + d
+  A += a; D += d; F++
+}
+END {
+  if (F == 0) { print "📊 no changes vs base"; exit }
+  T = A + D; if (T == 0) T = 1
+  printf "📊 **+%d / −%d across %d file%s** —", A, D, F, (F == 1 ? "" : "s")
+  n = split("🧠 logic|🧪 tests|📝 docs|⚙️ config|📦 generated|🖼️ assets", order, "|")
+  sep = " "
+  for (i = 1; i <= n; i++) { k = order[i]; if (kf[k]) { printf "%s%s %d%%", sep, k, int((ka[k] + kd[k]) * 100 / T + 0.5); sep = " · " } }
+  print ""; print ""
+  print "| Kind | Files | + | − |"; print "|---|---:|---:|---:|"
+  for (i = 1; i <= n; i++) { k = order[i]; if (kf[k]) printf "| %s | %d | %d | %d |\n", k, kf[k], ka[k], kd[k] }
+  # Subsystems, biggest churn first (insertion sort — POSIX awk has no asort).
+  ns = 0; for (s in sa) { ns++; j = ns
+    while (j > 1 && sa[name[j-1]] + sd[name[j-1]] < sa[s] + sd[s]) { name[j] = name[j-1]; j-- }
+    name[j] = s }
+  if (ns < 2) exit
+  print ""; print "| Subsystem | Files | + | − | Mostly |"; print "|---|---:|---:|---:|---|"
+  for (i = 1; i <= ns && i <= 10; i++) { s = name[i]; best = ""; bv = -1
+    for (j = 1; j <= n; j++) if (sk[s, order[j]] > bv) { bv = sk[s, order[j]]; best = order[j] }
+    sub(/ .*/, "", best)
+    printf "| `%s` | %d | %d | %d | %s |\n", s, sf[s], sa[s], sd[s], best }
+  if (ns > 10) printf "| … %d more | | | | |\n", ns - 10
+}'
