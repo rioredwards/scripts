@@ -1,0 +1,81 @@
+#!/bin/sh
+# agent-budget — the LOC appetite for the work in this repo, made measurable.
+#
+# The plan phase sets a budget after approval; hooks/loc-budget.sh measures the
+# diff against it on every edit and at commit time. Prose appetites ("keep it
+# small") lose; a number with a gate holds.
+#
+#   agent-budget set <loc> [--files N] [--base REF]   # start/raise (base = HEAD, kept on raise)
+#   agent-budget status                               # one line; exit 1 when over
+#   agent-budget clear                                # drop it
+#
+# State lives in the repo's .git dir (per worktree, never committed). Counted:
+# added+deleted lines vs base, committed or not, untracked files included.
+# Lockfiles and snapshots are ignored.
+#
+# Exit codes: 0 within budget · 1 over · 3 no budget set · 2 usage/infra error
+set -u
+
+die() { printf 'agent-budget: %s\n' "$*" >&2; exit 2; }
+
+GIT_DIR="$(git rev-parse --git-dir 2>/dev/null)" || die "not a git repo"
+STATE="$GIT_DIR/agent-budget"
+WARNED="$GIT_DIR/agent-budget-warned"
+
+# Paths that inflate a diff without being code anyone wrote.
+EXCLUDES=':(exclude,glob)**/pnpm-lock.yaml :(exclude,glob)**/package-lock.json :(exclude,glob)**/yarn.lock :(exclude,glob)**/*.lock :(exclude,glob)**/*.snap :(exclude,glob)**/Cargo.lock :(exclude,glob)**/Package.resolved'
+
+cmd="${1:-status}"; [ $# -gt 0 ] && shift
+
+case "$cmd" in
+  set)
+    loc="${1:-}"; [ $# -gt 0 ] && shift
+    case "$loc" in ''|*[!0-9]*) die "usage: agent-budget set <loc> [--files N] [--base REF]" ;; esac
+    # Raising an existing budget keeps its base; a fresh one measures from HEAD.
+    files=""; base="HEAD"
+    [ -r "$STATE" ] && base="$(sed -n 's/^BASE=//p' "$STATE")"
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --files) files="${2:-}"; shift 2 ;;
+        --base)  base="${2:-}";  shift 2 ;;
+        *) die "unknown flag $1" ;;
+      esac
+    done
+    [ -n "$files" ] && case "$files" in *[!0-9]*) die "--files wants a number" ;; esac
+    sha="$(git rev-parse --verify "$base^{commit}" 2>/dev/null)" || die "bad base ref: $base"
+    printf 'BASE=%s\nLOC=%s\nFILES=%s\nSET_AT=%s\n' "$sha" "$loc" "$files" "$(date +%s)" > "$STATE"
+    rm -f "$WARNED"
+    printf 'budget set: %s LOC%s, measured from %s\n' "$loc" "${files:+, $files new files}" "$(git rev-parse --short "$sha")"
+    ;;
+
+  clear)
+    rm -f "$STATE" "$WARNED"; echo "budget cleared" ;;
+
+  status)
+    [ -r "$STATE" ] || { echo "no budget set"; exit 3; }
+    . "$STATE"
+    git rev-parse --verify -q "$BASE^{commit}" >/dev/null || die "budget base $BASE no longer exists — run agent-budget set again"
+
+    # shellcheck disable=SC2086
+    tracked="$(git diff --numstat "$BASE" -- . $EXCLUDES | awk '$1!="-"{s+=$1+$2} END{print s+0}')"
+    untracked_lines=0; untracked_n=0
+    for f in $(git ls-files --others --exclude-standard); do
+      case "$f" in *lock.yaml|*lock.json|*.lock|*.snap|*Package.resolved) continue ;; esac
+      untracked_n=$((untracked_n+1))
+      n="$(wc -l < "$f" 2>/dev/null | tr -d ' ')"; untracked_lines=$((untracked_lines + ${n:-0}))
+    done
+    loc=$((tracked + untracked_lines))
+    # shellcheck disable=SC2086
+    added="$(git diff --name-only --diff-filter=A "$BASE" -- . $EXCLUDES | wc -l | tr -d ' ')"
+    newfiles=$((added + untracked_n))
+
+    over=0
+    [ "$loc" -gt "$LOC" ] && over=1
+    [ -n "$FILES" ] && [ "$newfiles" -gt "$FILES" ] && over=1
+    fpart=""; [ -n "$FILES" ] && fpart=" · new files $newfiles/$FILES"
+    if [ "$over" = 1 ]; then printf 'OVER BUDGET: %s/%s LOC%s\n' "$loc" "$LOC" "$fpart"; exit 1; fi
+    printf 'within budget: %s/%s LOC%s\n' "$loc" "$LOC" "$fpart"
+    ;;
+
+  *) die "usage: agent-budget set <loc> [--files N] [--base REF] | status | clear" ;;
+esac
