@@ -1,0 +1,21 @@
+#!/bin/sh
+# dev-url — remember the running dev server's URL for this repo so the Claude
+# statusline can show it as a clickable link. run-dev sets it; it is per-repo,
+# machine-local (.git dir), and should be the tailnet hostname, never localhost.
+#
+#   dev-url set http://rios-mac-mini:3000
+#   dev-url            # print it (exit 1 if none)
+#   dev-url clear
+set -u
+GIT_DIR="$(git rev-parse --git-dir 2>/dev/null)" || { echo "dev-url: not a git repo" >&2; exit 2; }
+F="$GIT_DIR/dev-url"
+case "${1:-get}" in
+  set)
+    u="${2:-}"
+    case "$u" in http://*|https://*) ;; *) echo "dev-url: want a full http(s) URL" >&2; exit 2 ;; esac
+    case "$u" in *localhost*|*127.0.0.1*) echo "dev-url: use the tailnet hostname, not localhost (breaks from the other Mac/phone)" >&2; exit 2 ;; esac
+    printf '%s\n' "$u" > "$F"; echo "dev-url: $u" ;;
+  clear) rm -f "$F"; echo "dev-url cleared" ;;
+  get) [ -r "$F" ] && cat "$F" || exit 1 ;;
+  *) echo "usage: dev-url [set <url>|clear]" >&2; exit 2 ;;
+esac
