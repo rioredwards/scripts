@@ -53,3 +53,37 @@ reply_will_bounce() {
   REPLY_CAP="$cap"
   return 0
 }
+
+# --- rules.json response rules -----------------------------------------------
+#
+# `hooks/rules/run.sh response` bounces a reply that trips an `on: response`
+# rule. It is a second reason a turn gets rewritten, so it needs the same
+# skip-this-pass treatment the length cap gets.
+
+# True when a response rule will bounce this reply. Delegates to run.sh instead
+# of re-reading rules.json, so the matching logic lives in exactly one place and
+# cannot drift from what actually fires.
+reply_rules_will_bounce() {
+  payload="$1"
+  runner="${AGENT_RULES_RUNNER:-$HOME/scripts/hooks/rules/run.sh}"
+  [ -r "$runner" ] || return 1
+  command -v jq >/dev/null 2>&1 || return 1
+
+  # Not registered on Stop means nobody will ask for a rewrite, so callers must
+  # not skip work waiting on one that never comes. Same guard as the cap's.
+  jq -e '[.hooks.Stop[]?.hooks[]?.command] | any(test("rules/run\\.sh.*response"))' \
+    "$HOME/.claude/settings.json" >/dev/null 2>&1 || return 1
+
+  # run.sh exits 2 exactly when it bounces, and already returns 0 on the
+  # rewrite pass (stop_hook_active), so no second guard is needed here.
+  printf '%s' "$payload" | sh "$runner" response >/dev/null 2>&1
+  [ "$?" -eq 2 ]
+}
+
+# True when this reply is about to be rewritten for ANY reason — over the length
+# cap, or tripping a response rule. This is the predicate a hook with real side
+# effects wants; `reply_will_bounce` alone now covers only half the reasons.
+reply_will_be_rewritten() {
+  reply_will_bounce "$1" && return 0
+  reply_rules_will_bounce "$1"
+}
