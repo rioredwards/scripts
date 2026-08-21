@@ -16,9 +16,10 @@ if [ -z "$base" ]; then
 fi
 [ -n "$base" ] || base=$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || true)
 [ -n "$base" ] || { echo "pr-loc: no base found — pass one: pr-loc origin/main" >&2; exit 2; }
+git rev-parse -q --verify "$base^{commit}" >/dev/null || { echo "pr-loc: unknown ref: $base" >&2; exit 2; }
 mb=$(git merge-base "$base" HEAD 2>/dev/null) || { echo "pr-loc: no merge-base with $base" >&2; exit 2; }
 
-git diff --numstat "$mb" HEAD | awk -F'\t' '
+git -c core.quotePath=false diff --numstat "$mb" HEAD | awk -F'\t' '
 function kind(p,  f) {
   f = p; sub(/.*\//, "", f)
   if (p ~ /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|Cargo\.lock|poetry\.lock|uv\.lock|Gemfile\.lock|go\.sum|composer\.lock)$/ ||
@@ -35,12 +36,13 @@ function kind(p,  f) {
 function subsystem(p,  n, a) {
   n = split(p, a, "/")
   if (n == 1) return "(root)"
-  if (a[1] ~ /^(src|apps|packages|plugins|lib|app)$/ && n > 2) return a[1] "/" a[2]
+  if (a[1] ~ /^(src|apps|packages|plugins)$/ && n > 2) return a[1] "/" a[2]
   return a[1]
 }
 {
   path = $3; a = ($1 == "-") ? 0 : $1; d = ($2 == "-") ? 0 : $2
-  if (path ~ /=>/) { sub(/.*=> /, "", path); gsub(/[{}]/, "", path) }   # renames: keep new path
+  # renames: keep the new path — both "old => new" and "pre/{old => new}/suf" forms.
+  if (path ~ /=>/) { if (sub(/\{[^{}]* => /, "", path)) sub(/\}/, "", path); else sub(/.* => /, "", path) }
   k = kind(path); s = subsystem(path)
   ka[k] += a; kd[k] += d; kf[k]++
   sa[s] += a; sd[s] += d; sf[s]++; sk[s, k] += a + d
@@ -63,7 +65,7 @@ END {
   if (ns < 2) exit
   print ""; print "| Subsystem | Files | + | − | Mostly |"; print "|---|---:|---:|---:|---|"
   for (i = 1; i <= ns && i <= 10; i++) { s = name[i]; best = ""; bv = -1
-    for (j = 1; j <= n; j++) if (sk[s, order[j]] > bv) { bv = sk[s, order[j]]; best = order[j] }
+    for (j = 1; j <= n; j++) if ((s, order[j]) in sk && sk[s, order[j]] > bv) { bv = sk[s, order[j]]; best = order[j] }
     sub(/ .*/, "", best)
     printf "| `%s` | %d | %d | %d | %s |\n", s, sf[s], sa[s], sd[s], best }
   if (ns > 10) printf "| … %d more | | | | |\n", ns - 10
