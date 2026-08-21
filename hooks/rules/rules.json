@@ -65,6 +65,26 @@
       "text": "BLOCKED: this writes 200+ words to GitHub. A PR body, issue body, or review comment is something Rio has to read, and length there costs him exactly what a long chat reply does — the same 200-word ceiling applies. Scale it to the diff: a two-line docs change gets two sentences, not a document. Keep what changed, why, and anything he must decide; cut the narration, the options you rejected, and the restated context. Do not route around this with --body-file. If the length is genuinely earned, re-run prefixed with `RIO_LONG_OK=1 ` and say in your reply why it was."
     },
     {
+      "id": "system-changes-via-skill",
+      "on": "tool",
+      "match": {
+        "tool": "^(Edit|Write|NotebookEdit)$",
+        "input": "(agent-skills/|hooks/rules/|\\.agents/AGENTS\\.md)"
+      },
+      "do": "remind",
+      "text": "You are editing Rio's agentic system (skills, ledger, hooks, agent rules, global AGENTS.md). All system changes go through the `utils:system` skill — invoke it FIRST if you haven't this session: it records intent in LEDGER.md, finds prior art, and owns publish + verify across both Macs. If it is already loaded, carry on."
+    },
+    {
+      "id": "system-changes-via-skill-bash",
+      "on": "tool",
+      "match": {
+        "tool": "^Bash$",
+        "input": "(?s)^(?=.*(agent-skills/|hooks/rules/|\\.agents/AGENTS\\.md)).*(<<|>>|sed[[:space:]]+-i|(echo|printf)[^|>]*>)"
+      },
+      "do": "remind",
+      "text": "This shell command writes into Rio's agentic system (skills, ledger, hooks, agent rules). All system changes go through the `utils:system` skill — invoke it FIRST if you haven't this session. If it is already loaded, carry on."
+    },
+    {
       "id": "never-merge-pr",
       "on": "tool",
       "match": {
