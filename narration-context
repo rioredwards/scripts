@@ -169,6 +169,47 @@ if [ -n "$sid" ] && command -v jq >/dev/null 2>&1; then
   fi
 fi
 
+# ------------------------------------------------------------- already said
+# The lead-in is only worth hearing for what changed. Forty clips a day that
+# each open with the time, the machine and the repo are noise, so the block
+# remembers what the previous narration on this Mac already said and names the
+# facts that have not moved since. The full block is still printed — sidecars,
+# the reader, the Raycast list and narration-title all parse it and must see
+# every fact — only the trailer tells the model what to leave unsaid.
+#
+# Per-Mac on purpose: ~/.cache is local, and "the Mac Mini" is exactly the fact
+# that should be spoken when Rio's attention moves between machines.
+#
+# Time is unchanged within the same clock hour. Turn, goal and issue are
+# unchanged for the rest of a session once its first turn said them. Caller
+# facts (-f) are never marked — the caller knows whether its fact is new.
+last_file="$HOME/.cache/note-on-turn/last-facts.json"
+hour="$(date '+%Y-%m-%d-%H' 2>/dev/null || true)"
+unchanged=""
+if command -v jq >/dev/null 2>&1; then
+  last="$(cat "$last_file" 2>/dev/null || true)"
+  printf '%s' "$last" | jq -e . >/dev/null 2>&1 || last='{}'
+  same() { [ -n "$2" ] && [ "$(printf '%s' "$last" | jq -r --arg k "$1" '.[$k] // ""')" = "$2" ]; }
+  mark() { unchanged="$unchanged${unchanged:+, }$1"; }
+  same hour "$hour" && [ -n "$now" ] && mark Time
+  same machine "$machine" && mark Machine
+  same agent "$agent" && mark Agent
+  same project "$project" && mark Project
+  same branch "$branch" && mark Branch
+  same worktree "$worktree" && mark Worktree
+  if same session "$sid"; then
+    [ -n "$turn" ] && mark Turn
+    [ -n "$goal" ] && mark "Session goal"
+    [ -n "$issue" ] && mark Issue
+  fi
+  mkdir -p "$(dirname "$last_file")" 2>/dev/null || true
+  jq -n --arg hour "$hour" --arg machine "$machine" --arg agent "$agent" \
+        --arg project "$project" --arg branch "$branch" --arg worktree "$worktree" \
+        --arg session "$sid" \
+    '{hour:$hour, machine:$machine, agent:$agent, project:$project, branch:$branch, worktree:$worktree, session:$session}' \
+    > "$last_file" 2>/dev/null || true
+fi
+
 # ---------------------------------------------------------------------- output
 out=""
 add() { [ -n "$2" ] && out="$out$1: $2
@@ -189,6 +230,11 @@ add "Issue" "$issue"
 # one — the document being read, the depth asked for. Read top-down, that puts
 # the general before the particular, which is the order a lead-in wants.
 out="$out$extra"
+
+# The trailer's key deliberately fails the `Key: value` shape (the em dash), so
+# no consumer that parses facts will ever mistake it for one.
+[ -n "$unchanged" ] && out="${out}Already said in the last clip — do not repeat: $unchanged
+"
 
 [ -n "$out" ] || exit 0
 
