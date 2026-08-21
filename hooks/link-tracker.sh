@@ -6,6 +6,9 @@
 #   1. Bare "PR #N" mentions (no URL) — resolved against this repo's GitHub
 #      remote, e.g. "PR #544" -> https://github.com/<owner>/<repo>/pull/544
 #   2. Any URL already written in the reply, markdown-formatted or bare
+#   3. File references (`src/a.ts:42`, `~/x/y.md`) that exist on disk ->
+#      `mycontrols-dev://open?path=&host=&line=` deeplinks, so a click opens the
+#      file in Cursor on whichever Mac Rio is at (my-controls routes it)
 #
 # Each becomes an OSC-8 hyperlink line (short label clickable, URL as
 # target) in a session-scoped marker file the statusline script reads:
@@ -101,6 +104,29 @@ if [ -n "$BARE_URLS" ]; then
     esac
   done <<< "$BARE_URLS"
 fi
+
+# 3. File references -> my-controls `open` deeplinks (first 3 that exist).
+#    `host` is this Mac's ssh alias: the click may land on the other one.
+case "$(hostname -s | tr '[:upper:]' '[:lower:]')" in
+  *mac-mini*) HOST_ALIAS=mini ;;
+  *) HOST_ALIAS=macbook ;;
+esac
+MC_SCHEME="${MC_SCHEME:-mycontrols-dev}"
+n_files=0
+FILE_REFS="$(printf '%s' "$TEXT_NO_MD" | grep -oE '(~/|/|\./)?[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*\.[A-Za-z0-9]+(:[0-9]+)?' | sed -E 's#^`##; s#`$##' | awk '!seen[$0]++')"
+while IFS= read -r ref; do
+  [ -n "$ref" ] || continue
+  [ "$n_files" -lt 3 ] || break
+  line="${ref##*:}"; path="${ref%:*}"
+  [ "$line" = "$ref" ] && line=""
+  path="${path/#\~/$HOME}"
+  case "$path" in /*) ;; *) path="${CWD:-.}/$path" ;; esac
+  [ -f "$path" ] || continue
+  path="$(cd "$(dirname "$path")" && pwd)/$(basename "$path")"
+  url="${MC_SCHEME}://open?path=${path}&host=${HOST_ALIAS}${line:+&line=$line}"
+  add_link "$url" "$(printf '\xf0\x9f\x93\x82 %s' "$(basename "$path")${line:+:$line}")"
+  n_files=$((n_files + 1))
+done <<< "$FILE_REFS"
 
 [ "${#ORDER[@]}" -gt 0 ] || exit 0
 
