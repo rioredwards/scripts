@@ -12,7 +12,6 @@
     "         'deny'   — block the tool call outright (on=tool only)",
     "  text   what the agent is told. Say the rule AND what to do instead."
   ],
-
   "rules": [
     {
       "id": "prefer-trash",
@@ -94,6 +93,16 @@
       "unless": "RIO_MERGE_OK=1",
       "do": "deny",
       "text": "BLOCKED: Rio never lets an agent merge a PR without his explicit, in-conversation permission. Ask him, in your reply, whether to merge. Only if he says yes, re-run the command prefixed with `RIO_MERGE_OK=1 `. This is an automated gate, not a denial from Rio."
+    },
+    {
+      "id": "no-handmade-svg",
+      "on": "tool",
+      "match": {
+        "tool": "^(Write|Edit|NotebookEdit)$",
+        "input": "(?i)<svg\\b|<path[[:space:]]+[^>]*\\bd=\"[MmLlCcZz]"
+      },
+      "do": "remind",
+      "text": "This writes hand-drawn SVG. Rio's rule: never author icons, logos, or vector art by hand — they look off. Use an icon library (lucide, heroicons, simple-icons) or his real assets in `~/Documents/Graphic Design/Logos:Icons/`. If this SVG is a copy-paste from one of those sources, carry on."
     }
   ]
 }
