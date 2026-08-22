@@ -1,0 +1,31 @@
+#!/bin/sh
+# narration-spoken — the fact block a narration should actually speak.
+#
+# stdin: a `narration-context` block. stdout: the same block with every fact
+# the trailer names as already said removed, and the trailer itself gone.
+#
+# The split is deliberate: the full block is the record (sidecars, the reader,
+# narration-title all want every fact), this is the script. Dropping the lines
+# here, not in the prompt, is what makes the quiet intro deterministic — the
+# model never sees a fact it is not meant to say, so it cannot decide to say it.
+#
+# Never fails the caller; a block with no trailer passes through unchanged.
+set -u
+awk '
+  /^Already said in the last clip — do not repeat: / {
+    n = split(substr($0, index($0, ": ") + 2), names, /, /)
+    for (i = 1; i <= n; i++) skip[names[i]] = 1
+    next
+  }
+  { lines[++count] = $0 }
+  END {
+    for (i = 1; i <= count; i++) {
+      line = lines[i]
+      if (match(line, /^[A-Za-z][A-Za-z ]{0,30}: /)) {
+        key = substr(line, 1, RLENGTH - 2)
+        if (key in skip) continue
+      }
+      print line
+    }
+  }
+'

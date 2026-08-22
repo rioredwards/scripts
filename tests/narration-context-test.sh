@@ -41,4 +41,16 @@ check "new session: Machine still quiet"  "Machine" "$(printf '%s' "$out" | grep
 trailer="$(printf '%s' "$out" | grep 'Already said')"
 if printf '%s' "$trailer" | grep -qE '^[A-Za-z][A-Za-z ]{0,30}:'; then echo "FAIL trailer parses as a fact"; fail=1; else echo "ok   trailer is not a fact line"; fi
 
+
+
+# narration-spoken: the model-facing block drops exactly the named facts.
+spoken="$(printf '%s' "$out" | "$here/narration-spoken")"
+check "spoken: kept changed fact"         "Turn: number 1" "$spoken"
+check "spoken: dropped Machine"           "!Machine:" "$spoken"
+check "spoken: dropped Project"           "!Project:" "$spoken"
+check "spoken: caller fact kept"          "Depth: brief" "$spoken"
+check "spoken: trailer gone"              "!Already said" "$spoken"
+check "spoken: header kept"               "MESSAGE CONTEXT" "$spoken"
+plain="$(printf 'MESSAGE CONTEXT — x\nTime: 1 PM\n' | "$here/narration-spoken")"
+check "spoken: no trailer passes through" "Time: 1 PM" "$plain"
 exit $fail

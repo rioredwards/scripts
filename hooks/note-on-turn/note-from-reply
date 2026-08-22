@@ -139,8 +139,11 @@ err_tmp="$(mktemp)"
 
 # Facts first, then the reply, with a header between them so the model can tell
 # which is which.
+# The model gets the spoken block — facts the last clip already said are
+# stripped here, deterministically, not left for the prompt to ignore. The
+# sidecar keeps the full block from $ctx_tmp.
 if [ -s "$ctx_tmp" ]; then
-  transform_input="$(cat "$ctx_tmp")
+  transform_input="$("$scripts_root/narration-spoken" < "$ctx_tmp")
 TEXT TO REWRITE
 
 $text"
