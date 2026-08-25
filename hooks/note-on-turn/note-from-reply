@@ -202,6 +202,16 @@ if [ -z "$fail_stage" ]; then
     || merge_json='{}'
   [ -n "$merge_json" ] || merge_json='{}'
   mark render+title
+
+  # Reset the repeated-failure alarm (see the degraded branch). A streak that
+  # got loud gets a matching all-clear text; a short one resets silently.
+  nf_count="$(cat "$log_dir/narrate-failed.count" 2>/dev/null || true)"
+  case "$nf_count" in ''|*[!0-9]*) nf_count=0 ;; esac
+  if [ "$nf_count" -ge "${AGENT_NARRATE_ALERT_AFTER:-3}" ]; then
+    printf '🟢 Narration recovered on %s after %s failed turns' "$(hostname -s)" "$nf_count" \
+      | "$scripts_root/sc" text-phone >/dev/null 2>&1 || true
+  fi
+  rm -f "$log_dir/narrate-failed.count" "$log_dir/narrate-failed.stamp"
 else
   degraded=1
   summary="⚠️ Summarizer failed this turn on $(hostname -s) — no summary sent (raw reply withheld). Stage: $fail_stage. See $log_dir/summarize.err"
@@ -221,6 +231,30 @@ else
       printf '          stderr: (none — stage produced no diagnostics)\n'
     fi
   } >>"$log_dir/summarize.err"
+
+  # Get loud when it keeps happening (scripts#8). The per-turn ⚠️ text above is
+  # gated on AGENT_TEXT and a summarize.err line is silence — a morning of dead
+  # narration went unnoticed for days once. N consecutive failures text the
+  # phone directly, debounced so a sustained outage is one message per window,
+  # not one per turn. The counter resets on the next good turn (above).
+  nf_count_file="$log_dir/narrate-failed.count"
+  nf_count="$(cat "$nf_count_file" 2>/dev/null || true)"
+  case "$nf_count" in ''|*[!0-9]*) nf_count=0 ;; esac
+  nf_count=$(( nf_count + 1 ))
+  printf '%s' "$nf_count" > "$nf_count_file"
+  if [ "$nf_count" -ge "${AGENT_NARRATE_ALERT_AFTER:-3}" ]; then
+    nf_stamp="$log_dir/narrate-failed.stamp"
+    nf_now="$(date +%s)"
+    nf_last="$(cat "$nf_stamp" 2>/dev/null || echo 0)"
+    case "$nf_last" in ''|*[!0-9]*) nf_last=0 ;; esac
+    if [ "$(( nf_now - nf_last ))" -ge "${AGENT_NARRATE_ALERT_EVERY:-1800}" ]; then
+      printf '%s' "$nf_now" > "$nf_stamp"
+      nf_err="$(head -c 200 "$err_tmp" 2>/dev/null | tr '\n' ' ')"
+      printf '🔴 Narration dead on %s — %s turns in a row. Stage: %s. %s' \
+        "$(hostname -s)" "$nf_count" "$fail_stage" "${nf_err:-see ~/.cache/note-on-turn/summarize.err}" \
+        | "$scripts_root/sc" text-phone >/dev/null 2>&1 || true
+    fi
+  fi
 fi
 
 # Speak the summary aloud when the voice toggle is on. Uses the emoji-stripped
