@@ -7,6 +7,7 @@ Small personal command wrappers and automation helpers. App-sized tools live in 
 - `agent-router` - wrapper for `~/dev/agent-router/agent-router`. Examples: `agent-router guide`, `agent-router providers --verbose`, `agent-router delegate "prompt"`.
 - `aitt` - compatibility shim for `~/dev/ai-text-transform/aitt`.
 - `sc` - text-only proxy for Apple Shortcuts registered in `sc-helpers/`. Run `sc` to list aliases.
+- `cal-add` - create an Apple Calendar event (defaults to "Work Time Tracking"). `cal-add "Title" --start "YYYY-MM-DD HH:MM" --duration 20 [--notes ...]`; `cal-add --list` for calendar names. Needs an unlocked GUI session on the running Mac.
 - `cleanshot` - minimal CleanShot X CLI firing `cleanshot://` URL commands. Run `cleanshot` to list aliases; `--dry-run` prints the URL.
 - `hooks/note-on-turn/` - hook scripts for summarizing final agent replies into the phone note pipeline.
 - `pr-loc` - markdown LOC breakdown of the current branch's diff by kind (logic/tests/docs/config/generated) and subsystem, for PR bodies. `pr-loc [base]`.
