@@ -55,7 +55,11 @@ fi
 
 gui_warning="GUI side effects (open, screenshots, notifications, Reminders, \
 Shortcuts) land on $machine's screen where he cannot see them — route anything \
-visual to his machine."
+visual to his machine. If a macOS permission prompt (TCC: calendar, \
+automation, screen recording, etc.) blocks a command on this Mac, it is NOT a \
+serious blocker: Rio can approve it in seconds via Screen Sharing from his \
+machine. Prefer approaches that need no prompt, but if one appears, tell Rio \
+and wait — do not hang silently or build workarounds."
 
 if [ "$locked" = yes ]; then
   echo "Seat: Remote. $machine's screen is LOCKED, so Rio is NOT at this Mac\
