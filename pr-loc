@@ -33,23 +33,39 @@ function kind(p,  f) {
       f ~ /\.config\.[a-z]+$/ || f ~ /^(Makefile|justfile|Dockerfile|Procfile|Brewfile)$/) return "⚙️ config"
   return "🧠 logic"
 }
-function subsystem(p,  n, a) {
+# Subsystem = first path segment below the directory every changed file shares
+# (a repo that keeps everything under skeleton/flask_app/ still gets models/ vs
+# templates/, not one "skeleton" row). Container dirs descend one more level.
+function subsystem(p,  n, a, i) {
   n = split(p, a, "/")
   if (n == 1) return "(root)"
-  if (a[1] ~ /^(src|apps|packages|plugins)$/ && n > 2) return a[1] "/" a[2]
-  return a[1]
+  i = depth + 1
+  if (i >= n) return (depth ? a[depth] : "(root)")
+  if (a[i] ~ /^(src|apps|packages|plugins|lib|app|.*_app)$/ && i + 1 < n) return a[i] "/" a[i+1]
+  return a[i]
 }
 {
   path = $3; a = ($1 == "-") ? 0 : $1; d = ($2 == "-") ? 0 : $2
   # renames: keep the new path — both "old => new" and "pre/{old => new}/suf" forms.
   if (path ~ /=>/) { if (sub(/\{[^{}]* => /, "", path)) sub(/\}/, "", path); else sub(/.* => /, "", path) }
-  k = kind(path); s = subsystem(path)
-  ka[k] += a; kd[k] += d; kf[k]++
-  sa[s] += a; sd[s] += d; sf[s]++; sk[s, k] += a + d
-  A += a; D += d; F++
+  F++; P[F] = path; PA[F] = a; PD[F] = d
 }
 END {
   if (F == 0) { print "📊 no changes vs base"; exit }
+  # Longest directory prefix common to every changed file, leaving each file at
+  # least one directory of its own below it (root files stay "(root)").
+  depth = -1
+  for (i = 1; i <= F && depth != 0; i++) { n = split(P[i], seg, "/") - 1
+    if (n == 0) continue
+    if (depth < 0) { depth = n - 1; for (j = 1; j <= n; j++) pre[j] = seg[j]; continue }
+    if (n - 1 < depth) depth = n - 1
+    for (j = 1; j <= depth; j++) if (seg[j] != pre[j]) { depth = j - 1; break } }
+  if (depth < 0) depth = 0
+  if (depth > 0) { prefix = pre[1]; for (j = 2; j <= depth; j++) prefix = prefix "/" pre[j]; print "_under `" prefix "/`_"; print "" }
+  for (i = 1; i <= F; i++) { a = PA[i]; d = PD[i]; k = kind(P[i]); s = subsystem(P[i])
+    ka[k] += a; kd[k] += d; kf[k]++
+    sa[s] += a; sd[s] += d; sf[s]++; sk[s, k] += a + d
+    A += a; D += d }
   n = split("🧠 logic|🧪 tests|📝 docs|⚙️ config|📦 generated|🖼️ assets", order, "|")
   # Subsystems, biggest churn first (insertion sort — POSIX awk has no asort).
   ns = 0; for (s in sa) { ns++; j = ns
