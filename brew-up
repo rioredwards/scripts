@@ -1,0 +1,15 @@
+#!/bin/zsh
+# brew-up — update Homebrew, upgrade everything, clean up.
+# Usage: brew-up [--dry]  (--dry: show what would upgrade, change nothing)
+set -euo pipefail
+
+if [[ "${1:-}" == "--dry" ]]; then
+  brew update
+  brew outdated
+  exit 0
+fi
+
+brew update
+brew upgrade
+brew cleanup
+brew autoremove
