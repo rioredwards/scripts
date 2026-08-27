@@ -95,6 +95,17 @@
       "text": "BLOCKED: Rio never lets an agent merge a PR without his explicit, in-conversation permission. Ask him, in your reply, whether to merge. Only if he says yes, re-run the command prefixed with `RIO_MERGE_OK=1 `. This is an automated gate, not a denial from Rio."
     },
     {
+      "id": "no-draft-pr",
+      "on": "tool",
+      "match": {
+        "tool": "^Bash$",
+        "input": "gh[[:space:]]+pr[[:space:]]+create[^\\n]*([[:space:]]--draft|[[:space:]]-d([[:space:]]|$))"
+      },
+      "unless": "RIO_DRAFT_OK=1",
+      "do": "deny",
+      "text": "BLOCKED: Rio never wants a PR opened as a draft unless he asked for one in this conversation. Re-run without `--draft`/`-d`. If he did explicitly ask, prefix the command with `RIO_DRAFT_OK=1 `."
+    },
+    {
       "id": "no-handmade-svg",
       "on": "tool",
       "match": {
