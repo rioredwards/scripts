@@ -38,7 +38,7 @@ reply_will_bounce() {
 
   # No cap hook registered means nobody will ask for a rewrite, so callers must
   # not skip work waiting on one that never comes.
-  grep -q 'reply-cap' "$HOME/.claude/settings.json" 2>/dev/null || return 1
+  grep -q 'reply-cap' "$HOME/.claude/settings.json" "$HOME/.codex/hooks.json" 2>/dev/null || return 1
 
   # Already bounced once this turn — the cap lets it through, so does everyone.
   [ "$(printf '%s' "$payload" | jq -r '.stop_hook_active // false')" = "true" ] && return 1
@@ -71,8 +71,12 @@ reply_rules_will_bounce() {
 
   # Not registered on Stop means nobody will ask for a rewrite, so callers must
   # not skip work waiting on one that never comes. Same guard as the cap's.
-  jq -e '[.hooks.Stop[]?.hooks[]?.command] | any(test("rules/run\\.sh.*response"))' \
-    "$HOME/.claude/settings.json" >/dev/null 2>&1 || return 1
+  registered=1
+  for f in "$HOME/.claude/settings.json" "$HOME/.codex/hooks.json"; do
+    jq -e '[.hooks.Stop[]?.hooks[]?.command] | any(test("rules/run\\.sh.*response"))' \
+      "$f" >/dev/null 2>&1 && { registered=0; break; }
+  done
+  [ "$registered" -eq 0 ] || return 1
 
   # run.sh exits 2 exactly when it bounces, and already returns 0 on the
   # rewrite pass (stop_hook_active), so no second guard is needed here.

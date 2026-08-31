@@ -4,6 +4,17 @@ set -eu
 scripts_root="${SCRIPTS:-$HOME/scripts}"
 payload="$(cat)"
 
+# A reply about to be bounced and rewritten — over the length cap, or tripping
+# an `on: response` rule — fires Stop again on the rewrite. Skip this pass so
+# one turn costs Rio one phone note, not two. Same guard as claude-note-on-turn.
+if [ -f "$scripts_root/hooks/lib/reply-cap-lib.sh" ]; then
+  . "$scripts_root/hooks/lib/reply-cap-lib.sh"
+  if reply_will_be_rewritten "$payload"; then
+    printf '%s\n' '{"continue": true}'
+    exit 0
+  fi
+fi
+
 HOOK_AGENT=codex
 HOOK_SESSION_ID="$(printf '%s' "$payload" | jq -r '.session_id // empty')"
 HOOK_CWD="$(printf '%s' "$payload" | jq -r '.cwd // empty')"
