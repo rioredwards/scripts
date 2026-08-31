@@ -31,9 +31,13 @@ case "$cmd" in
   set)
     loc="${1:-}"; [ $# -gt 0 ] && shift
     case "$loc" in ''|*[!0-9]*) die "usage: agent-budget set <loc> [--files N] [--base REF]" ;; esac
-    # Raising an existing budget keeps its base; a fresh one measures from HEAD.
+    # Raising an existing budget keeps its base — but only on the same branch;
+    # a fresh budget or a branch switch measures from HEAD (stale bases gate falsely).
     files=""; base="HEAD"
-    [ -r "$STATE" ] && base="$(sed -n 's/^BASE=//p' "$STATE")"
+    branch="$(git symbolic-ref --short -q HEAD || echo detached)"
+    [ -r "$STATE" ] && [ "$(sed -n 's/^BRANCH=//p' "$STATE")" = "$branch" ] && base="$(sed -n 's/^BASE=//p' "$STATE")"
+    # Kept base gone stale (rebase)? Refresh to HEAD instead of re-saving a false gate.
+    [ "$base" = "HEAD" ] || git merge-base --is-ancestor "$base" HEAD 2>/dev/null || base="HEAD"
     while [ $# -gt 0 ]; do
       case "$1" in
         --files) files="${2:-}"; shift 2 ;;
@@ -43,7 +47,7 @@ case "$cmd" in
     done
     [ -n "$files" ] && case "$files" in *[!0-9]*) die "--files wants a number" ;; esac
     sha="$(git rev-parse --verify "$base^{commit}" 2>/dev/null)" || die "bad base ref: $base"
-    printf 'BASE=%s\nLOC=%s\nFILES=%s\nSET_AT=%s\n' "$sha" "$loc" "$files" "$(date +%s)" > "$STATE"
+    printf 'BASE=%s\nLOC=%s\nFILES=%s\nBRANCH=%s\nSET_AT=%s\n' "$sha" "$loc" "$files" "$branch" "$(date +%s)" > "$STATE"
     rm -f "$WARNED"
     printf 'budget set: %s LOC%s, measured from %s\n' "$loc" "${files:+, $files new files}" "$(git rev-parse --short "$sha")"
     ;;
@@ -55,6 +59,9 @@ case "$cmd" in
     [ -r "$STATE" ] || { echo "no budget set"; exit 3; }
     . "$STATE"
     git rev-parse --verify -q "$BASE^{commit}" >/dev/null || die "budget base $BASE no longer exists — run agent-budget set again"
+    # A base that isn't an ancestor of HEAD (rebase, branch switch) inflates the diff
+    # into a false OVER BUDGET. Fail loud instead of gating falsely.
+    git merge-base --is-ancestor "$BASE" HEAD 2>/dev/null || die "budget base $(git rev-parse --short "$BASE") is stale (rebase/branch switch) — re-run: agent-budget set <loc>"
 
     # shellcheck disable=SC2086
     tracked="$(git diff --numstat "$BASE" -- . $EXCLUDES | awk '$1!="-"{s+=$1+$2} END{print s+0}')"
