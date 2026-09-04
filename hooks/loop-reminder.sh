@@ -16,6 +16,7 @@ command -v jq >/dev/null 2>&1 || exit 0
 INPUT="$(cat)"
 SID="$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)"
 [ -n "$SID" ] || exit 0
+CWD="$(printf '%s' "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)"
 
 MARKER="/tmp/claude-loop-phase-${SID}"
 [ -r "$MARKER" ] || exit 0
@@ -37,6 +38,17 @@ if [ -r "$STAMP" ]; then
 fi
 printf '%s' "$now" > "$STAMP"
 
-jq -n --arg ctx "📌 core:loop active — last phase skill loaded: ${PHASE}. Protocol: every phase transition begins by invoking that phase's skill (Skill tool, core:<phase>) before any phase work or delegation. If you have moved past '${PHASE}' without doing so, invoke the current phase's skill now. If context was compacted, re-invoke core:loop first." \
+# Declared composition (phases + routes), written by the loop at contract time to
+# $GIT_DIR/claude-loop-plan. When present, echo it back — the evidenced drift is toward
+# MORE ceremony than agreed, not phase-skipping (L-0060).
+COMP=""
+if [ -n "$CWD" ]; then
+  GD="$(git -C "$CWD" rev-parse --absolute-git-dir 2>/dev/null)" || GD=""
+  [ -n "$GD" ] && [ -r "$GD/claude-loop-plan" ] && COMP="$(head -c 400 "$GD/claude-loop-plan" 2>/dev/null)"
+fi
+COMP_LINE=""
+[ -n "$COMP" ] && COMP_LINE=" Declared composition: ${COMP} — hold the declared depth (no extra ceremony, no skipped floors); re-route only with a stated reason, announced and recorded."
+
+jq -n --arg ctx "📌 core:loop active — last phase skill loaded: ${PHASE}.${COMP_LINE} Protocol: every phase transition begins by invoking that phase's skill (Skill tool, core:<phase>) before any phase work or delegation. If you have moved past '${PHASE}' without doing so, invoke the current phase's skill now. If context was compacted, re-invoke core:loop first." \
   '{hookSpecificOutput:{hookEventName:"PostToolUse",additionalContext:$ctx}}'
 exit 0
