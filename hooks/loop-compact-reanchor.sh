@@ -34,8 +34,7 @@ if [ -n "$CWD" ]; then
 fi
 
 cat <<EOF
-🚨 Context was just compacted mid-core:loop. Last phase skill loaded: ${PHASE}.
-${COMP:+Declared composition: ${COMP} — hold the declared depth; re-route only with a stated reason.}
+🚨 Context was just compacted mid-core:loop. Last phase skill loaded: ${PHASE}.${COMP:+ Declared composition: ${COMP} — hold the declared depth; re-route only with a stated reason.}
 The loop protocol likely got lost in the summary — re-anchor before continuing:
 1. Re-invoke core:loop (Skill tool) to reload the orchestration rules.
 2. Every phase transition begins by invoking that phase's skill (core:<phase>) — never do phase work or spawn phase agents without it.

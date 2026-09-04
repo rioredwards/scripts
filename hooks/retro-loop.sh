@@ -44,7 +44,7 @@ case "$EVERY" in *[!0-9]*|"") EVERY=500 ;; esac
 COUNT_FILE="$GD/retro-loop-count"
 COUNT="$(cat "$COUNT_FILE" 2>/dev/null || echo 0)"
 case "$COUNT" in *[!0-9]*|"") COUNT=0 ;; esac
-COUNT=$((COUNT + 1))
+COUNT=$((10#$COUNT + 1))  # 10# — a stray leading zero must not be read as octal
 
 if [ "$COUNT" -lt "$EVERY" ]; then
   printf '%s' "$COUNT" > "$COUNT_FILE" 2>/dev/null || true
