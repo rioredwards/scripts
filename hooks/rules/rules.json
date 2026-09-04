@@ -3,13 +3,13 @@
     "Rio's agent rules. One entry per rule Rio wants enforced mechanically",
     "instead of hoping prose in AGENTS.md lands. See README.md for the schema.",
     "",
-    "  on     'tool'     — checked before a tool runs  (Claude PreToolUse)",
-    "         'response' — checked on the final reply   (Claude/Codex Stop)",
+    "  on     'tool'     \u2014 checked before a tool runs  (Claude PreToolUse)",
+    "         'response' \u2014 checked on the final reply   (Claude/Codex Stop)",
     "  match  regexes. 'tool'/'input' for on=tool, 'text' for on=response.",
     "         Omitted keys match anything. All present keys must match.",
     "  unless regex escape hatch; matches -> rule is skipped this time.",
-    "  do     'remind' — non-blocking nudge into the agent's context",
-    "         'deny'   — block the tool call outright (on=tool only)",
+    "  do     'remind' \u2014 non-blocking nudge into the agent's context",
+    "         'deny'   \u2014 block the tool call outright (on=tool only)",
     "  text   what the agent is told. Say the rule AND what to do instead."
   ],
   "rules": [
@@ -21,7 +21,7 @@
         "input": "(^|[[:space:];&|(){}`/])rm([[:space:]]|$)"
       },
       "do": "remind",
-      "text": "Rio prefers `trash` over `rm` — deletions stay recoverable. This command is allowed and will run. Use `rm` only when it is genuinely right: CI cleanup, temp/build artifacts, or a path Trash cannot handle."
+      "text": "Rio prefers `trash` over `rm` \u2014 deletions stay recoverable. This command is allowed and will run. Use `rm` only when it is genuinely right: CI cleanup, temp/build artifacts, or a path Trash cannot handle."
     },
     {
       "id": "no-fallbacks",
@@ -40,7 +40,7 @@
         "input": "/Users/rio(redwards|edwards)/"
       },
       "do": "remind",
-      "text": "This writes a hardcoded home path. Rio works on two Macs with two usernames (`rioredwards`, `rioedwards`), so an absolute path here is broken on the other machine. Use `$HOME`, `~`, or one of his dir handles ($DEV, $SCRIPTS, $DOTFILES, $SKILLS). Keep the literal path only if it must name one specific machine — and say why."
+      "text": "This writes a hardcoded home path. Rio works on two Macs with two usernames (`rioredwards`, `rioedwards`), so an absolute path here is broken on the other machine. Use `$HOME`, `~`, or one of his dir handles ($DEV, $SCRIPTS, $DOTFILES, $SKILLS). Keep the literal path only if it must name one specific machine \u2014 and say why."
     },
     {
       "id": "no-hardcoded-home-bash",
@@ -50,7 +50,7 @@
         "input": "(?s)^(?=.*/Users/rio(redwards|edwards)/).*(<<|sed[[:space:]]+-i|perl[[:space:]]+-[a-z]*i|(echo|printf)[^|>]*>)"
       },
       "do": "remind",
-      "text": "This shell command writes a hardcoded home path into a file (heredoc, redirect, or in-place edit). The command runs, but the file it leaves behind is broken on Rio's other Mac — two machines, two usernames (`rioredwards`, `rioedwards`). Write `$HOME`, `~`, or a dir handle ($DEV, $SCRIPTS, $DOTFILES, $SKILLS) into the file instead. Keep the literal path only if it must name one specific machine — and say why."
+      "text": "This shell command writes a hardcoded home path into a file (heredoc, redirect, or in-place edit). The command runs, but the file it leaves behind is broken on Rio's other Mac \u2014 two machines, two usernames (`rioredwards`, `rioedwards`). Write `$HOME`, `~`, or a dir handle ($DEV, $SCRIPTS, $DOTFILES, $SKILLS) into the file instead. Keep the literal path only if it must name one specific machine \u2014 and say why."
     },
     {
       "id": "gh-body-cap",
@@ -61,7 +61,7 @@
       },
       "unless": "RIO_LONG_OK=1",
       "do": "deny",
-      "text": "BLOCKED: this writes 200+ words to GitHub. A PR body, issue body, or review comment is something Rio has to read, and length there costs him exactly what a long chat reply does — the same 200-word ceiling applies. Scale it to the diff: a two-line docs change gets two sentences, not a document. Keep what changed, why, and anything he must decide; cut the narration, the options you rejected, and the restated context. Do not route around this with --body-file. If the length is genuinely earned, re-run prefixed with `RIO_LONG_OK=1 ` and say in your reply why it was."
+      "text": "BLOCKED: this writes 200+ words to GitHub. A PR body, issue body, or review comment is something Rio has to read, and length there costs him exactly what a long chat reply does \u2014 the same 200-word ceiling applies. Scale it to the diff: a two-line docs change gets two sentences, not a document. Keep what changed, why, and anything he must decide; cut the narration, the options you rejected, and the restated context. Do not route around this with --body-file. If the length is genuinely earned, re-run prefixed with `RIO_LONG_OK=1 ` and say in your reply why it was."
     },
     {
       "id": "system-changes-via-skill",
@@ -71,7 +71,7 @@
         "input": "(agent-skills/|hooks/rules/|\\.agents/AGENTS\\.md)"
       },
       "do": "remind",
-      "text": "You are editing Rio's agentic system (skills, ledger, hooks, agent rules, global AGENTS.md). All system changes go through the `utils:system` skill — invoke it FIRST if you haven't this session: it records intent in LEDGER.md, finds prior art, and owns publish + verify across both Macs. If it is already loaded, carry on."
+      "text": "You are editing Rio's agentic system (skills, ledger, hooks, agent rules, global AGENTS.md). All system changes go through the `utils:system` skill \u2014 invoke it FIRST if you haven't this session: it records intent in LEDGER.md, finds prior art, and owns publish + verify across both Macs. If it is already loaded, carry on."
     },
     {
       "id": "system-changes-via-skill-bash",
@@ -81,7 +81,7 @@
         "input": "(?s)^(?=.*(agent-skills/|hooks/rules/|\\.agents/AGENTS\\.md)).*(<<|>>|sed[[:space:]]+-i|(echo|printf)[^|>]*>)"
       },
       "do": "remind",
-      "text": "This shell command writes into Rio's agentic system (skills, ledger, hooks, agent rules). All system changes go through the `utils:system` skill — invoke it FIRST if you haven't this session. If it is already loaded, carry on."
+      "text": "This shell command writes into Rio's agentic system (skills, ledger, hooks, agent rules). All system changes go through the `utils:system` skill \u2014 invoke it FIRST if you haven't this session. If it is already loaded, carry on."
     },
     {
       "id": "never-merge-pr",
@@ -113,7 +113,18 @@
         "input": "(?i)<svg\\b|<path[[:space:]]+[^>]*\\bd=\"[MmLlCcZz]"
       },
       "do": "remind",
-      "text": "This writes hand-drawn SVG. Rio's rule: never author icons, logos, or vector art by hand — they look off. Use an icon library (lucide, heroicons, simple-icons) or his real assets in `~/Documents/Graphic Design/Logos:Icons/`. If this SVG is a copy-paste from one of those sources, carry on."
+      "text": "This writes hand-drawn SVG. Rio's rule: never author icons, logos, or vector art by hand \u2014 they look off. Use an icon library (lucide, heroicons, simple-icons) or his real assets in `~/Documents/Graphic Design/Logos:Icons/`. If this SVG is a copy-paste from one of those sources, carry on."
+    },
+    {
+      "id": "use-the-start-script",
+      "on": "tool",
+      "match": {
+        "tool": "^Bash$",
+        "input": "(?i)(^|[\\n;&|(){}])[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*([^[:space:]]*/)?(flask[[:space:]]+([^[:space:]]+[[:space:]]+)*run|(npm|pnpm|yarn|bun)[[:space:]]+(run[[:space:]]+)?(dev|start|serve)|uvicorn[[:space:]]|gunicorn[[:space:]]|(npx[[:space:]]+)?vite([[:space:]]+(dev|preview|serve))?[[:space:]]*$|next[[:space:]]+dev|nodemon([[:space:]]|$)|rails[[:space:]]+s(erver)?([[:space:]]|$)|python[0-9.]*[[:space:]]+manage\\.py[[:space:]]+runserver|streamlit[[:space:]]+run)"
+      },
+      "unless": "RIO_RUN_OK=1",
+      "do": "deny",
+      "text": "BLOCKED: this looks like a hand-rolled dev-server start. Rio's rule: never guess how to run an app -- guessing skips the port guard, env loading, and worktree setup the repo's own script does, and the breakage surfaces later as a dead page. Use the `core:run-dev` skill, or find the repo's start script yourself: `scripts/start_dev.sh`, `bin/dev`, a Makefile/justfile target, `.claude/launch.json`, or whatever the RUNBOOK/README names. Run that instead. If the repo genuinely has none, say so and offer to add one. If the command you were about to run IS that script (or none exists yet), re-run it prefixed with `RIO_RUN_OK=1 `. And if the script did not work on the first try, tell Rio what broke and recommend the fix, so next time is one shot."
     }
   ]
 }
