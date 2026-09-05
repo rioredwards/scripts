@@ -41,6 +41,11 @@ case "$MODE" in
     ;;
   post)
     case "$TOOL" in Edit|Write|NotebookEdit|Bash) ;; *) exit 0 ;; esac
+    # Delegates never get the checkpoint-with-Rio nudge — and must not consume
+    # the once-per-budget warned marker the main agent relies on. The commit
+    # gate in `pre` still binds everyone.
+    . "$HOME/scripts/hooks/lib/delegate.sh"
+    hook_is_delegate "$INPUT" && exit 0
     [ -e "$GIT_DIR/agent-budget-warned" ] && exit 0
     STATUS="$("$HOME/scripts/agent-budget" status 2>&1)"; RC=$?
     [ "$RC" -eq 1 ] || exit 0

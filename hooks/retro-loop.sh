@@ -31,6 +31,10 @@ set -uo pipefail
 command -v jq >/dev/null 2>&1 || exit 0
 
 INPUT="$(cat)"
+# The retro is Rio's loop, not a delegate's: subagent tool calls neither tick
+# the counter nor receive the check-in.
+. "$HOME/scripts/hooks/lib/delegate.sh"
+hook_is_delegate "$INPUT" && exit 0
 CWD="$(printf '%s' "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)"
 [ -n "$CWD" ] || exit 0
 

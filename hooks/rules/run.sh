@@ -43,6 +43,10 @@ else
   # A bounced reply gets rewritten, and the rewrite fires Stop again. Let the
   # second pass through or the agent never finishes the turn.
   [ "$(printf '%s' "$PAYLOAD" | jq -r '.stop_hook_active // false' 2>/dev/null)" = "true" ] && exit 0
+  # Response rules police replies Rio reads. A delegate's reply is another
+  # agent's input — let it through whole. (Tool rules still bind delegates.)
+  . "$HOME/scripts/hooks/lib/delegate.sh"
+  hook_is_delegate "$PAYLOAD" && exit 0
   TEXT="$(printf '%s' "$PAYLOAD" | jq -r '.last_assistant_message // empty' 2>/dev/null)"
   [ -n "$TEXT" ] || exit 0
 fi

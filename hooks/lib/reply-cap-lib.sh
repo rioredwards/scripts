@@ -34,6 +34,12 @@ reply_prose_words() {
 # stdin-free — pass the raw hook payload as $1.
 reply_will_bounce() {
   payload="$1"
+
+  # The cap prices Rio's reading time. A delegate's reply is another agent's
+  # input, not Rio's reading — it must arrive whole.
+  . "$HOME/scripts/hooks/lib/delegate.sh"
+  hook_is_delegate "$payload" && return 1
+
   cap="$(reply_cap_value)" || return 1
 
   # No cap hook registered means nobody will ask for a rewrite, so callers must
