@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+#
+# dev-up — start this repo's dev server the way Rio wants it, in ONE command.
+#
+# Finds the repo's own start script, runs it through portless (named, stable,
+# tailnet-reachable port) inside a herdr pane, waits for the URL, remembers it
+# for the statusline, and prints it. No port hunting, no pane surveys, no
+# guessing. If a server for this checkout is already up, prints its URL and
+# does nothing else.
+#
+#   dev-up                 # detect the start script, start, print URL
+#   dev-up -- <command...> # start this exact command instead of detecting
+#   DEV_UP_TIMEOUT=120 dev-up
+#
+# Prints on success (stdout, last line):   URL pane=<herdr pane id>
+# Exit codes: 0 started or already running · 1 server failed (pane tail
+# printed) · 2 could not even try (no script, no herdr, not a repo).
+#
+# Agents: this IS the sanctioned dev-server start (RIO_RUN_OK is implied).
+set -euo pipefail
+
+say()  { printf '%s\n' "$*" >&2; }
+die()  { say "dev-up: $*"; exit 2; }
+
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a git repo"
+cd "$ROOT"
+TIMEOUT_MS=$(( ${DEV_UP_TIMEOUT:-90} * 1000 ))
+
+# ── 1. What to run ────────────────────────────────────────────────────────────
+CMD=()
+if [[ "${1:-}" == "--" ]]; then
+  shift; CMD=("$@")
+  [[ ${#CMD[@]} -gt 0 ]] || die "nothing after --"
+else
+  for cand in skeleton/scripts/start_dev.sh scripts/start_dev.sh scripts/dev bin/dev start_dev.sh; do
+    if [[ -x "$cand" ]]; then CMD=("./$cand"); break; fi
+  done
+  if [[ ${#CMD[@]} -eq 0 && -f package.json ]] && grep -q '"dev"[[:space:]]*:' package.json; then
+    if [[ -f pnpm-lock.yaml ]]; then CMD=(pnpm dev); else CMD=(npm run dev); fi
+  fi
+  [[ ${#CMD[@]} -gt 0 ]] || die "no start script found (looked for skeleton/scripts/start_dev.sh, scripts/start_dev.sh, scripts/dev, bin/dev, a package.json dev script). Check RUNBOOK.md, or run: dev-up -- <command>"
+fi
+
+# ── 2. Already running for this checkout? ─────────────────────────────────────
+# portless lists routes with their supervisor pid; a pid whose cwd is this
+# checkout is our server. Print its tailscale URL and stop.
+existing="$(portless list 2>/dev/null || true)"
+while IFS= read -r pid; do
+  [[ -n "$pid" ]] || continue
+  pcwd="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)"
+  if [[ "$pcwd" == "$ROOT" ]]; then
+    url="$(printf '%s\n' "$existing" | awk -v p="(pid $pid)" 'index($0,p){f=1;next} f&&/tailscale:/{print $2;exit}')"
+    if [[ -n "$url" ]]; then
+      dev-url set "$url" >/dev/null 2>&1 || true
+      say "dev-up: already running for this checkout (pid $pid)"
+      printf '%s pane=?\n' "$url"
+      exit 0
+    fi
+  fi
+done < <(printf '%s\n' "$existing" | sed -n 's/.*(pid \([0-9]*\)).*/\1/p')
+
+# ── 3. A herdr pane, split off one that already lives in this repo ────────────
+command -v herdr >/dev/null || die "herdr not installed; long-running servers must run in a herdr pane"
+snap="$(herdr api snapshot 2>/dev/null)" || die "herdr socket is not live (herdr api snapshot failed); open Herdr, then rerun"
+main_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+src="$(printf '%s' "$snap" | ROOT="$ROOT" MAIN="$main_root" python3 -c '
+import json,os,sys
+s=json.load(sys.stdin)["result"]["snapshot"]
+panes=s["panes"]; root=os.environ["ROOT"]; main=os.environ["MAIN"]
+def pick(pred):
+    for p in panes:
+        if pred(p.get("cwd","")): return p["pane_id"]
+pid = pick(lambda c: c==root) or pick(lambda c: c.startswith(root+"/")) \
+   or pick(lambda c: c==main) or pick(lambda c: c.startswith(main+"/")) \
+   or (panes[0]["pane_id"] if panes else "")
+print(pid)')"
+[[ -n "$src" ]] || die "herdr has no panes to split from"
+pane="$(herdr pane split "$src" --direction right --cwd "$ROOT" --no-focus | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["pane"]["pane_id"])')"
+[[ -n "$pane" ]] || die "herdr pane split returned no pane id"
+sleep 1  # let the shell reach its prompt
+
+# ── 4. Run through portless and wait for the tailnet URL ──────────────────────
+herdr pane run "$pane" "portless run --tailscale ${CMD[*]}" >/dev/null
+herdr pane wait-output "$pane" --source recent-unwrapped \
+  --regex 'Tailscale -> https://|🔴|EADDRINUSE|Error:|error:|Traceback|exit code' \
+  --timeout "$TIMEOUT_MS" >/dev/null 2>&1 || true
+tail="$(herdr pane read "$pane" --source recent-unwrapped --lines 80 2>/dev/null || true)"
+url="$(printf '%s\n' "$tail" | sed -n 's/.*Tailscale -> \(https:\/\/[^[:space:]]*\).*/\1/p' | tail -1)"
+if [[ -z "$url" ]]; then
+  say "dev-up: no tailnet URL after ${DEV_UP_TIMEOUT:-90}s. Pane $pane tail:"
+  printf '%s\n' "$tail" | tail -30 >&2
+  exit 1
+fi
+
+# ── 5. Is it actually answering? ──────────────────────────────────────────────
+# portless prints the URL before the app behind it is listening, so poll until
+# something other than the proxy's 502 comes back.
+deadline=$(( SECONDS + ${DEV_UP_TIMEOUT:-90} ))
+code=000
+while (( SECONDS < deadline )); do
+  code="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 "$url/" || echo 000)"
+  case "$code" in 2*|3*|401|403) break ;; esac
+  sleep 2
+done
+case "$code" in
+  2*|3*|401|403) ;;
+  *) say "dev-up: $url still answers HTTP $code after ${DEV_UP_TIMEOUT:-90}s. Pane $pane tail:"
+     herdr pane read "$pane" --source recent-unwrapped --lines 40 2>/dev/null | tail -30 >&2; exit 1 ;;
+esac
+
+dev-url set "$url" >/dev/null 2>&1 || true
+say "dev-up: ${CMD[*]} is up in herdr pane $pane (HTTP $code)"
+printf '%s pane=%s\n' "$url" "$pane"
