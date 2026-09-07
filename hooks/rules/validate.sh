@@ -31,12 +31,14 @@ errs="$(jq -r '
                then err($id; "`on` must be \"tool\" or \"response\", got \($on|tojson)") else empty end),
             (if (["remind","deny"] | index($do)) == null
                then err($id; "`do` must be \"remind\" or \"deny\", got \($do|tojson)") else empty end),
+            (if has("scope") and (.scope != "all" or .on != "response")
+               then err($id; "scope must be all and is response-only") else empty end),
             (if .do == "deny" and .on == "response"
                then err($id; "cannot deny a reply that already happened; use `remind`") else empty end),
             (if (.text // "") == "" then err($id; "missing text — the agent needs to be told what to do") else empty end),
             (if (.match | type) != "object" then err($id; "missing `match` object") else empty end),
-            (if .on == "tool" and ((.match.tool // "") == "") and ((.match.input // "") == "")
-               then err($id; "on=tool needs match.tool and/or match.input") else empty end),
+            (if .on == "tool" and ((.match.tool // "") == "") and ((.match.input // "") == "") and ((.match.content // "") == "")
+               then err($id; "on=tool needs match.tool, match.input, or match.content") else empty end),
             (if .on == "response" and ((.match.text // "") == "")
                then err($id; "on=response needs match.text") else empty end) ]
         | .[] ]
@@ -48,7 +50,7 @@ if [ -n "$errs" ]; then note "$errs"; fi
 # pattern that survives here is a pattern the runner can use.
 re_errs="$(
   jq -r '.rules[]? | .id as $i
-         | (.match.tool, .match.input, .match.text, .unless)
+         | (.match.tool, .match.input, .match.content, .match.text, .unless)
          | select(. != null and . != "") | $i + "\t" + .' "$RULES" \
   | while IFS="$(printf '\t')" read -r id re; do
       jq -n -e --arg re "$re" '"sample" | test($re) | true' >/dev/null 2>&1 \

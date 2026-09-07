@@ -16,7 +16,9 @@ Every field. There is nothing else.
 | `on` | `tool` \| `response` | When it is checked. |
 | `match.tool` | regex | `on: tool` only. Matches the tool name (`Bash`, `Edit`, …). |
 | `match.input` | regex | `on: tool` only. Matches `tool_input.command`, else the whole input as JSON. |
+| `match.content` | regex | Tool only. Whole input, excluding Edit old_string and patch removal/context lines. |
 | `match.text` | regex | `on: response` only. Matches the final reply. |
+| `scope` | `all` | Optional, response-only. Also enforce on retries and delegates. |
 | `unless` | regex | Optional escape hatch. Matches the same subject → rule skipped. |
 | `do` | `remind` \| `deny` | `deny` is `on: tool` only. |
 | `text` | string | What the agent is told. State the rule **and** what to do instead. |
@@ -26,7 +28,7 @@ Omitted `match` keys match anything; all present keys must match (AND).
 - **`remind`** on a tool → runs anyway, nudge lands in the agent's context. Rio is
   never prompted.
 - **`deny`** on a tool → blocked, agent sees `text` as the reason.
-- **`remind`** on a response → the reply is bounced and rewritten. One retry only.
+- **`remind`** on a response → the reply is bounced and rewritten. One retry only, unless `scope: all`.
 
 Regexes are Oniguruma (jq): `(?i)` for case-insensitive, `[[:space:]]` classes work.
 
@@ -37,7 +39,8 @@ Regexes are Oniguruma (jq): `(?i)` for case-insensitive, `[[:space:]]` classes w
 | Rule kind | Claude event | Registered |
 |---|---|---|
 | `tool` | `PreToolUse`, matcher `*` | ✅ in `.dotfiles/.claude/settings.json` |
-| `response` | `Stop` | ✅ in `.dotfiles/.claude/settings.json` |
+| `response` | `Stop` | Claude settings and Codex hooks.json |
+| `response`, scope all | `SubagentStop` | Claude settings |
 
 A bounced reply re-fires the whole `Stop` chain, so a hook with real side
 effects must skip the pass that is about to be rewritten — otherwise one
@@ -61,3 +64,15 @@ block a stop, so it would match rules and let the reply through anyway.
 - **Not replaced:** `issue-skill-guard.sh` and `loop-reminder.sh` need per-session
   state (marker files, throttles) that this schema has no way to express. If the
   pilot survives, that is the first thing to add.
+
+## Em dashes
+
+`no-em-dash-tools` denies literal U+2014 in any tool input. Edit `old_string`
+and patch removal/context lines are excluded so existing characters can be removed. `no-em-dash-responses`
+bounces replies, including retries and delegates. Existing hook registrations
+cover Claude and Codex on both Macs.
+
+Coverage is hook-visible text, not tool results, streamed commentary, or text
+constructed by executed code. These rules do not scan or rewrite existing files.
+
+Claude subagent registration follows [the hook reference](https://code.claude.com/docs/en/hooks#subagentstop). New registrations require a fresh Claude session.

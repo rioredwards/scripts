@@ -28,25 +28,37 @@ command -v jq >/dev/null 2>&1 || exit 0
 PAYLOAD="$(cat)"
 [ -n "$PAYLOAD" ] || exit 0
 
-TOOL=""; INPUT=""; TEXT=""
+TOOL=""; INPUT=""; CONTENT=""; TEXT=""; LIMITED=false
 if [ "$KIND" = "tool" ]; then
   TOOL="$(printf '%s' "$PAYLOAD" | jq -r '.tool_name // empty' 2>/dev/null)"
-  # Drop the path keys before matching. Write/Edit always carry an absolute
-  # file_path, so leaving them in makes any path rule fire on every single call.
-  # Rules care what gets *written*, not where.
+  # Preserve the legacy command/path projection for existing rules.
   INPUT="$(printf '%s' "$PAYLOAD" | jq -r '
-    (.tool_input.command
-     // ((.tool_input | if type == "object" then del(.file_path, .notebook_path) else . end) | tostring)
-    ) // empty' 2>/dev/null)"
+    .tool_input | if type == "object" then
+      (.command // (del(.file_path, .notebook_path) | tostring))
+    else (. // "" | tostring) end
+  ' 2>/dev/null)"
+  # Whole input for content rules; only known existing-content fields are exempt.
+  CONTENT="$(printf '%s' "$PAYLOAD" | jq -r --arg tool "$TOOL" '
+    def patch:
+      if type == "string" then
+        split("\n") | map(select(startswith("-") or startswith(" ") | not)) | join("\n")
+      else . end;
+    .tool_input
+    | if $tool == "Edit" and type == "object" then del(.old_string)
+      elif ($tool | test("(^|[._])apply_patch$")) then
+        if type == "object" then
+          if has("input") then .input |= patch
+          elif has("patch") then .patch |= patch else . end
+        else patch end
+      else . end
+    | if . == null then "" elif type == "string" then . else tostring end
+  ' 2>/dev/null)"
   [ -n "$TOOL" ] || exit 0
 else
-  # A bounced reply gets rewritten, and the rewrite fires Stop again. Let the
-  # second pass through or the agent never finishes the turn.
-  [ "$(printf '%s' "$PAYLOAD" | jq -r '.stop_hook_active // false' 2>/dev/null)" = "true" ] && exit 0
-  # Response rules police replies Rio reads. A delegate's reply is another
-  # agent's input — let it through whole. (Tool rules still bind delegates.)
+  # Ordinary response rules skip rewrites/delegates; scope=all rules still run.
+  [ "$(printf '%s' "$PAYLOAD" | jq -r '.stop_hook_active // false' 2>/dev/null)" = "true" ] && LIMITED=true
   . "$HOME/scripts/hooks/lib/delegate.sh"
-  hook_is_delegate "$PAYLOAD" && exit 0
+  hook_is_delegate "$PAYLOAD" && LIMITED=true
   TEXT="$(printf '%s' "$PAYLOAD" | jq -r '.last_assistant_message // empty' 2>/dev/null)"
   [ -n "$TEXT" ] || exit 0
 fi
@@ -54,20 +66,22 @@ fi
 VERDICT="$(
   printf '%s' '{}' | jq -r \
     --slurpfile cfg "$RULES" \
-    --arg kind "$KIND" --arg tool "$TOOL" --arg input "$INPUT" --arg text "$TEXT" '
+    --argjson limited "$LIMITED" --arg kind "$KIND" --arg tool "$TOOL" --arg input "$INPUT" --arg content "$CONTENT" --arg text "$TEXT" '
   def m($re; $subject):
     if (($re // "") == "") then true else ($subject | test($re)) end;
 
-  def subject: if $kind == "tool" then $input else $text end;
+  def subject($r): if $kind != "tool" then $text
+    elif $r.match.content != null then $content else $input end;
 
   def hit($r):
     (if $kind == "tool"
-     then m($r.match.tool; $tool) and m($r.match.input; $input)
+     then m($r.match.tool; $tool) and m($r.match.input; $input) and m($r.match.content; $content)
      else m($r.match.text; $text) end)
-    and (($r.unless // "") == "" or (subject | test($r.unless) | not));
+    and (($r.unless // "") == "" or (subject($r) | test($r.unless) | not));
 
   [ (($cfg[0].rules) // [])[]
     | select(.on == $kind)
+    | select(($limited | not) or .scope == "all")
     | select(hit(.)) ]                      as $fired
   | ($fired | map(select(.do == "deny")))   as $denies
   | if ($fired | length) == 0 then "none\t\t"
