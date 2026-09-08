@@ -22,7 +22,7 @@ set -euo pipefail
 say()  { printf '%s\n' "$*" >&2; }
 die()  { say "dev-up: $*"; exit 2; }
 
-ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a git repo"
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a git repo. cd into the repo checkout, then rerun: dev-up"
 cd "$ROOT"
 TIMEOUT_MS=$(( ${DEV_UP_TIMEOUT:-90} * 1000 ))
 
@@ -30,7 +30,7 @@ TIMEOUT_MS=$(( ${DEV_UP_TIMEOUT:-90} * 1000 ))
 CMD=()
 if [[ "${1:-}" == "--" ]]; then
   shift; CMD=("$@")
-  [[ ${#CMD[@]} -gt 0 ]] || die "nothing after --"
+  [[ ${#CMD[@]} -gt 0 ]] || die "nothing after --. Run: dev-up -- <command...>"
 else
   for cand in skeleton/scripts/start_dev.sh scripts/start_dev.sh scripts/dev bin/dev start_dev.sh; do
     if [[ -x "$cand" ]]; then CMD=("./$cand"); break; fi
@@ -60,7 +60,7 @@ while IFS= read -r pid; do
 done < <(printf '%s\n' "$existing" | sed -n 's/.*(pid \([0-9]*\)).*/\1/p')
 
 # ── 3. A herdr pane, split off one that already lives in this repo ────────────
-command -v herdr >/dev/null || die "herdr not installed; long-running servers must run in a herdr pane"
+command -v herdr >/dev/null || die "herdr not installed; long-running servers must run in a herdr pane. Run: brew install herdr"
 herr="$(mktemp)"; trap 'rm -f "$herr"' EXIT
 if ! snap="$(herdr api snapshot 2>"$herr")"; then
   # herdr reports why on stderr as JSON (protocol_mismatch, no socket, ...).
@@ -81,9 +81,9 @@ pid = pick(lambda c: c==root) or pick(lambda c: c.startswith(root+"/")) \
    or pick(lambda c: c==main) or pick(lambda c: c.startswith(main+"/")) \
    or (panes[0]["pane_id"] if panes else "")
 print(pid)')"
-[[ -n "$src" ]] || die "herdr has no panes to split from"
+[[ -n "$src" ]] || die "herdr is running but has no panes. Open Herdr (run: herdr), then rerun: dev-up"
 pane="$(herdr pane split "$src" --direction right --cwd "$ROOT" --no-focus | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["pane"]["pane_id"])')"
-[[ -n "$pane" ]] || die "herdr pane split returned no pane id"
+[[ -n "$pane" ]] || die "herdr pane split returned no pane id. Rerun: dev-up. If it repeats, the server is wedged: herdr server stop && herdr (this exits pane processes, so it is Rio's call)"
 sleep 1  # let the shell reach its prompt
 
 # ── 4. Run through portless and wait for the tailnet URL ──────────────────────
@@ -94,7 +94,7 @@ herdr pane wait-output "$pane" --source recent-unwrapped \
 tail="$(herdr pane read "$pane" --source recent-unwrapped --lines 80 2>/dev/null || true)"
 url="$(printf '%s\n' "$tail" | sed -n 's/.*Tailscale -> \(https:\/\/[^[:space:]]*\).*/\1/p' | tail -1)"
 if [[ -z "$url" ]]; then
-  say "dev-up: no tailnet URL after ${DEV_UP_TIMEOUT:-90}s. Pane $pane tail:"
+  say "dev-up: no tailnet URL after ${DEV_UP_TIMEOUT:-90}s. If the tail below shows a slow boot, retry: DEV_UP_TIMEOUT=180 dev-up. Pane $pane tail:"
   printf '%s\n' "$tail" | tail -30 >&2
   exit 1
 fi
