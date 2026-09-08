@@ -61,7 +61,14 @@ done < <(printf '%s\n' "$existing" | sed -n 's/.*(pid \([0-9]*\)).*/\1/p')
 
 # ── 3. A herdr pane, split off one that already lives in this repo ────────────
 command -v herdr >/dev/null || die "herdr not installed; long-running servers must run in a herdr pane"
-snap="$(herdr api snapshot 2>/dev/null)" || die "herdr socket is not live (herdr api snapshot failed); open Herdr, then rerun"
+herr="$(mktemp)"; trap 'rm -f "$herr"' EXIT
+if ! snap="$(herdr api snapshot 2>"$herr")"; then
+  # herdr reports why on stderr as JSON (protocol_mismatch, no socket, ...).
+  hmsg="$(python3 -c 'import json,sys
+try: print(json.load(open(sys.argv[1]))["error"]["message"])
+except Exception: pass' "$herr" 2>/dev/null)"
+  die "herdr api snapshot failed: ${hmsg:-$(tr -d "\r" <"$herr" | head -3)}"
+fi
 main_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
 src="$(printf '%s' "$snap" | ROOT="$ROOT" MAIN="$main_root" python3 -c '
 import json,os,sys
