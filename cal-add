@@ -1,6 +1,6 @@
 #!/bin/zsh
 #
-# cal-add — create an Apple Calendar event from the shell (AppleScript → Calendar.app).
+# cal-add: create an Apple Calendar event from the shell (AppleScript → Calendar.app).
 #
 # Events land in iCloud and sync to every device. Needs an unlocked GUI session on
 # the Mac running it and Terminal → Calendar automation permission (one-time prompt).

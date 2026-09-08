@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# issue-skill-guard.sh — deterministic enforcement for the /core:issue skill.
+# issue-skill-guard.sh: deterministic enforcement for the /core:issue skill.
 #
 # Fires from a PreToolUse hook on the Bash tool. If the command contains
 # `gh issue create` or `gh issue edit`, the call is DENIED unless this session

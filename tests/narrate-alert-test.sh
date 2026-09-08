@@ -54,7 +54,7 @@ grep -q 'aitt narrate-turn' "$tmp/sc.log" || fail "alert missing stage"
 grep -q 'credit balance too low' "$tmp/sc.log" || fail "alert missing stderr detail"
 
 run_turn
-[ "$(calls)" -eq 1 ] || fail "debounce ignored — alerted twice in window"
+[ "$(calls)" -eq 1 ] || fail "debounce ignored, alerted twice in window"
 
 touch "$tmp/aitt-ok"; run_turn
 [ "$(calls)" -eq 2 ] || fail "no recovery notice"

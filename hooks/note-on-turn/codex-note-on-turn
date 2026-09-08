@@ -4,8 +4,8 @@ set -eu
 scripts_root="${SCRIPTS:-$HOME/scripts}"
 payload="$(cat)"
 
-# A reply about to be bounced and rewritten — over the length cap, or tripping
-# an `on: response` rule — fires Stop again on the rewrite. Skip this pass so
+# A reply about to be bounced and rewritten: over the length cap, or tripping
+# an `on: response` rule: fires Stop again on the rewrite. Skip this pass so
 # one turn costs Rio one phone note, not two. Same guard as claude-note-on-turn.
 if [ -f "$scripts_root/hooks/lib/reply-cap-lib.sh" ]; then
   . "$scripts_root/hooks/lib/reply-cap-lib.sh"

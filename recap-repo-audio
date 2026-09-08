@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# recap-repo-audio — generate a spoken re-entry recap for a repo, cached.
+# recap-repo-audio: generate a spoken re-entry recap for a repo, cached.
 #
 # Pipeline: gather-context.sh (repo recon bundle) -> aitt repo-recap-audio
 # (semantic synthesis into a short spoken recap) -> grok-tts (mp3).
@@ -89,7 +89,7 @@ recap="$(printf '%s' "$bundle" | LLM_MODEL="$model" "$HOME/scripts/aitt" repo-re
 
 # 3. TTS: recap -> mp3. Write to a temp file then move, so a killed run never
 # leaves a half-written mp3 that later reads as a cache hit. The temp name keeps
-# the .mp3 suffix — grok-tts derives its output format from the extension.
+# the .mp3 suffix: grok-tts derives its output format from the extension.
 log "synthesizing audio (grok)..."
 tmp="${out%.mp3}.tmp.$$.mp3"
 if ! printf '%s' "$recap" | "$HOME/scripts/grok-tts" -o "$tmp" >/dev/null 2>&1; then

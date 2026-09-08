@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# rm-guard.sh — Rio prefers `trash` over `rm`. This is a NON-BLOCKING nudge, not a
+# rm-guard.sh: Rio prefers `trash` over `rm`. This is a NON-BLOCKING nudge, not a
 # gate: it never prompts Rio and never blocks the command (that would fight his global
 # bypassPermissions mode). It just reminds the agent, every time, that `trash` exists
-# and that there's a decision to be made — the agent stays free to proceed with rm.
+# and that there's a decision to be made: the agent stays free to proceed with rm.
 #
 # Fires from a PreToolUse hook on the Bash tool. If the command invokes `rm` as a
 # command, it emits permissionDecision "allow" (so the command runs with no prompt,
@@ -12,7 +12,7 @@
 # Detection is intentionally biased to OVER-remind (an extra nudge is cheap; a
 # silently-deleted file is not). It matches `rm` in command position and skips the
 # common substring traps (alarm, charm, perm, npm, format, confirm, arm) and `rmdir`.
-# It will also fire on `git rm`, `echo rm ...`, and rm inside quotes/comments — all
+# It will also fire on `git rm`, `echo rm ...`, and rm inside quotes/comments: all
 # acceptable: the reminder is the whole point.
 set -uo pipefail
 
@@ -31,7 +31,7 @@ if printf '%s' "$CMD" | grep -Eq '(^|[[:space:];&|(){}`/])rm([[:space:]]|$)'; th
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
     "permissionDecision": "allow",
-    "additionalContext": "NUDGE (non-blocking, not a prompt to Rio): Rio prefers `trash` over `rm`. This command is allowed and will run. Prefer `trash <file>` for deletions so files are recoverable — use `rm` only when it's genuinely right (CI cleanup, temp/build artifacts, or a path Trash can't handle)."
+    "additionalContext": "NUDGE (non-blocking, not a prompt to Rio): Rio prefers `trash` over `rm`. This command is allowed and will run. Prefer `trash <file>` for deletions so files are recoverable. Use `rm` only when it's genuinely right (CI cleanup, temp/build artifacts, or a path Trash can't handle)."
   }
 }
 JSON

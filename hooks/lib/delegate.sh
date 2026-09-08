@@ -1,6 +1,6 @@
 #!/bin/sh
-# delegate.sh — one question, shared by every Rio-facing hook: is this hook
-# firing inside a DELEGATE — an agent whose reply goes to another agent, not to
+# delegate.sh: one question, shared by every Rio-facing hook: is this hook
+# firing inside a DELEGATE: an agent whose reply goes to another agent, not to
 # Rio? Rio-facing behavior (reply cap, response rules, checkpoint nudges, retro
 # check-ins) stands down for delegates: Rio never reads their replies, and
 # capping or nudging them starves the orchestrator of the detailed report that

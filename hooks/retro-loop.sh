@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# retro-loop.sh — occasional meta/system check-in for agent sessions.
+# retro-loop.sh: occasional meta/system check-in for agent sessions.
 #
 # PostToolUse (all tools). Every Nth tool call IN THIS REPO it injects a
 # non-blocking additionalContext note asking the agent: is Rio's system (skills,
 # CLIs, hooks) working smoothly? The agent acknowledges, leaves a `[retro-loop]:`
 # note in the transcript (recommendations, or "system is working well, no
-# feedback"), and carries on — it must never stop its work.
+# feedback"), and carries on: it must never stop its work.
 #
 # WHY THE COUNTER IS PER-REPO ($GIT_DIR/retro-loop-count), NOT PER-SESSION:
 # epics are rolling streams spanning sessions and providers that never reach a
@@ -48,16 +48,16 @@ case "$EVERY" in *[!0-9]*|"") EVERY=500 ;; esac
 COUNT_FILE="$GD/retro-loop-count"
 COUNT="$(cat "$COUNT_FILE" 2>/dev/null || echo 0)"
 case "$COUNT" in *[!0-9]*|"") COUNT=0 ;; esac
-COUNT=$((10#$COUNT + 1))  # 10# — a stray leading zero must not be read as octal
+COUNT=$((10#$COUNT + 1))  # 10#, a stray leading zero must not be read as octal
 
 if [ "$COUNT" -lt "$EVERY" ]; then
   printf '%s' "$COUNT" > "$COUNT_FILE" 2>/dev/null || true
   exit 0
 fi
 
-# Fire: reset the clock, inject the check-in (additionalContext — never blocks).
+# Fire: reset the clock, inject the check-in (additionalContext: never blocks).
 printf '0' > "$COUNT_FILE" 2>/dev/null || true
 
-jq -n --arg ctx "🔄 [retro-loop] Occasional meta check-in (every ${EVERY} tool calls in this repo — not about your current task). Is Rio's system working smoothly: skills, CLIs, hooks, docs? Any friction, failures, or workarounds you hit using them? Do NOT stop your work — acknowledge in your next reply with a one-line transcript note: '[retro-loop]: <recommendations>' or '[retro-loop]: system is working well, no feedback'. Then continue exactly where you were." \
+jq -n --arg ctx "🔄 [retro-loop] Occasional meta check-in (every ${EVERY} tool calls in this repo, not about your current task). Is Rio's system working smoothly: skills, CLIs, hooks, docs? Any friction, failures, or workarounds you hit using them? Do NOT stop your work, acknowledge in your next reply with a one-line transcript note: '[retro-loop]: <recommendations>' or '[retro-loop]: system is working well, no feedback'. Then continue exactly where you were." \
   '{hookSpecificOutput:{hookEventName:"PostToolUse",additionalContext:$ctx}}'
 exit 0

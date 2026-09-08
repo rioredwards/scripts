@@ -1,12 +1,12 @@
 #!/bin/sh
-# narration-title — derive a short title from a turn narration.
+# narration-title: derive a short title from a turn narration.
 #
 # stdin:  the prose emitted by the aitt `narrate-turn` transform.
 # stdout: one line, the title.
 #
 #   -c FILE   the `narration-context` fact block used to generate the narration.
 #
-# The narration's own `TITLE:` line wins when it has one — see below. The rest
+# The narration's own `TITLE:` line wins when it has one: see below. The rest
 # of this script is the fallback for narrations that don't.
 #
 # Why the fallback exists: the narration opens with an orientation lead-in
@@ -17,7 +17,7 @@
 #
 # The lead-in is identifiable rather than guessed at: it is phrased from the
 # fact block, so a sentence echoing one of those facts is lead-in and gets
-# skipped. Which facts exist is not this script's business — see the mark rules
+# skipped. Which facts exist is not this script's business: see the mark rules
 # below. -c is optional; without it only the clock-time and turn-number tests
 # apply.
 #
@@ -43,7 +43,7 @@ text="$(cat)"
 # line ahead of the prose. It is the only thing in the chain that knows what the
 # turn was about, so when it answers, take the answer.
 #
-# Everything below is the fallback for when it doesn't — a model that skipped
+# Everything below is the fallback for when it doesn't: a model that skipped
 # the line, and every clip made before the prompt asked for one. Lifting a
 # sentence out of spoken prose gives a conversational opener ("Good news…")
 # rather than a description, which is why it stopped being the primary path.
@@ -76,7 +76,7 @@ printf '%s' "$text" | perl -CSD -e '
   # Keys are never consulted: any producer may invent any key, so the rules read
   # the shape of the value instead.
   #
-  #   - A long value is prose, not an identifier — a session goal or an issue
+  #   - A long value is prose, not an identifier: a session goal or an issue
   #     title. Splitting one into words would mark most of the narration, so it
   #     contributes nothing.
   #   - A value of a few words is an identifier and contributes those words:
@@ -85,7 +85,7 @@ printf '%s' "$text" | perl -CSD -e '
   #   - More words than that is a phrase, and only matches whole.
   #
   # Short words are dropped: a project called "sc" would match half the
-  # narration. So are a few common ones — "Claude Code" split naively made every
+  # narration. So are a few common ones: "Claude Code" split naively made every
   # sentence containing "code" look like a lead-in, which here is most of them.
   #
   # Over-marking is the safe direction: a wrongly marked sentence is skipped,
@@ -124,7 +124,7 @@ printf '%s' "$text" | perl -CSD -e '
   # The lead-in is a paragraph, not a sentence: the prompt asks for orientation
   # first and the update after, and the orientation often runs on into a second
   # sentence that names no fact ("This ties into the bigger effort around your
-  # agent tooling") — true of every turn, so useless as a title. Once any
+  # agent tooling"): true of every turn, so useless as a title. Once any
   # sentence in the opening paragraph is recognizably lead-in, drop the whole
   # paragraph rather than fishing a sentence out of it.
   if (@paras > 1 && grep { $is_leadin->($_) } $split_sentences->($paras[0])) {

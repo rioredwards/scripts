@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# issue-session-footer.sh — deterministic session-ID stamping for GitHub issues.
+# issue-session-footer.sh: deterministic session-ID stamping for GitHub issues.
 #
 # Fires from a PostToolUse hook on the Bash tool. When the command was a
 # `gh issue create` or `gh issue edit`, it extracts every issue URL from the
 # tool response and appends a `Session: <session_id>` footer to each issue
-# body — unless that exact footer is already present (idempotent, so repeated
+# body: unless that exact footer is already present (idempotent, so repeated
 # edits don't stack footers).
 #
 # Runs outside the agent's tool loop, so its own `gh issue edit` calls do not

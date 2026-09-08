@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# grok-tts — synthesize speech with the xAI (Grok) TTS API.
+# grok-tts: synthesize speech with the xAI (Grok) TTS API.
 #
 # Reads text from -i FILE, args, or stdin and writes an MP3. Does not play by
 # default.
 #
 # Anything past a few sentences is split on sentence boundaries and synthesized
-# CONCURRENTLY, then rejoined — the API's latency tracks the length of the text
+# CONCURRENTLY, then rejoined: the API's latency tracks the length of the text
 # almost exactly, so N pieces at once cost roughly 1/N the wall clock. A typical
 # 1500-char narration went 26s -> 9s at -j 4. Text over the API's 15000-char
 # limit uses the same path; that used to be the only case that chunked, and it
@@ -61,14 +61,14 @@ mode="polish"   # polish (default) | compress | raw
 # per request no matter how short the text, so past this the chunks finish at
 # the floor and the extra calls buy nothing.
 jobs="${GROK_TTS_JOBS:-4}"
-# Don't make a chunk smaller than this — same floor, from the other direction.
+# Don't make a chunk smaller than this: same floor, from the other direction.
 min_chunk="${GROK_TTS_MIN_CHUNK:-300}"
 # Each chunk is synthesized cold, so the breath a single long request would have
 # left at that boundary isn't in either half. This puts it back.
 gap="${GROK_TTS_GAP:-0.35}"
 
 # Voice-master chain for spoken TTS: heavy dynamic-range compression,
-# high-pass rumble cut, dynamic de-esser, loudness normalize. No EQ boost —
+# high-pass rumble cut, dynamic de-esser, loudness normalize. No EQ boost:
 # a presence boost was exciting a raspy top end, so it's left flat.
 POLISH_CHAIN="acompressor=threshold=-30dB:ratio=8:attack=10:release=150,highpass=f=90,deesser=i=0.20:m=0.5:f=0.35,loudnorm=I=-16:TP=-1.5:LRA=9"
 
@@ -131,7 +131,7 @@ fi
 workdir="$(mktemp -d "${TMPDIR:-/tmp}/grok-tts-work.XXXXXX")"
 trap 'rm -rf "$workdir"' EXIT
 
-# synth_one TEXT OUTPATH — one API call for text under the char limit.
+# synth_one TEXT OUTPATH: one API call for text under the char limit.
 synth_one() {
   local t="$1" out="$2" body http_code
   body="$(jq -n \
@@ -155,7 +155,7 @@ synth_one() {
 }
 
 # Split text into exactly $nchunks near-equal pieces, cut on sentence
-# boundaries (paragraph breaks land here too — they follow a terminator).
+# boundaries (paragraph breaks land here too: they follow a terminator).
 # Writes chunk_NNN.txt into $workdir and prints the count.
 #
 # Boundaries matter more here than they did when this only ran on 15000-char
@@ -165,7 +165,7 @@ synth_one() {
 #
 # Sizes are driven by cumulative position, not by a per-chunk budget: packing
 # sentences greedily until a budget is hit under-fills every chunk by most of a
-# sentence, which turned a requested 4 into an actual 6 — and 6 chunks at 4-way
+# sentence, which turned a requested 4 into an actual 6: and 6 chunks at 4-way
 # concurrency is two batches, which is the whole cost this is trying to avoid.
 split_chunks() {
   awk -v nchunks="$nchunks" -v hard="$MAX_CHARS" -v out="$workdir/chunk_" '
@@ -199,7 +199,7 @@ split_chunks() {
 char_count=${#text}
 raw="$workdir/full.mp3"
 
-# How many pieces: $jobs, unless that would make them smaller than min_chunk —
+# How many pieces: $jobs, unless that would make them smaller than min_chunk:
 # and always enough that no piece exceeds the API limit.
 nchunks="$jobs"
 fewest_useful=$(( char_count / min_chunk ))
@@ -225,7 +225,7 @@ else
   wait
 
   # `wait` reports nothing about the jobs it waited on, so each success leaves a
-  # marker. A missing one means a silent hole in the middle of the clip — fail
+  # marker. A missing one means a silent hole in the middle of the clip: fail
   # rather than ship audio with a sentence missing.
   for chunk in "$workdir"/chunk_*.txt; do
     if [ ! -f "${chunk%.txt}.ok" ]; then

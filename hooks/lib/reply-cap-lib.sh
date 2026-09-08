@@ -1,9 +1,9 @@
 #!/bin/sh
-# reply-cap-lib.sh — shared brains for the reply-length cap.
+# reply-cap-lib.sh: shared brains for the reply-length cap.
 #
 # Two hooks need the same answer to one question: "is this reply about to be
 # bounced for length?" reply-cap.sh asks so it can block. The note-on-turn
-# adapter asks so it can skip a turn that is about to be rewritten — otherwise
+# adapter asks so it can skip a turn that is about to be rewritten: otherwise
 # a bounced reply costs Rio two phone texts, two audio clips and two summarizer
 # runs, which is exactly why the cap got removed the first time.
 #
@@ -31,12 +31,12 @@ reply_prose_words() {
 }
 
 # True when this reply will be bounced: over cap, and not already the rewrite.
-# stdin-free — pass the raw hook payload as $1.
+# stdin-free: pass the raw hook payload as $1.
 reply_will_bounce() {
   payload="$1"
 
   # The cap prices Rio's reading time. A delegate's reply is another agent's
-  # input, not Rio's reading — it must arrive whole.
+  # input, not Rio's reading: it must arrive whole.
   . "$HOME/scripts/hooks/lib/delegate.sh"
   hook_is_delegate "$payload" && return 1
 
@@ -46,7 +46,7 @@ reply_will_bounce() {
   # not skip work waiting on one that never comes.
   grep -q 'reply-cap' "$HOME/.claude/settings.json" "$HOME/.codex/hooks.json" 2>/dev/null || return 1
 
-  # Already bounced once this turn — the cap lets it through, so does everyone.
+  # Already bounced once this turn: the cap lets it through, so does everyone.
   [ "$(printf '%s' "$payload" | jq -r '.stop_hook_active // false')" = "true" ] && return 1
 
   reply="$(printf '%s' "$payload" | jq -r '.last_assistant_message // empty')"
@@ -90,7 +90,7 @@ reply_rules_will_bounce() {
   [ "$?" -eq 2 ]
 }
 
-# True when this reply is about to be rewritten for ANY reason — over the length
+# True when this reply is about to be rewritten for ANY reason: over the length
 # cap, or tripping a response rule. This is the predicate a hook with real side
 # effects wants; `reply_will_bounce` alone now covers only half the reasons.
 reply_will_be_rewritten() {

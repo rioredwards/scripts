@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Dynamic agent context — emitted at SessionStart for Claude Code and Codex.
+# Dynamic agent context: emitted at SessionStart for Claude Code and Codex.
 #
 # One rule: a fact is a provider script in providers/ that prints "Name: value"
-# lines on stdout. How it gets that value — computing it, reading a file an
-# Apple Shortcut wrote, calling an API — is that provider's own business.
+# lines on stdout. How it gets that value: computing it, reading a file an
+# Apple Shortcut wrote, calling an API: is that provider's own business.
 # There is no "derived" vs "declared" split to reason about.
 #
 #   Add a fact       drop an executable in providers/. Nothing else changes.

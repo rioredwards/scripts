@@ -25,7 +25,7 @@ check "first clip: no trailer"            "!Already said" "$out"
 
 out="$(run s1)"
 check "same session: block still complete" "Project: repo" "$out"
-check "same session: trailer present"     "Already said in the last clip — do not repeat: Time, Machine, Agent, Project, Branch, Turn" "$out"
+check "same session: trailer present"     "Already said in the last clip. Do not repeat: Time, Machine, Agent, Project, Branch, Turn" "$out"
 check "caller facts never marked"         "!Depth" "$(printf '%s' "$out" | grep 'Already said')"
 
 git -C "$repo" checkout -q -b feature 2>/dev/null || git -C "$repo" switch -q -c feature
@@ -51,6 +51,6 @@ check "spoken: dropped Project"           "!Project:" "$spoken"
 check "spoken: caller fact kept"          "Depth: brief" "$spoken"
 check "spoken: trailer gone"              "!Already said" "$spoken"
 check "spoken: header kept"               "MESSAGE CONTEXT" "$spoken"
-plain="$(printf 'MESSAGE CONTEXT — x\nTime: 1 PM\n' | "$here/narration-spoken")"
+plain="$(printf 'MESSAGE CONTEXT, x\nTime: 1 PM\n' | "$here/narration-spoken")"
 check "spoken: no trailer passes through" "Time: 1 PM" "$plain"
 exit $fail

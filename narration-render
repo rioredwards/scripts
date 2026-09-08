@@ -1,21 +1,21 @@
 #!/bin/sh
-# narration-render — render a turn narration for one surface.
+# narration-render: render a turn narration for one surface.
 #
-# stdin:  the prose emitted by the aitt `narrate-turn` transform — connected
+# stdin:  the prose emitted by the aitt `narrate-turn` transform: connected
 #         sentences with inline annotations like `[❓ Decision]` written into
 #         them.
 # stdout: the same prose, adapted to the surface.
 #
 #   (none)     phone text. Annotations pass through exactly as written; the
 #              emoji is the whole point on a screen.
-#   --speech   spoken audio. `[❓ Decision]` becomes the cue `— decision —`
+#   --speech   spoken audio. `[❓ Decision]` becomes the cue `: decision:`
 #              and every emoji is removed, because a speech engine either
 #              skips an emoji or reads its name out loud ("question mark
 #              ornament").
 #
 # There is no schema here on purpose. The narration text *is* the artifact all
 # three surfaces render, so the phone, the audio and the page cannot say
-# different things — the failure mode of the structured summary this replaced.
+# different things: the failure mode of the structured summary this replaced.
 #
 # Fails loud. Empty input or input that renders to nothing exits non-zero with
 # a reason, rather than letting a caller text and narrate an empty message.

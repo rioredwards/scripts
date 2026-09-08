@@ -1,5 +1,5 @@
 #!/bin/bash
-# todaybar-watchdog.sh — health check for the TodayBar agent loop in tmux
+# todaybar-watchdog.sh: health check for the TodayBar agent loop in tmux
 # Outputs a 2-3 line report for piping to text-phone-summary
 set -euo pipefail
 

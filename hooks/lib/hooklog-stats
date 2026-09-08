@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# hooklog-stats — is each hook earning its keep?
+# hooklog-stats: is each hook earning its keep?
 #
 #   hooklog-stats              summary: fires, blocks, nudges, slowest
-#   hooklog-stats blocks       every block/deny, newest first — the false-positive review
+#   hooklog-stats blocks       every block/deny, newest first: the false-positive review
 #   hooklog-stats <hook>       one hook's recent activity
 #   hooklog-stats raw          the log path, for your own jq
 set -uo pipefail

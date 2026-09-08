@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# claude-token-audit.sh — show where Claude Code token/quota burn went.
+# claude-token-audit.sh: show where Claude Code token/quota burn went.
 #
 # Scans ~/.claude/projects/**/*.jsonl, sums token usage per session for
 # messages inside a time window, and cost-weights each so you can see what
@@ -72,7 +72,7 @@ fi
             .msgs, .in, .cc, .cr, .out,
             ((.file|split("/")|.[-2]) + "/" + (.file|split("/")|.[-1]|.[0:8]))
           ] | @tsv ),
-      ( "—\t—\t—\t—\t—\t—\t—\t—\t—" ),
+      ( ", \t, \t, \t, \t, \t, \t, \t, \t, " ),
       ( [ ($T*100|round/100), 100, "TOTAL", "", "", "", "", "", "" ] | @tsv )
   ' "$tmp"
 } | column -t -s "$(printf '\t')"

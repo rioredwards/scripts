@@ -715,11 +715,11 @@ def build_sessions() -> list[dict]:
 def emit_json(sessions: list[dict], query: str = "") -> None:
     """Clean structured output for non-terminal consumers (e.g. Raycast).
 
-    No ANSI, no Nerd Font glyphs — raw values the consumer formats itself.
+    No ANSI, no Nerd Font glyphs, raw values the consumer formats itself.
 
     `query` (case-insensitive) restricts output to sessions whose full
     conversation `body` matches, and attaches a `match` snippet around the
-    first hit. The heavy `body` text itself is never shipped — it stays
+    first hit. The heavy `body` text itself is never shipped. It stays
     server-side so the consumer (Raycast) never holds 100s of MB in memory.
     """
     q = (query or "").strip().lower()
@@ -914,7 +914,7 @@ def codex_path_for(sid: str) -> str | None:
     """Resolve a codex session id to its newest rollout file. Fallback only:
     callers normally pass the path the list already knows. The id lives in
     session_meta (the header line), not the filename, and is reused across
-    forks/resumes — newest mtime matches build_sessions' dedupe."""
+    forks/resumes, newest mtime matches build_sessions' dedupe."""
     best, best_mt = None, -1.0
     root = HOME / ".codex" / "sessions"
     for f in glob.glob(str(root / "**" / "rollout-*.jsonl"), recursive=True):
@@ -974,7 +974,7 @@ def show_messages(provider: str, sid: str, path: str = "") -> None:
     """Emit one session's ordered [{role, text}] as JSON. `path` (the transcript
     file the caller already knows) skips on-disk resolution; opencode ignores it
     (db-backed). Unknown provider / missing id is a contract error, not an empty
-    conversation — exit nonzero so the consumer shows a failure, not "No messages"."""
+    conversation, exit nonzero so the consumer shows a failure, not "No messages"."""
     if not sid or provider not in ("claude", "codex", "opencode"):
         sys.stderr.write("usage: --show <provider:id> [--path <file>]\n")
         sys.exit(1)

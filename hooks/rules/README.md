@@ -1,4 +1,4 @@
-# Agent rules — pilot
+# Agent rules: pilot
 
 Prose in `AGENTS.md` is advisory; a hook is not. This turns "write another guard
 script" into "add a JSON entry".
@@ -43,14 +43,14 @@ Regexes are Oniguruma (jq): `(?i)` for case-insensitive, `[[:space:]]` classes w
 | `response`, scope all | `SubagentStop` | Claude settings |
 
 A bounced reply re-fires the whole `Stop` chain, so a hook with real side
-effects must skip the pass that is about to be rewritten — otherwise one
+effects must skip the pass that is about to be rewritten, otherwise one
 `fallback` costs Rio two phone texts. `hooks/lib/reply-cap-lib.sh` owns that
 predicate: `reply_will_be_rewritten` is true for a reply over the length cap
 **or** one tripping a `response` rule. Side-effect hooks call it, not
 `reply_will_bounce`. The rules half delegates to `run.sh response` and checks
 for exit 2, so there is no copy of the matching logic to drift.
 
-⚠️ Never register the `response` hook `async` — an async `Stop` hook cannot
+⚠️ Never register the `response` hook `async`, an async `Stop` hook cannot
 block a stop, so it would match rules and let the reply through anyway.
 
 ## Design notes

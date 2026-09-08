@@ -1,5 +1,5 @@
 #!/bin/sh
-# validate.sh — fail loudly here so run.sh can fail open there.
+# validate.sh: fail loudly here so run.sh can fail open there.
 #
 # Checks the schema and compiles every regex against a sample string, so a typo
 # is caught at edit time instead of silently never matching at runtime. This is
@@ -35,7 +35,7 @@ errs="$(jq -r '
                then err($id; "scope must be all and is response-only") else empty end),
             (if .do == "deny" and .on == "response"
                then err($id; "cannot deny a reply that already happened; use `remind`") else empty end),
-            (if (.text // "") == "" then err($id; "missing text — the agent needs to be told what to do") else empty end),
+            (if (.text // "") == "" then err($id; "missing text, the agent needs to be told what to do") else empty end),
             (if (.match | type) != "object" then err($id; "missing `match` object") else empty end),
             (if .on == "tool" and ((.match.tool // "") == "") and ((.match.input // "") == "") and ((.match.content // "") == "")
                then err($id; "on=tool needs match.tool, match.input, or match.content") else empty end),

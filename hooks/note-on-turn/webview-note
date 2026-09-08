@@ -4,7 +4,7 @@
 # web view window.
 #
 # The page is rendered by render-summary-html.mjs, the same module the Raycast
-# audio player uses — an auto-popped page and a page opened from Raycast are
+# audio player uses: an auto-popped page and a page opened from Raycast are
 # produced by identical code, so the two surfaces cannot drift.
 #
 #   -a FILE   the turn's audio clip. The page gets a player for it; without it
@@ -16,7 +16,7 @@
 # the window twice; the chain in note-from-reply removed that constraint.
 #
 # Overwrites one stable path per machine rather than accumulating a file per
-# turn — nothing here is worth keeping, and the web view reloads from disk.
+# turn: nothing here is worth keeping, and the web view reloads from disk.
 #
 # Set AGENT_WEBVIEW_HOST to an ssh alias to display the page on a different mac
 # than the one that generated it (see the remote block below).
@@ -64,7 +64,7 @@ if [ -z "$node_bin" ]; then
   fi
 fi
 if [ -z "$node_bin" ] || [ ! -x "$node_bin" ]; then
-  printf '%s node not found (PATH=%s) — set AGENT_WEBVIEW_NODE\n' "$(stamp)" "${PATH:-}" >>"$log"
+  printf '%s node not found (PATH=%s), set AGENT_WEBVIEW_NODE\n' "$(stamp)" "${PATH:-}" >>"$log"
   exit 1
 fi
 
@@ -79,7 +79,7 @@ title="$(printf '%s' "$payload" | jq -r '.title // "" | select(length > 0)' 2>/d
 
 # The clip has to sit NEXT TO the page: it is referenced relatively, and
 # WKWebView will not read a sibling outside the page's own directory. A copy,
-# not a symlink — the source lives in iCloud and can be evicted, at which point
+# not a symlink: the source lives in iCloud and can be evicted, at which point
 # a link resolves to nothing and the player is silently dead.
 #
 # Last turn's clip is cleared either way, so a transcript-only page never leaves
@@ -108,13 +108,13 @@ mark html-rendered
 #
 # The case this exists for: sitting at the MacBook, ssh'd into the mini, agents
 # running on the mini. The hook fires on the machine doing the work, which is
-# not the machine with a screen in front of it — so the window pops where nobody
+# not the machine with a screen in front of it: so the window pops where nobody
 # can see it. AGENT_WEBVIEW_HOST is an ssh alias (`macbook`), set machine-locally
 # on the box that generates, never in the synced profile.
 #
 # One connection does all three steps: make the dir, stream the files in over
 # stdin, fire the deeplink. The page is self-contained (CSS and JS inline, no
-# images), so page plus clip is the whole transfer — tar rather than plain `cat`
+# images), so page plus clip is the whole transfer: tar rather than plain `cat`
 # because the player needs the mp3 to land beside the page, not instead of it.
 remote_host="${AGENT_WEBVIEW_HOST:-}"
 if [ -n "$remote_host" ]; then
@@ -122,7 +122,7 @@ if [ -n "$remote_host" ]; then
   [ -n "$audio_name" ] && set -- "$@" "$audio_name"
   # BatchMode so a missing key fails instead of blocking the turn on a password
   # prompt forever; ServerAlive so a connection that dies mid-transfer gives up
-  # rather than hanging. A closed laptop is the expected case, not an error —
+  # rather than hanging. A closed laptop is the expected case, not an error:
   # log it and exit 0 so a sleeping MacBook never marks the turn as failed.
   if tar -cf - -C "$out_dir" "$@" \
      | ssh -o BatchMode=yes -o ConnectTimeout=5 \

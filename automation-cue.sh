@@ -8,7 +8,7 @@ cmd="${1:-}"
 
 if ! pgrep -x Hammerspoon >/dev/null 2>&1; then
   if [[ "$cmd" == "start" ]]; then
-    osascript -e 'display notification "Automation running — hands off" with title "Automation"'
+    osascript -e 'display notification "Automation running, hands off" with title "Automation"'
   fi
   exit 0
 fi

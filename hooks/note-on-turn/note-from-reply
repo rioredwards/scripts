@@ -21,7 +21,7 @@ text="$(cat)"
 # "on track".
 #
 # Two markers, because the parent can be either agent:
-#   AGENT_DELEGATE  set by the caller (spin-check) — provider-agnostic.
+#   AGENT_DELEGATE  set by the caller (spin-check): provider-agnostic.
 #   CLAUDECODE      Claude Code's own marker, inherited by everything it
 #                   spawns. Only meaningful for a non-claude agent: the claude
 #                   hook always runs inside Claude Code, so it is always set.
@@ -37,7 +37,7 @@ mkdir -p "$log_dir"
 # so the wait between Rio reading the reply and the audio/page landing can be
 # attributed instead of guessed at. Exported so the detached audio and webview
 # children stamp the same timeline. Deliberately crude: second resolution and no
-# rotation — every stage worth optimizing here is measured in seconds.
+# rotation: every stage worth optimizing here is measured in seconds.
 PERF_LOG="$log_dir/perf.log"
 PERF_T0="$(date +%s)"
 PERF_RUN="$$"
@@ -53,10 +53,10 @@ mark turn-start
 # surface was flattened out of. The schema kept the surfaces in sync but was
 # built for a page: spoken aloud it became a list of section titles, it forced
 # content into categories that often didn't fit, and it opened with no
-# orientation at all. Prose with inline annotations keeps the sync — the text
-# *is* the artifact — without any of that.
+# orientation at all. Prose with inline annotations keeps the sync (the text
+# *is* the artifact) without any of that.
 #
-# A failed transform must NOT degrade into shipping the raw reply — that is the
+# A failed transform must NOT degrade into shipping the raw reply: that is the
 # exact silent failure this pipeline existed to prevent: Rio gets a novel on his
 # phone and no signal that the summarizer broke. Any failure in the chain
 # delivers a short explicit notice instead.
@@ -84,13 +84,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# The facts that orient the narration — time, machine, project, branch,
+# The facts that orient the narration: time, machine, project, branch,
 # worktree, turn number, session goal, issue. Computed, never inferred: see
 # narration-context. Handed to the model as verified data so it phrases them into a
 # lead-in instead of guessing at them. Never fails; an empty block just means
 # the narration opens without orientation.
 #
-# Depth rides in as one more fact — the same brief|balanced|deep level the
+# Depth rides in as one more fact: the same brief|balanced|deep level the
 # Raycast summarizer and content-pipeline already pass. The `narrate-turn`
 # prompt has always honored a `Depth` fact; this hook was the only producer
 # never sending one. Length is not just a reading cost: synthesis time tracks
@@ -127,7 +127,7 @@ fi
 mark context
 
 # Each stage runs on its own so a failure names itself. The old form chained
-# all three into one `if`, which recorded neither which stage broke nor why —
+# all three into one `if`, which recorded neither which stage broke nor why:
 # 13 skipped turns in a single day left 13 identical anonymous lines and
 # nothing to act on. Stderr goes to a scratch file and is flushed to the log
 # only on failure: on a good turn it is noise, and interleaving it with other
@@ -139,7 +139,7 @@ err_tmp="$(mktemp)"
 
 # Facts first, then the reply, with a header between them so the model can tell
 # which is which.
-# The model gets the spoken block — facts the last clip already said are
+# The model gets the spoken block: facts the last clip already said are
 # stripped here, deterministically, not left for the prompt to ignore. The
 # sidecar keeps the full block from $ctx_tmp.
 if [ -s "$ctx_tmp" ]; then
@@ -167,7 +167,7 @@ if [ -z "$fail_stage" ] && [ -z "$narration" ]; then
 fi
 # The transform's first line is the model's title for the turn. Keep the raw
 # output for narration-title to read it from, and strip it out of the narration
-# every surface renders — the phone, the audio, the web view, the sidecar.
+# every surface renders: the phone, the audio, the web view, the sidecar.
 narration_raw="$narration"
 if [ -z "$fail_stage" ]; then
   narration="$(printf '%s' "$narration_raw" | "$scripts_root/narration-body" 2>>"$err_tmp")" \
@@ -184,7 +184,7 @@ fi
 
 if [ -z "$fail_stage" ]; then
   # The model's own title for the turn, read off the raw output's first line.
-  # Fed the raw text, not the stripped body, because that line is the answer —
+  # Fed the raw text, not the stripped body, because that line is the answer:
   # narration-title falls back to picking a sentence only when it is missing.
   # Best-effort either way: a missing title costs a good filename, not the turn.
   title="$(printf '%s' "$narration_raw" | "$scripts_root/narration-title" -c "$ctx_tmp" 2>>"$err_tmp" || true)"
@@ -195,7 +195,7 @@ if [ -z "$fail_stage" ]; then
   #
   # Held as a string, not a temp file. Both consumers now run inside a detached
   # chain that can outlive this script, and a mktemp path handed across that
-  # boundary is deleted by the EXIT trap before the child reads it — the race
+  # boundary is deleted by the EXIT trap before the child reads it: the race
   # that silently stripped structure off sidecars once already.
   merge_json="$(jq -n --arg narration "$narration" --arg title "$title" --arg context "$(cat "$ctx_tmp")" \
     '{narration:$narration, title:$title, context:$context}' 2>>"$log_dir/summarize.err")" \
@@ -214,13 +214,13 @@ if [ -z "$fail_stage" ]; then
   rm -f "$log_dir/narrate-failed.count" "$log_dir/narrate-failed.stamp"
 else
   degraded=1
-  summary="⚠️ Summarizer failed this turn on $(hostname -s) — no summary sent (raw reply withheld). Stage: $fail_stage. See $log_dir/summarize.err"
+  summary="⚠️ Summarizer failed this turn on $(hostname -s), no summary sent (raw reply withheld). Stage: $fail_stage. See $log_dir/summarize.err"
   spoken="$summary"
   # One record per failure carrying everything needed to diagnose it without
   # reproducing: which stage, its exit code, how much the model actually
   # returned, who was running, and the stage's own stderr. `origin` was logged
   # here before but nothing ever set HOOK_ORIGIN, so every line read
-  # "origin=unknown" — the adapters export HOOK_AGENT/HOOK_SESSION_ID.
+  # "origin=unknown": the adapters export HOOK_AGENT/HOOK_SESSION_ID.
   {
     printf '%s\tFAILED stage=%s exit=%s raw_bytes=%s agent=%s session=%s\n' \
       "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$fail_stage" "$fail_code" \
@@ -228,12 +228,12 @@ else
     if [ -s "$err_tmp" ]; then
       sed -n '1,20s/^/          stderr: /p' "$err_tmp"
     else
-      printf '          stderr: (none — stage produced no diagnostics)\n'
+      printf '          stderr: (none, stage produced no diagnostics)\n'
     fi
   } >>"$log_dir/summarize.err"
 
   # Get loud when it keeps happening (scripts#8). The per-turn ⚠️ text above is
-  # gated on AGENT_TEXT and a summarize.err line is silence — a morning of dead
+  # gated on AGENT_TEXT and a summarize.err line is silence: a morning of dead
   # narration went unnoticed for days once. N consecutive failures text the
   # phone directly, debounced so a sustained outage is one message per window,
   # not one per turn. The counter resets on the next good turn (above).
@@ -250,7 +250,7 @@ else
     if [ "$(( nf_now - nf_last ))" -ge "${AGENT_NARRATE_ALERT_EVERY:-1800}" ]; then
       printf '%s' "$nf_now" > "$nf_stamp"
       nf_err="$(head -c 200 "$err_tmp" 2>/dev/null | tr '\n' ' ')"
-      printf '🔴 Narration dead on %s — %s turns in a row. Stage: %s. %s' \
+      printf '🔴 Narration dead on %s, %s turns in a row. Stage: %s. %s' \
         "$(hostname -s)" "$nf_count" "$fail_stage" "${nf_err:-see ~/.cache/note-on-turn/summarize.err}" \
         | "$scripts_root/sc" text-phone >/dev/null 2>&1 || true
     fi
@@ -269,7 +269,7 @@ esac
 # audio-file toggle is on (replaces the old phone Shortcut). Self-detaches.
 #
 # Self-expiring: if the toggle has been on longer than AGENT_AUDIO_FILE_TTL_MIN
-# (default 60), auto-disable it and text Rio — a forgotten toggle otherwise
+# (default 60), auto-disable it and text Rio: a forgotten toggle otherwise
 # burns TTS credits all day. The switch-on time is stamped by `agent-toggle` as
 # AGENT_AUDIO_FILE_SINCE; if it's missing (enabled before this guard, or via the
 # profile default), we stamp it now so the cap always applies. TTL_MIN=0 disables.
@@ -292,7 +292,7 @@ case "${degraded:+skip}${AGENT_AUDIO_FILE}" in
       audio_wanted=1
     elif [ "$(( $(date +%s) - since ))" -gt "$(( ttl_min * 60 ))" ]; then
       "$scripts_root/agent-toggle" audio off >/dev/null 2>&1 || true
-      printf '🔇 Agent audio auto-off after %sm on %s (forgotten toggle — TTS credits saved)' "$ttl_min" "$(hostname -s)" \
+      printf '🔇 Agent audio auto-off after %sm on %s (forgotten toggle, TTS credits saved)' "$ttl_min" "$(hostname -s)" \
         | "$scripts_root/sc" text-phone >/dev/null 2>&1 || true
     else
       audio_wanted=1
@@ -302,24 +302,24 @@ esac
 
 # Pop the turn's summary in a web view window when the webview toggle is on.
 # The page renders the same narration the phone and the audio are made from, so
-# the surfaces always agree — and now carries the turn's clip in a player, so
+# the surfaces always agree: and now carries the turn's clip in a player, so
 # reading it and listening to it are one window instead of two arrivals.
 #
-# Deliberately NOT gated on `degraded` — the other surfaces skip a failure
+# Deliberately NOT gated on `degraded`: the other surfaces skip a failure
 # because narrating an error string wastes TTS, but a page costs nothing and
 # putting the ⚠️ on screen is the fastest way for Rio to notice the summarizer
 # broke.
 #
 # Also not host-gated the way audio is: the window opens on whichever machine ran
 # the turn, unless AGENT_WEBVIEW_HOST names another one to ship the page to (the
-# ssh'd-into-the-mini case — webview-note handles it).
+# ssh'd-into-the-mini case: webview-note handles it).
 #
 # Decision only, same as the audio block; the chain below does the work.
 AGENT_WEBVIEW="${AGENT_WEBVIEW:-off}"
 webview_wanted=""
 # Self-expiring on the same pattern as the audio toggle: a window that keeps
 # appearing on every turn a week after it was useful is noise. No phone text on
-# expiry (unlike audio, which is protecting spend) — this is a GUI surface, and
+# expiry (unlike audio, which is protecting spend): this is a GUI surface, and
 # it stopping is self-evident to whoever is sitting in front of it.
 case "$AGENT_WEBVIEW" in
   on|1|true|yes)
@@ -361,7 +361,7 @@ if [ -n "$webview_wanted" ]; then
     '{summary:$summary, agent:$agent, repo_name:$repo_name, created_at:$created_at} + $merge')"
 fi
 
-# Synthesize, then show the page — one detached chain, so the hook still returns
+# Synthesize, then show the page: one detached chain, so the hook still returns
 # immediately but the two surfaces of a turn arrive together.
 #
 # They used to fork side by side. The page won that race by ~25s and sat there
@@ -369,8 +369,8 @@ fi
 # turn interrupted twice and neither surface knew about the other. Chained, the
 # window opens once, with the clip already in it.
 #
-# When no audio is coming — toggle off, host-gated to the mini, a degraded turn,
-# or a synth that failed — the page opens immediately, transcript-only. There is
+# When no audio is coming: toggle off, host-gated to the mini, a degraded turn,
+# or a synth that failed: the page opens immediately, transcript-only. There is
 # nothing to wait for, and a page is still the fastest way to see a ⚠️.
 if [ -n "$audio_wanted" ] || [ -n "$webview_wanted" ]; then
   {
@@ -407,7 +407,7 @@ mark fork
 
 # Text the summary to Rio's phone when the text toggle is on.
 #
-# Last, and detached. It used to run first and in the foreground — a leftover
+# Last, and detached. It used to run first and in the foreground: a leftover
 # from when the phone was the only surface, kept by nobody's decision. That cost
 # every turn a second of `shortcuts run` before the audio synth and the page
 # were even started, and worse: under `set -e` a flaky Shortcuts run aborted the

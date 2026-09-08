@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// UserPromptSubmit hook — machine-agnostic home-path normalizer.
+// UserPromptSubmit hook, machine-agnostic home-path normalizer.
 //
 // When a message references a file path under SOME machine's home dir that is
 // not this machine's (e.g. /Users/rioedwards/... pasted into a session running
 // as /Users/rioredwards, or vice-versa), inject a note giving the equivalent
 // path under THIS machine's $HOME. Runs per-machine, so it always resolves to
-// wherever the session currently is — not hardcoded to any one host or user.
+// wherever the session currently is. Not hardcoded to any one host or user.
 // Main use: pasting a screenshot path copied on one Mac into a Claude session
 // on the other; the file lives at the same $HOME-relative spot on both (iCloud).
 //
@@ -14,7 +14,7 @@
 //   - the pasted path may omit the extension (e.g. CleanShot "...@2x"),
 //   - the path may be followed by trailing words ("read <path> and ...").
 // So from each /Users|home/<user>/ start we take the rest of the line, then
-// find the LONGEST prefix that resolves to a real local file — trying the
+// find the LONGEST prefix that resolves to a real local file, trying the
 // literal path and the path with a known media extension appended. Existence
 // gating also means an unrelated /Users/someone-else/... path is left untouched.
 //
@@ -23,7 +23,7 @@
 //
 // When the path is under a KNOWN machine's home but no local equivalent exists
 // (dir not iCloud-synced, e.g. ~/Downloads), stay loud instead of silent:
-// inject a note that this is the other Mac's real username — not a typo — with
+// inject a note that this is the other Mac's real username, not a typo, with
 // ssh/scp hints to check/fetch it there.
 // Fail-safe: any error exits 0 with no output; never blocks a prompt.
 
@@ -89,7 +89,7 @@ try {
 
     // No local equivalent. If the prefix is the OTHER known machine's home,
     // report loudly rather than letting an agent call the username a typo.
-    // Path end is approximate (no existence probe possible) — whole tail kept.
+    // Path end is approximate (no existence probe possible), whole tail kept.
     const foreignUser = foreignPrefix.split('/').pop();
     const alias = MACHINES[foreignUser];
     if (!alias || foreignUser === localUser) continue;
@@ -121,7 +121,7 @@ try {
     parts.push(
       `The path ${x.orig} is under the other Mac's home dir (ssh alias: ${x.alias}). ` +
       `That username is REAL, not a typo. No local equivalent exists at ` +
-      `${x.local} — the directory may not be cloud-synced (~/Downloads is not). ` +
+      `${x.local}, the directory may not be cloud-synced (~/Downloads is not). ` +
       `Check the other machine first, then fetch if needed:\n` +
       `  ssh ${x.alias} ls -la '${x.orig}'\n` +
       `  scp '${x.alias}:${x.orig}' '${x.local}'\n` +

@@ -1,5 +1,5 @@
 #!/bin/sh
-# agent-budget — the LOC appetite for the work in this repo, made measurable.
+# agent-budget: the LOC appetite for the work in this repo, made measurable.
 #
 # The plan phase sets a budget after approval; hooks/loc-budget.sh measures the
 # diff against it on every edit and at commit time. Prose appetites ("keep it
@@ -31,7 +31,7 @@ case "$cmd" in
   set)
     loc="${1:-}"; [ $# -gt 0 ] && shift
     case "$loc" in ''|*[!0-9]*) die "usage: agent-budget set <loc> [--files N] [--base REF]" ;; esac
-    # Raising an existing budget keeps its base — but only on the same branch;
+    # Raising an existing budget keeps its base: but only on the same branch;
     # a fresh budget or a branch switch measures from HEAD (stale bases gate falsely).
     files=""; base="HEAD"
     branch="$(git symbolic-ref --short -q HEAD || echo detached)"
@@ -58,10 +58,10 @@ case "$cmd" in
   status)
     [ -r "$STATE" ] || { echo "no budget set"; exit 3; }
     . "$STATE"
-    git rev-parse --verify -q "$BASE^{commit}" >/dev/null || die "budget base $BASE no longer exists — run agent-budget set again"
+    git rev-parse --verify -q "$BASE^{commit}" >/dev/null || die "budget base $BASE no longer exists. Run agent-budget set again"
     # A base that isn't an ancestor of HEAD (rebase, branch switch) inflates the diff
     # into a false OVER BUDGET. Fail loud instead of gating falsely.
-    git merge-base --is-ancestor "$BASE" HEAD 2>/dev/null || die "budget base $(git rev-parse --short "$BASE") is stale (rebase/branch switch) — re-run: agent-budget set <loc>"
+    git merge-base --is-ancestor "$BASE" HEAD 2>/dev/null || die "budget base $(git rev-parse --short "$BASE") is stale (rebase/branch switch), re-run: agent-budget set <loc>"
 
     # shellcheck disable=SC2086
     tracked="$(git diff --numstat "$BASE" -- . $EXCLUDES | awk '$1!="-"{s+=$1+$2} END{print s+0}')"

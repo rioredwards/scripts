@@ -1,5 +1,5 @@
 #!/bin/sh
-# run.sh — one hook that enforces every rule in rules.json.
+# run.sh: one hook that enforces every rule in rules.json.
 #
 # PILOT. The bet: Rio's guard hooks (rm-guard, issue-skill-guard, reply-cap,
 # loop-reminder) are all the same 30 lines of jq plumbing with a different
@@ -11,7 +11,7 @@
 #   tool      -> Claude PreToolUse. Can remind or deny.
 #   response  -> Claude/Codex Stop. Can remind (bounces the reply back).
 #
-# Fails OPEN everywhere. A broken rules file must never wedge an agent — that
+# Fails OPEN everywhere. A broken rules file must never wedge an agent: that
 # is the one place Rio's fail-fast-and-loud rule is the wrong call, because the
 # blast radius is every tool call on the machine. `validate.sh` is where a bad
 # rule is supposed to fail loudly, before it ships.

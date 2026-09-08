@@ -1,5 +1,5 @@
 #!/bin/sh
-# dev-url — remember the running dev server's URL for this repo so the Claude
+# dev-url: remember the running dev server's URL for this repo so the Claude
 # statusline can show it as a clickable link. run-dev sets it; it is per-repo,
 # machine-local (.git dir), and should be the tailnet hostname, never localhost.
 #

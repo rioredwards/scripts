@@ -1,8 +1,8 @@
 #!/bin/sh
-# agent-toggle — flip machine-local agent-hook knobs from anywhere (incl. a phone
+# agent-toggle: flip machine-local agent-hook knobs from anywhere (incl. a phone
 # Shortcut over SSH). Writes to ~/.config/agent-hooks/local.sh, which wins over
 # the dotfiles-synced agent-hooks profile, so a remote flip can't be reverted by
-# an auto-sync. Hooks re-read this every turn — a change takes effect next turn,
+# an auto-sync. Hooks re-read this every turn: a change takes effect next turn,
 # no restart.
 #
 # Usage:
@@ -76,7 +76,7 @@ knob_key() {
   esac
 }
 
-# every env key this script knows about — used to strip ambient values when
+# every env key this script knows about: used to strip ambient values when
 # asking "what would the files alone say?"
 all_keys() {
   for _ak in $KNOBS $VALUE_KNOBS; do knob_key "$_ak"; done
@@ -94,7 +94,7 @@ raw_current() {
 
 # raw value from the config files alone, with any ambient value stripped first.
 # Differs from raw_current only when something exported an override into this
-# shell — which is what makes the `env` source detectable.
+# shell: which is what makes the `env` source detectable.
 raw_file() {
   _fk="$1"
   (
@@ -160,7 +160,7 @@ validate_value() {
   case "$1" in
     "") return 0 ;;
     *[!A-Za-z0-9._-]*)
-      echo "agent-toggle: refusing value '$1' — only letters, digits, dot, underscore, dash" >&2
+      echo "agent-toggle: refusing value '$1', only letters, digits, dot, underscore, dash" >&2
       return 1 ;;
   esac
 }
@@ -195,7 +195,7 @@ list_all() {
   for k in $VALUE_KNOBS; do
     env_key="$(knob_key "$k")"
     val="$(raw_current "$env_key")"
-    printf '%-14s %-16s %s\n' "$k" "${val:-—}" "($(source_of "$env_key"))"
+    printf '%-14s %-16s %s\n' "$k" "${val:--}" "($(source_of "$env_key"))"
   done
 }
 
@@ -213,7 +213,7 @@ case "${1:-}" in
     key="$(knob_key "$2")" || { echo "agent-toggle: unknown knob '$2'" >&2; exit 2; }
     validate_value "$3" || exit 2
     set_state "$key" "$3"
-    echo "$2: ${3:-—}"
+    echo "$2: ${3:--}"
     exit 0 ;;
   unset)
     [ "$#" -ge 2 ] || { echo "agent-toggle: usage: agent-toggle unset <knob|KEY>" >&2; exit 2; }
@@ -227,7 +227,7 @@ knob="$1"
 env_key="$(knob_key "$knob")" || { echo "agent-toggle: unknown knob '$knob' (one of: $KNOBS $VALUE_KNOBS)" >&2; exit 2; }
 action="${2:-show}"
 
-# Value knobs have no on/off state — show the value, and treat a bare
+# Value knobs have no on/off state: show the value, and treat a bare
 # `agent-toggle <knob> <value>` as a set.
 case " $VALUE_KNOBS " in
   *" $knob "*)
@@ -236,7 +236,7 @@ case " $VALUE_KNOBS " in
     else
       validate_value "$action" || exit 2
       set_state "$env_key" "$action"
-      echo "$knob: ${action:-—}"
+      echo "$knob: ${action:-, }"
     fi
     exit 0 ;;
 esac

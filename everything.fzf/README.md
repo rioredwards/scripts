@@ -10,7 +10,7 @@ What is this?
 A personal collection of simple scripts that integrate *everything* with fzf.
 
 They are mostly opinionated, unpolished, unextendable, inconsistent, and
-unconfigurable — just the way I like them. Only tested on my MacBook.
+unconfigurable, just the way I like them. Only tested on my MacBook.
 Keep that in mind.
 
 Hope you find some ideas useful.

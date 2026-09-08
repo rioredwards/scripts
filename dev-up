@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# dev-up — start this repo's dev server the way Rio wants it, in ONE command.
+# dev-up: start this repo's dev server the way Rio wants it, in ONE command.
 #
 # Finds the repo's own start script, runs it through portless (named, stable,
 # tailnet-reachable port) inside a herdr pane, waits for the URL, remembers it

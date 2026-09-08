@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# automation-guard.sh — put the fullscreen "hands off" cue up whenever an agent
+# automation-guard.sh: put the fullscreen "hands off" cue up whenever an agent
 # drives the GUI, and take it down when the agent is done.
 #
 # Rio can't tell, from across the room or from his phone, whether the mouse
@@ -10,7 +10,7 @@
 # NON-BLOCKING by design: it never prompts and never denies (that would fight
 # Rio's global bypassPermissions mode). It only makes GUI automation *visible*.
 #
-# Wiring — same script on four events, dispatching on hook_event_name:
+# Wiring: same script on four events, dispatching on hook_event_name:
 #   PreToolUse  (matcher Bash) → cue up   if the command drives the GUI
 #   PostToolUse (matcher Bash) → cue down when the last such command finishes
 #   Stop / SessionEnd          → cue down unconditionally (crash safety net)
@@ -71,7 +71,7 @@ drives_gui() {
     *automation-cue*) return 1 ;;
   esac
 
-  # Quoted text is data, not a command — `git commit -m 'fix screencapture'`
+  # Quoted text is data, not a command: `git commit -m 'fix screencapture'`
   # must not raise the overlay. Tool names are matched against the stripped
   # form; the argument patterns below need the original, since a deeplink or
   # app path is usually quoted.
@@ -85,12 +85,12 @@ drives_gui() {
   printf '%s' "$bare" | grep -Eq '(^|[[:space:];&|(){}`])shortcuts[[:space:]]+run([[:space:]]|$)' && return 0
 
   # `open` that launches or fronts an app, or fires a deeplink. Plain
-  # `open somefile.txt` is left alone — too common, rarely a takeover.
+  # `open somefile.txt` is left alone: too common, rarely a takeover.
   printf '%s' "$bare" | grep -Eq '(^|[[:space:];&|(){}`/])open([[:space:]]|$)' &&
     printf '%s' "$1" | grep -Eq '(^|[[:space:];&|(){}`/])open[[:space:]]+.*(-[aRn][[:space:]]|[a-z][a-z0-9+.-]*://|\.app)' && return 0
 
   # AppleScript that types, clicks, fronts an app, or throws up a dialog.
-  # `display notification` is deliberately excluded — it steals nothing.
+  # `display notification` is deliberately excluded: it steals nothing.
   printf '%s' "$bare" | grep -Eq 'osascript' &&
     printf '%s' "$1" | grep -Eq 'System Events|keystroke|key code|display dialog|to activate|click at|perform action' && return 0
 

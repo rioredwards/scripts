@@ -1,5 +1,5 @@
 #!/bin/sh
-# pr-loc — one-table breakdown of a branch's diff for PR bodies: lines changed per
+# pr-loc: one-table breakdown of a branch's diff for PR bodies: lines changed per
 # subsystem, with the dominant kind (🧠 logic · 🧪 tests · 📝 docs · ⚙️ config ·
 # 📦 generated · 🖼️ assets) and a total row. Markdown out, paste at the top of the PR body.
 #
@@ -15,7 +15,7 @@ if [ -z "$base" ]; then
   [ -n "$base" ] && base="origin/$base"
 fi
 [ -n "$base" ] || base=$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || true)
-[ -n "$base" ] || { echo "pr-loc: no base found — pass one: pr-loc origin/main" >&2; exit 2; }
+[ -n "$base" ] || { echo "pr-loc: no base found, pass one: pr-loc origin/main" >&2; exit 2; }
 git rev-parse -q --verify "$base^{commit}" >/dev/null || { echo "pr-loc: unknown ref: $base" >&2; exit 2; }
 mb=$(git merge-base "$base" HEAD 2>/dev/null) || { echo "pr-loc: no merge-base with $base" >&2; exit 2; }
 
@@ -46,7 +46,7 @@ function subsystem(p,  n, a, i) {
 }
 {
   path = $3; a = ($1 == "-") ? 0 : $1; d = ($2 == "-") ? 0 : $2
-  # renames: keep the new path — both "old => new" and "pre/{old => new}/suf" forms.
+  # renames: keep the new path: both "old => new" and "pre/{old => new}/suf" forms.
   if (path ~ /=>/) { if (sub(/\{[^{}]* => /, "", path)) sub(/\}/, "", path); else sub(/.* => /, "", path) }
   F++; P[F] = path; PA[F] = a; PD[F] = d
 }
@@ -67,7 +67,7 @@ END {
     sa[s] += a; sd[s] += d; sf[s]++; sk[s, k] += a + d
     A += a; D += d }
   n = split("🧠 logic|🧪 tests|📝 docs|⚙️ config|📦 generated|🖼️ assets", order, "|")
-  # Subsystems, biggest churn first (insertion sort — POSIX awk has no asort).
+  # Subsystems, biggest churn first (insertion sort: POSIX awk has no asort).
   ns = 0; for (s in sa) { ns++; j = ns
     while (j > 1 && sa[name[j-1]] + sd[name[j-1]] < sa[s] + sd[s]) { name[j] = name[j-1]; j-- }
     name[j] = s }

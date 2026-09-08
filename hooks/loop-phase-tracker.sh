@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# loop-phase-tracker.sh — POC: track which core:loop phase is active for the statusline.
+# loop-phase-tracker.sh: POC: track which core:loop phase is active for the statusline.
 #
 # Fires from a PreToolUse hook matched on the Skill tool. When the skill invoked is one
 # of the core:loop phase skills, writes the bare phase name to a session-scoped marker
 # file the statusline script reads:
 #   /tmp/claude-loop-phase-<session_id>
 #
-# Never blocks the tool call — always exits 0. Fails open if jq is missing or input is
+# Never blocks the tool call: always exits 0. Fails open if jq is missing or input is
 # malformed (same posture as issue-skill-guard.sh).
 set -uo pipefail
 

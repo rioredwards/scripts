@@ -4,10 +4,10 @@
 # Precedence, highest first:
 #   1. env vars already set when this file is sourced  (per-run override:
 #      `AGENT_SPEAK=on claude ...`)
-#   2. ~/.config/agent-hooks/local.sh   — machine-local, untracked. Written by
+#   2. ~/.config/agent-hooks/local.sh  : machine-local, untracked. Written by
 #      `agent-toggle`; wins over the synced profile so a remote flip can't be
 #      reverted by a dotfiles auto-sync race. Absent on a fresh machine.
-#   3. ~/.dotfiles/zsh/profiles/agent-hooks.sh — tracked, synced defaults.
+#   3. ~/.dotfiles/zsh/profiles/agent-hooks.sh: tracked, synced defaults.
 #
 # Implemented by loading local BEFORE the profile, with neither ever
 # overwriting a value that is already set. Env beats local because env is set
@@ -24,7 +24,7 @@ _ah_local_set=0
 _ah_profile_set=0
 _ah_local_keys=' '
 
-# _ah_load FILE LAYER — parse `KEY=VAL` / `export KEY=VAL` lines, skipping any
+# _ah_load FILE LAYER: parse `KEY=VAL` / `export KEY=VAL` lines, skipping any
 # key that already holds a value. LAYER is `local` or `profile`.
 _ah_load() {
   [ -f "$1" ] || return 0
@@ -36,7 +36,7 @@ _ah_load() {
     case "$_ah_line" in *=*) ;; *) continue ;; esac
     _ah_key="${_ah_line%%=*}"
     _ah_val="${_ah_line#*=}"
-    # Skip anything that isn't a plain shell name — it would break the eval.
+    # Skip anything that isn't a plain shell name: it would break the eval.
     case "$_ah_key" in ''|*[!A-Za-z0-9_]*) continue ;; esac
     if eval "[ -z \"\${${_ah_key}+x}\" ]"; then
       # shellcheck disable=SC2086

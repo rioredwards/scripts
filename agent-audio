@@ -1,5 +1,5 @@
 #!/bin/sh
-# agent-audio — thin alias for `agent-toggle audio`. Kept so existing phone
+# agent-audio: thin alias for `agent-toggle audio`. Kept so existing phone
 # Shortcuts (agent-audio on|off|toggle|status) keep working after the toggle CLI
 # was generalized. All logic lives in agent-toggle.
 set -eu

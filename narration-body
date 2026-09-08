@@ -1,12 +1,12 @@
 #!/bin/sh
-# narration-body — the narration with the model's title line removed.
+# narration-body: the narration with the model's title line removed.
 #
 # stdin:  the output of the aitt `narrate-turn` transform: a `TITLE:` line, a
 #         blank line, then the prose.
 # stdout: the prose alone.
 #
-# Every surface renders the body — the phone text, the spoken audio, the web
-# view, the sidecar — and none of them should show the title line. Both callers
+# Every surface renders the body: the phone text, the spoken audio, the web
+# view, the sidecar: and none of them should show the title line. Both callers
 # (note-from-reply, content-pipeline) have to strip it the same way, so the rule
 # lives here instead of as a sed copied into each of them.
 #

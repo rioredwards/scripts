@@ -43,7 +43,7 @@ case "$tool_name" in
   run_command)
     ;;  # handled below
   *)
-    ask "Tool '$tool_name' is not on the allow list — confirm to proceed."
+    ask "Tool '$tool_name' is not on the allow list, confirm to proceed."
     ;;
 esac
 
@@ -121,4 +121,4 @@ case "$bin" in
 esac
 
 # Default: ask for anything not explicitly listed
-ask "command($bin) is not on the allow list — confirm to proceed."
+ask "command($bin) is not on the allow list, confirm to proceed."

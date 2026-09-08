@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pr-review — review a GitHub PR locally with Claude Code.
+# pr-review: review a GitHub PR locally with Claude Code.
 #
 # Usage: pr-review [--model MODEL_ID] [--wait SECONDS] [PR_NUMBER]
 #   --model    Claude model (default: claude-opus-4-8).
@@ -8,7 +8,7 @@
 #   PR_NUMBER  PR to review (default: the open PR for the current branch).
 #
 # Authenticates through the Claude Code CLI's own login (subscription), NOT an
-# Anthropic API key — this is the whole point, so it costs no API credits. The
+# Anthropic API key: this is the whole point, so it costs no API credits. The
 # GitHub Actions counterpart (install-pr-review) uses secrets.ANTHROPIC_API_KEY
 # and does spend them.
 #
@@ -57,7 +57,7 @@ PROMPT=$(cat <<EOF
 REPO: ${REPO}
 PR NUMBER: ${PR}
 
-You are an expert code reviewer. Be terse and direct — no praise, no filler.
+You are an expert code reviewer. Be terse and direct, no praise, no filler.
 Only comment on things that matter.
 
 Process:
@@ -66,31 +66,31 @@ Process:
 3. If CLAUDE.md or README.md exists in the repo root, read it and enforce its
    conventions.
 4. Before reporting any finding, open the surrounding source files and verify
-   it against the actual code — never judge from the diff hunk alone. Context
+   it against the actual code. Never judge from the diff hunk alone. Context
    outside the hunk often resolves what looks like a bug.
 
 Review priorities (highest first):
-1. Bugs and logic errors — code that won't do what it's meant to
-2. Security — injection, secrets committed, unsafe input handling, overly
+1. Bugs and logic errors: code that won't do what it's meant to
+2. Security: injection, secrets committed, unsafe input handling, overly
    broad permissions
-3. Silent failure — swallowed errors, catch-and-continue, fallbacks that hide
+3. Silent failure: swallowed errors, catch-and-continue, fallbacks that hide
    problems (prefer fail fast and loud)
-4. Portability — hardcoded absolute paths or usernames; require \$HOME/~ or
+4. Portability: hardcoded absolute paths or usernames; require \$HOME/~ or
    relative paths
 5. Dead code, unused files, needless complexity
 
 Rules:
 - Report only issues you are confident about after verification. A false
   positive costs more than a miss.
-- Max 10 findings — keep the most severe, note that the rest were folded.
+- Max 10 findings: keep the most severe, note that the rest were folded.
 - No style/formatting nits unless they change meaning. Never restate what the
   code does.
 
-Output — post exactly ONE comment with \`gh pr comment ${PR} --body ...\`:
+Output: post exactly ONE comment with \`gh pr comment ${PR} --body ...\`:
 - First line is the verdict: ✅ approve or ❌ needs changes.
 - Then one finding per line, severity-tagged 🚨 blocker / ⚠️ should fix /
   💡 optional, each starting with \`path/to/file.py:LINE\` so it is clickable.
-- If nothing is wrong, the comment body is exactly "✅ LGTM" — no invented
+- If nothing is wrong, the comment body is exactly "✅ LGTM", no invented
   nitpicks.
 EOF
 )

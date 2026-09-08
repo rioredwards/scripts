@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# link-tracker.sh — surface links from the agent's reply in the statusline.
+# link-tracker.sh: surface links from the agent's reply in the statusline.
 #
 # Fires from a Stop hook. Two sources of links, both scanned from
 # `last_assistant_message` (the reply just shown to Rio):
-#   1. Bare "PR #N" mentions (no URL) — resolved against this repo's GitHub
+#   1. Bare "PR #N" mentions (no URL): resolved against this repo's GitHub
 #      remote, e.g. "PR #544" -> https://github.com/<owner>/<repo>/pull/544
 #   2. Any URL already written in the reply, markdown-formatted or bare
 #   3. File references (`src/a.ts:42`, `~/x/y.md`) that exist on disk ->
@@ -16,10 +16,10 @@
 #
 # Label priority for URLs already in the text: the reply's own markdown
 # label if present, else a pattern derived from known GitHub URL shapes
-# (PR/issue/commit), else the bare hostname. No network calls — fetching
+# (PR/issue/commit), else the bare hostname. No network calls: fetching
 # page titles adds latency and failure modes a per-turn hook can't afford.
 #
-# Overwrites every turn — empty file when the reply has no links — so the
+# Overwrites every turn (empty file when the reply has no links), so the
 # statusline never shows stale links from an earlier turn. Never blocks the
 # turn; fails open on missing jq/git, no git remote, or malformed input.
 set -uo pipefail

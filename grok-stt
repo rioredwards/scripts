@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# grok-stt — transcribe audio with the xAI (Grok) STT API.
+# grok-stt: transcribe audio with the xAI (Grok) STT API.
 #
 # Reads an audio file and writes the transcript to stdout (or -o FILE).
 #
@@ -94,7 +94,7 @@ while true; do
 
   # Fatal: bad/expired key
   if [[ "$http_code" == "401" || "$http_code" == "403" ]]; then
-    echo "grok-stt: auth error (HTTP $http_code) — check XAI_API_KEY" >&2
+    echo "grok-stt: auth error (HTTP $http_code). Check XAI_API_KEY" >&2
     head -c 500 "$response_file" >&2; echo >&2
     exit 1
   fi
@@ -103,7 +103,7 @@ while true; do
   if [[ "$http_code" =~ ^(408|429|500|502|503|504)$ ]] && [[ $attempt -lt $MAX_RETRIES ]]; then
     attempt=$((attempt + 1))
     backoff_ms=$(( RETRY_BASE_MS * (2 ** (attempt - 1)) ))
-    echo "grok-stt: HTTP $http_code — retrying (attempt $attempt/$MAX_RETRIES, ${backoff_ms}ms)..." >&2
+    echo "grok-stt: HTTP $http_code, retrying (attempt $attempt/$MAX_RETRIES, ${backoff_ms}ms)..." >&2
     sleep "$(echo "scale=3; $backoff_ms / 1000" | bc)"
     continue
   fi

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# hooklog — wrap any hook command and record what it did.
+# hooklog: wrap any hook command and record what it did.
 #
 # Rio has ~25 hooks across Claude and Codex and no way to tell which ones are
 # earning their keep. This wraps each registered command instead of editing each
@@ -32,7 +32,7 @@ OUT="$(printf '%s' "$PAYLOAD" | sh -c "$CMD" 2>"$err")"
 CODE=$?
 end="${EPOCHREALTIME:-0}"
 
-# Replay first, log second — never make a hook slower to observe it.
+# Replay first, log second: never make a hook slower to observe it.
 [ -n "$OUT" ] && printf '%s\n' "$OUT"
 ERRTXT="$(cat "$err" 2>/dev/null)"
 [ -n "$ERRTXT" ] && printf '%s' "$ERRTXT" >&2
@@ -79,7 +79,7 @@ jq -nc \
       decision: ($o.hookSpecificOutput.permissionDecision // $o.permissionDecision
                  // $o.decision // (if $code == 2 then "block" else null end)),
       nudged:  (($o.hookSpecificOutput.additionalContext // $o.additionalContext // "") != ""),
-      # Why it blocked — the line Rio needs when judging a false positive.
+      # Why it blocked: the line Rio needs when judging a false positive.
       # No `select` here: an empty result inside object construction silently
       # drops the entire record, which is how the first version lost every
       # quiet hook.
