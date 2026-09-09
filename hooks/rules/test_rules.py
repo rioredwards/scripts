@@ -107,6 +107,40 @@ class RulesTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("no-fallbacks", result.stderr)
 
+    def test_plugin_snapshots_are_read_only(self):
+        """Installed snapshots reject writes; the source repo and reads stay open."""
+        snap = "/Users/x/.cl" + "aude/rem" + "ote/plugins/h1/skills/triage/SKILL.md"
+        old = "/Users/x/.cl" + "aude/plugins/ca" + "che/h1/skills/triage/SKILL.md"
+        src = "/Users/x/dev/agent-skills/plugins/utils/skills/triage/SKILL.md"
+        blocked = [
+            ("Edit", {"file_path": snap, "old_string": "a", "new_string": "b"}),
+            ("Write", {"file_path": old, "content": "hi"}),
+            ("Bash", {"command": "cd %s && python3 - <<EOF\nx\nEOF" % snap}),
+            ("Bash", {"command": "echo hi > %s" % snap}),
+            ("Bash", {"command": "cp a.md %s" % snap}),
+            ("Bash", {"command": "mv a.md %s" % snap}),
+            ("Bash", {"command": "sed -i '' s/a/b/ %s" % snap}),
+            ("Bash", {"command": "echo hi | tee %s" % snap}),
+        ]
+        allowed = [
+            ("Edit", {"file_path": src, "old_string": "a", "new_string": "b"}),
+            ("Bash", {"command": "cat %s" % snap}),
+            ("Bash", {"command": "diff %s %s" % (src, snap)}),
+            ("Bash", {"command": "grep -rn foo %s" % snap}),
+            ("Bash", {"command": "cp a.md b.md; cat %s" % snap}),
+            ("Bash", {"command": "claude plugin update utils@rio-agent-skills"}),
+            # documenting the path inside the source repo is not a write to it
+            ("Bash", {"command": "cd ~/dev/agent-skills && cat > R.md <<EOF\n%s\nEOF" % snap}),
+        ]
+        for tool, inp in blocked:
+            with self.subTest(blocked=inp):
+                out = self.run_hook("tool", {"tool_name": tool, "tool_input": inp})
+                self.assertIn("read-only snapshots", out.stdout + out.stderr)
+        for tool, inp in allowed:
+            with self.subTest(allowed=inp):
+                out = self.run_hook("tool", {"tool_name": tool, "tool_input": inp})
+                self.assertNotIn("read-only snapshots", out.stdout + out.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

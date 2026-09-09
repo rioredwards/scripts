@@ -84,6 +84,26 @@
       "text": "This shell command writes into Rio's agentic system (skills, ledger, hooks, agent rules). All system changes go through the `utils:system` skill, invoke it FIRST if you haven't this session. If it is already loaded, carry on."
     },
     {
+      "id": "no-editing-plugin-snapshots",
+      "on": "tool",
+      "match": {
+        "tool": "^(Edit|Write|NotebookEdit)$",
+        "content": "\\.claude/(remote/plugins|plugins/cache)/"
+      },
+      "do": "deny",
+      "text": "Installed plugins are read-only snapshots; edits there vanish on the next `claude plugin update` and never reach the other Mac. Edit the source in `~/dev/agent-skills/plugins/<plugin>/...` instead, then publish per agent-skills README.md#conventions (bump version, push, update on both Macs)."
+    },
+    {
+      "id": "no-editing-plugin-snapshots-bash",
+      "on": "tool",
+      "match": {
+        "tool": "^Bash$",
+        "input": "(?s)((cd|pushd)[[:space:]]+[^[:space:];|&]*\\.claude/(remote/plugins|plugins/cache)/.*(<<|>>|[^<>]>[^>]|tee[[:space:]]|sed[[:space:]]+-i)|(>>?|tee|touch)[[:space:]]*[^[:space:];|&]*\\.claude/(remote/plugins|plugins/cache)/|(cp|mv|install|rsync|sed[[:space:]]+-i)[[:space:]][^;|&]*\\.claude/(remote/plugins|plugins/cache)/)"
+      },
+      "do": "deny",
+      "text": "Installed plugins are read-only snapshots; edits there vanish on the next `claude plugin update` and never reach the other Mac. Edit the source in `~/dev/agent-skills/plugins/<plugin>/...` instead, then publish per agent-skills README.md#conventions (bump version, push, update on both Macs)."
+    },
+    {
       "id": "never-merge-pr",
       "on": "tool",
       "match": {
