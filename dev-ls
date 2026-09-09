@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+#
+# dev-ls: list the dev servers running on THIS Mac, with a health light and a
+# link Rio can click from any device. Wraps `portless list` (which owns the
+# routes) and adds the parts that make it readable: repo name, which worktree
+# or branch it is, how long it has been up, and whether it still answers.
+#
+#   dev-ls              # everything
+#   dev-ls straightaway # only rows matching a repo / branch / route name
+#
+# Health: 💚 answering · 💛 answering oddly (4xx or slow) · ❤️ not answering
+#         (a 502 means portless is up but the server behind it died).
+set -uo pipefail
+
+ROUTES="$HOME/.portless/routes.json"
+FILTER="${1:-}"
+
+[ -r "$ROUTES" ] || { echo "dev-ls: no portless routes at $ROUTES. Nothing running? Start one with: dev-up" >&2; exit 1; }
+
+# --- helpers ---------------------------------------------------------------
+
+# "3-04:05:06" | "04:05:06" | "05:06" -> seconds
+etime_secs() {
+  local e="$1" d=0 h=0 m=0 s=0
+  case "$e" in *-*) d="${e%%-*}"; e="${e#*-}";; esac
+  case "$e" in
+    *:*:*) h="${e%%:*}"; e="${e#*:}"; m="${e%%:*}"; s="${e#*:}";;
+    *:*)   m="${e%%:*}"; s="${e#*:}";;
+  esac
+  echo $(( 10#$d*86400 + 10#$h*3600 + 10#$m*60 + 10#$s ))
+}
+
+humanize() {
+  local t="$1"
+  if   [ "$t" -lt 3600 ];  then echo "$((t/60))m"
+  elif [ "$t" -lt 86400 ]; then echo "$((t/3600))h $(((t%3600)/60))m"
+  else echo "$((t/86400))d $(((t%86400)/3600))h"
+  fi
+}
+
+slug() { printf '%s' "$1" | tr '[:upper:]_' '[:lower:]-' | tr -cs 'a-z0-9-' '-' | sed 's/^-*//;s/-*$//'; }
+
+# --- gather ----------------------------------------------------------------
+
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+jq -r '.[] | [.pid, .hostname, .tailscaleUrl] | @tsv' "$ROUTES" > "$TMP/routes"
+
+# One lsof for every pid at once; cwd lookups are the slow part.
+PIDS="$(cut -f1 "$TMP/routes" | paste -sd, -)"
+lsof -a -d cwd -p "$PIDS" -Fpn 2>/dev/null | awk '
+  /^p/ { pid = substr($0,2) }
+  /^n/ { print pid "\t" substr($0,2) }
+' > "$TMP/cwds"
+
+# Health checks run in parallel; a dead server should not stall the list.
+while IFS=$'\t' read -r pid host url; do
+  ( curl -sk -o /dev/null -w '%{http_code} %{time_total}' --max-time 4 "$url" 2>/dev/null > "$TMP/h.$pid" \
+      || printf '000 0' > "$TMP/h.$pid" ) &
+done < "$TMP/routes"
+wait
+
+# --- build rows ------------------------------------------------------------
+
+: > "$TMP/rows"
+while IFS=$'\t' read -r pid host url; do
+  cwd="$(awk -F'\t' -v p="$pid" '$1==p {print $2; exit}' "$TMP/cwds")"
+
+  if [ -n "$cwd" ] && git -C "$cwd" rev-parse --git-dir >/dev/null 2>&1; then
+    common="$(git -C "$cwd" rev-parse --path-format=absolute --git-common-dir)"
+    repo="$(basename "$(dirname "$common")")"
+    branch="$(git -C "$cwd" branch --show-current)"
+  else
+    repo="$(basename "${cwd:-$host}")"
+    branch=""
+  fi
+
+  # The route's first label. If portless derived it from the directory it tells
+  # Rio nothing new, so prefer the branch. An explicit --name (e2e-ui) wins.
+  label="${host%%.*}"
+  if [ "$label" = "$(slug "$repo")" ] || [ -n "${branch:-}" ] && [ "$label" = "$(slug "$(basename "$cwd")")" ]; then
+    variant="${branch#*/}"
+    [ -n "$variant" ] || variant="$label"
+  else
+    variant="$label"
+  fi
+
+  etime="$(ps -o etime= -p "$pid" 2>/dev/null | tr -d ' ')"
+  if [ -n "$etime" ]; then up="$(humanize "$(etime_secs "$etime")")"; else up="gone"; fi
+
+  read -r code secs < "$TMP/h.$pid"
+  case "$code" in
+    2??|3??) if awk "BEGIN{exit !($secs > 2)}"; then light="💛"; rank=1; else light="💚"; rank=0; fi ;;
+    4??)     light="💛"; rank=1 ;;
+    *)       light="❤️"; rank=2 ;;
+  esac
+
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$rank" "$light" "$up" "$repo:$variant" "$url" "$code" >> "$TMP/rows"
+done < "$TMP/routes"
+
+# --- print -----------------------------------------------------------------
+
+if [ -n "$FILTER" ]; then
+  grep -i -- "$FILTER" "$TMP/rows" > "$TMP/f" || true
+  mv "$TMP/f" "$TMP/rows"
+fi
+
+[ -s "$TMP/rows" ] || { echo "dev-ls: nothing running${FILTER:+ matching \"$FILTER\"}. Start one with: dev-up" >&2; exit 1; }
+
+rule="$(printf '%*s' 52 '' | tr ' ' '_')"
+echo "$rule"
+echo
+sort -t$'\t' -k1,1n -k4,4 "$TMP/rows" | while IFS=$'\t' read -r rank light up name url code; do
+  note=""
+  [ "$rank" = 2 ] && note="  (not answering: $code)"
+  printf '%s %s%s\n' "$light" "$up" "$note"
+  printf '%s\n' "$name"
+  printf '%s\n\n' "$url"
+done
+echo "$rule"
