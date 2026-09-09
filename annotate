@@ -1,0 +1,257 @@
+#!/usr/bin/env python3
+"""annotate: mark up an image with arrows, callouts, boxes, circles and blur.
+
+Built for agents: point at a screenshot, describe the marks in coordinates, get a
+PNG back. Fails loudly on bad input; never silently skips a mark.
+
+Usage:
+  annotate IMAGE [-o OUT] [MARK ...]
+
+Marks (repeatable, drawn in the order given):
+  --callout X1,Y1:X2,Y2:TEXT   arrow from X1,Y1 to X2,Y2 plus a label box at the tail
+  --arrow   X1,Y1:X2,Y2        bare arrow, tip at X2,Y2
+  --label   X,Y:TEXT           label box with its top-left at X,Y (nudged in to stay on-canvas)
+  --box     X,Y,W,H            hollow rectangle
+  --circle  X,Y,R              hollow circle centred on X,Y
+  --blur    X,Y,W,H            redact a region (irreversible in the output)
+
+Options:
+  -o, --out PATH   output file (default: <input>.annotated.png, always PNG)
+  --color NAME     red (default), yellow, green, blue, magenta, white, black
+  --size N         text point size (default 22)
+  --width N        stroke width (default 5)
+  --grid [STEP]    overlay a labelled coordinate grid, default step 100
+  --info           print WIDTHxHEIGHT of the input and exit
+
+Coordinates are pixels from the top-left of the image. Run --grid once on an
+unfamiliar screenshot to read positions off it instead of guessing.
+
+Examples:
+  annotate shot.png --info
+  annotate shot.png --grid -o grid.png
+  annotate shot.png --callout 600,400:340,306:"this chip"
+  annotate shot.png --box 90,280,240,30 --blur 500,10,300,40 --color yellow
+"""
+
+import argparse
+import math
+import os
+import sys
+
+try:
+    from PIL import Image, ImageDraw, ImageFilter, ImageFont
+except ImportError:
+    sys.exit("❌ Pillow is missing. Install it: pip3 install --user Pillow")
+
+COLORS = {
+    "red": (255, 59, 48),
+    "yellow": (255, 204, 0),
+    "green": (52, 199, 89),
+    "blue": (0, 122, 255),
+    "magenta": (255, 45, 200),
+    "white": (255, 255, 255),
+    "black": (0, 0, 0),
+}
+
+FONT_CANDIDATES = [
+    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+    "/System/Library/Fonts/Helvetica.ttc",
+    "/Library/Fonts/Arial Bold.ttf",
+]
+
+
+def die(msg):
+    sys.exit(f"❌ {msg}")
+
+
+def load_font(size):
+    for path in FONT_CANDIDATES:
+        if os.path.exists(path):
+            return ImageFont.truetype(path, size)
+    die("no usable system font found; looked in " + ", ".join(FONT_CANDIDATES))
+
+
+def nums(spec, count, flag):
+    """Parse 'a,b,c' into `count` ints."""
+    parts = [p.strip() for p in spec.split(",")]
+    if len(parts) != count:
+        die(f"{flag} wants {count} numbers, got {len(parts)}: {spec!r}")
+    try:
+        return [int(round(float(p))) for p in parts]
+    except ValueError:
+        die(f"{flag} has a non-numeric value: {spec!r}")
+
+
+def split_spec(value, expected, flag):
+    """Split on ':' into `expected` fields; the last field may contain ':'."""
+    parts = value.split(":", expected - 1)
+    if len(parts) != expected:
+        die(f"{flag} expects {expected} colon-separated fields, got {value!r}")
+    return parts
+
+
+def contrasting(color):
+    r, g, b = color
+    return (0, 0, 0) if (r * 299 + g * 587 + b * 114) / 1000 > 150 else (255, 255, 255)
+
+
+def draw_arrow(d, start, end, color, width):
+    d.line([start, end], fill=color, width=width)
+    head = max(12, width * 4)
+    angle = math.atan2(end[1] - start[1], end[0] - start[0])
+    for spread in (-0.45, 0.45):
+        tail = (
+            end[0] - head * math.cos(angle + spread),
+            end[1] - head * math.sin(angle + spread),
+        )
+        d.line([end, tail], fill=color, width=width)
+
+
+def label_metrics(d, text, font, width):
+    left, top, right, bottom = d.textbbox((0, 0), text, font=font)
+    pad = max(8, width * 2)
+    return (left, top), (right - left) + pad * 2, (bottom - top) + pad * 2, pad
+
+
+def fit(x, y, w, h, size):
+    """Keep a w x h box fully inside the image so text is never clipped."""
+    img_w, img_h = size
+    return max(0, min(x, img_w - w)), max(0, min(y, img_h - h))
+
+
+def draw_label(d, xy, text, color, font, width, size):
+    (left, top), w, h, pad = label_metrics(d, text, font, width)
+    if w > size[0] or h > size[1]:
+        die(f"label {text!r} is larger than the image; shorten it or lower --size")
+    x, y = fit(xy[0], xy[1], w, h, size)
+    d.rounded_rectangle(
+        [x, y, x + w, y + h],
+        radius=pad,
+        fill=contrasting(color),
+        outline=color,
+        width=max(2, width - 2),
+    )
+    d.text((x + pad - left, y + pad - top), text, font=font, fill=color)
+
+
+def label_anchor(d, tail, tip, text, font, width, size):
+    """Sit the label at the arrow's tail, on the side away from the tip.
+
+    Flips to the near side when the far side runs out of canvas, so the text is
+    readable rather than half off the edge.
+    """
+    _, w, h, _ = label_metrics(d, text, font, width)
+    gap = max(10, width * 2)
+    far_left = tip[0] >= tail[0]
+    for left_side in (far_left, not far_left):
+        x = tail[0] - w - gap if left_side else tail[0] + gap
+        if 0 <= x <= size[0] - w:
+            return (x, tail[1] - h // 2)
+    return (tail[0] - w // 2, tail[1] - h // 2)
+
+
+def draw_grid(im, d, step, font_size):
+    color = (255, 0, 128)
+    font = load_font(max(11, font_size - 8))
+    for x in range(0, im.width, step):
+        d.line([(x, 0), (x, im.height)], fill=color, width=1)
+        d.text((x + 3, 3), str(x), font=font, fill=color)
+    for y in range(0, im.height, step):
+        d.line([(0, y), (im.width, y)], fill=color, width=1)
+        d.text((3, y + 3), str(y), font=font, fill=color)
+
+
+def clamp_box(im, x, y, w, h, flag):
+    if w <= 0 or h <= 0:
+        die(f"{flag} needs a positive width and height: got {w}x{h}")
+    x2, y2 = min(x + w, im.width), min(y + h, im.height)
+    x, y = max(0, x), max(0, y)
+    if x >= x2 or y >= y2:
+        die(f"{flag} region {x},{y},{w},{h} is fully outside the {im.width}x{im.height} image")
+    return x, y, x2, y2
+
+
+def main():
+    p = argparse.ArgumentParser(
+        prog="annotate",
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        add_help=True,
+    )
+    p.add_argument("image")
+    p.add_argument("-o", "--out")
+    p.add_argument("--color", default="red", choices=sorted(COLORS))
+    p.add_argument("--size", type=int, default=22)
+    p.add_argument("--width", type=int, default=5)
+    p.add_argument("--grid", nargs="?", const=100, type=int, default=None)
+    p.add_argument("--info", action="store_true")
+    p.add_argument("--callout", action="append", default=[], metavar="X1,Y1:X2,Y2:TEXT")
+    p.add_argument("--arrow", action="append", default=[], metavar="X1,Y1:X2,Y2")
+    p.add_argument("--label", action="append", default=[], metavar="X,Y:TEXT")
+    p.add_argument("--box", action="append", default=[], metavar="X,Y,W,H")
+    p.add_argument("--circle", action="append", default=[], metavar="X,Y,R")
+    p.add_argument("--blur", action="append", default=[], metavar="X,Y,W,H")
+    args = p.parse_args()
+
+    if not os.path.isfile(args.image):
+        die(f"no such image: {args.image}")
+    im = Image.open(args.image).convert("RGB")
+
+    if args.info:
+        print(f"{im.width}x{im.height}")
+        return
+
+    marks = (
+        len(args.callout) + len(args.arrow) + len(args.label)
+        + len(args.box) + len(args.circle) + len(args.blur)
+    )
+    if marks == 0 and args.grid is None:
+        die("nothing to draw. Pass at least one mark, or --grid. See annotate --help")
+
+    color = COLORS[args.color]
+    font = load_font(args.size)
+    d = ImageDraw.Draw(im)
+
+    for spec in args.blur:
+        x, y, x2, y2 = clamp_box(im, *nums(spec, 4, "--blur"), "--blur")
+        region = im.crop((x, y, x2, y2)).filter(ImageFilter.GaussianBlur(14))
+        im.paste(region, (x, y))
+
+    for spec in args.box:
+        x, y, x2, y2 = clamp_box(im, *nums(spec, 4, "--box"), "--box")
+        d.rectangle([x, y, x2, y2], outline=color, width=args.width)
+
+    for spec in args.circle:
+        x, y, r = nums(spec, 3, "--circle")
+        if r <= 0:
+            die(f"--circle needs a positive radius: got {r}")
+        d.ellipse([x - r, y - r, x + r, y + r], outline=color, width=args.width)
+
+    for spec in args.arrow:
+        tail_s, tip_s = split_spec(spec, 2, "--arrow")
+        tail, tip = nums(tail_s, 2, "--arrow"), nums(tip_s, 2, "--arrow")
+        draw_arrow(d, tuple(tail), tuple(tip), color, args.width)
+
+    for spec in args.label:
+        xy_s, text = split_spec(spec, 2, "--label")
+        draw_label(d, tuple(nums(xy_s, 2, "--label")), text, color, font, args.width, im.size)
+
+    for spec in args.callout:
+        tail_s, tip_s, text = split_spec(spec, 3, "--callout")
+        tail, tip = tuple(nums(tail_s, 2, "--callout")), tuple(nums(tip_s, 2, "--callout"))
+        draw_arrow(d, tail, tip, color, args.width)
+        anchor = label_anchor(d, tail, tip, text, font, args.width, im.size)
+        draw_label(d, anchor, text, color, font, args.width, im.size)
+
+    if args.grid is not None:
+        if args.grid <= 0:
+            die(f"--grid needs a positive step: got {args.grid}")
+        draw_grid(im, d, args.grid, args.size)
+
+    out = args.out or os.path.splitext(args.image)[0] + ".annotated.png"
+    im.save(out)
+    print(f"✅ {out} ({im.width}x{im.height})")
+
+
+if __name__ == "__main__":
+    main()

@@ -7,6 +7,7 @@ Small personal command wrappers and automation helpers. App-sized tools live in 
 - `agent-router` - wrapper for `~/dev/agent-router/agent-router`. Examples: `agent-router guide`, `agent-router providers --verbose`, `agent-router delegate "prompt"`.
 - `aitt` - compatibility shim for `~/dev/ai-text-transform/aitt`.
 - `sc` - text-only proxy for Apple Shortcuts registered in `sc-helpers/`. Run `sc` to list aliases.
+- `annotate` - draw arrows, callout labels, boxes, circles and blur redactions on an image. `annotate shot.png --callout 600,400:340,306:"this chip"`. Run `annotate shot.png --grid` first to read coordinates off a labelled overlay, and `--info` for dimensions. Agents use it to point Rio at a spot instead of describing it.
 - `cal-add` - create an Apple Calendar event (defaults to "Work Time Tracking"). `cal-add "Title" --start "YYYY-MM-DD HH:MM" --duration 20 [--notes ...]`; `cal-add --list` for calendar names. Needs an unlocked GUI session on the running Mac.
 - `cleanshot` - minimal CleanShot X CLI firing `cleanshot://` URL commands. Run `cleanshot` to list aliases; `--dry-run` prints the URL.
 - `dev-up` - start the current repo's dev server the sanctioned way in one command: finds the start script, runs it through portless in a herdr pane, waits until it answers, sets `dev-url`, prints the tailnet URL. Agents run this instead of guessing. `dev-up -- <cmd>` for an explicit command.
