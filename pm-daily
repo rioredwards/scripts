@@ -1,18 +1,3 @@
 #!/usr/bin/env bash
-# pm-daily: run Rio's project manager once, from a terminal, on either Mac.
-#   pm-daily             interactive claude session in the PM repo; approve tools as they come
-#   pm-daily --headless  print mode, no prompts, only the note comes back (needs a logged-in claude CLI)
-# The desktop app runs the same routine on its own at 06:30 weekdays (task "PM: plan Rio's day").
-set -euo pipefail
-PM="$HOME/dev/project-manager"
-[ -d "$PM/.git" ] || { echo "pm-daily: $PM missing. git clone git@github.com:rioredwards/project-manager.git $PM" >&2; exit 1; }
-command -v claude >/dev/null || { echo "pm-daily: claude CLI missing" >&2; exit 1; }
-cd "$PM" && git pull -q
-PROMPT="Run the daily routine now. Read AGENTS.md, PLAYBOOK.md, then skills/daily/SKILL.md and follow it exactly"
-CAL="mcp__3d6559c0-53a4-4853-be29-849c11211af1"   # Google Calendar connector (same id on both Macs)
-case "${1:-}" in
-  "") exec claude "$PROMPT." ;;
-  --headless) exec claude -p "$PROMPT, in headless mode: never ask, never wait." --max-turns 80 \
-        --allowedTools Bash Read Edit Write Glob Grep ToolSearch Artifact "$CAL" ;;
-  *) sed -n '2,5p' "$0"; exit 2 ;;
-esac
+# pm-daily: shim, same as `pm daily`.
+exec "$HOME/scripts/pm" daily "$@"
