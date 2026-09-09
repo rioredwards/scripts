@@ -13,6 +13,7 @@ Small personal command wrappers and automation helpers. App-sized tools live in 
 - `dev-ls` - what dev servers are running on this Mac, with health, URL and uptime. `dev-ls --json` for tools.
 - `dev-scan` - what this Mac has to run, as JSON, for tools: `dev-scan apps`, `dev-scan worktrees <dir>`, `dev-scan scripts <dir>`. Start-script detection mirrors `dev-up`. Meant to be run over ssh too: the answers describe the machine it ran on.
 - `hooks/note-on-turn/` - hook scripts for summarizing final agent replies into the phone note pipeline.
+- `pm-daily` - run the project manager's daily routine once in `~/dev/project-manager` (interactive); `--headless` for no prompts. The desktop app runs it on its own at 06:30 weekdays.
 - `pr-loc` - markdown LOC breakdown of the current branch's diff by kind (logic/tests/docs/config/generated) and subsystem, for PR bodies. `pr-loc [base]`.
 - `text-phone-summary` - source-agnostic note pipeline helper for a file path, literal text, or stdin.
 - `process-text-for-speech` - prepares text for speech via `aitt`.
