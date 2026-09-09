@@ -10,6 +10,8 @@ Small personal command wrappers and automation helpers. App-sized tools live in 
 - `cal-add` - create an Apple Calendar event (defaults to "Work Time Tracking"). `cal-add "Title" --start "YYYY-MM-DD HH:MM" --duration 20 [--notes ...]`; `cal-add --list` for calendar names. Needs an unlocked GUI session on the running Mac.
 - `cleanshot` - minimal CleanShot X CLI firing `cleanshot://` URL commands. Run `cleanshot` to list aliases; `--dry-run` prints the URL.
 - `dev-up` - start the current repo's dev server the sanctioned way in one command: finds the start script, runs it through portless in a herdr pane, waits until it answers, sets `dev-url`, prints the tailnet URL. Agents run this instead of guessing. `dev-up -- <cmd>` for an explicit command.
+- `dev-ls` - what dev servers are running on this Mac, with health, URL and uptime. `dev-ls --json` for tools.
+- `dev-scan` - what this Mac has to run, as JSON, for tools: `dev-scan apps`, `dev-scan worktrees <dir>`, `dev-scan scripts <dir>`. Start-script detection mirrors `dev-up`. Meant to be run over ssh too: the answers describe the machine it ran on.
 - `hooks/note-on-turn/` - hook scripts for summarizing final agent replies into the phone note pipeline.
 - `pr-loc` - markdown LOC breakdown of the current branch's diff by kind (logic/tests/docs/config/generated) and subsystem, for PR bodies. `pr-loc [base]`.
 - `text-phone-summary` - source-agnostic note pipeline helper for a file path, literal text, or stdin.

@@ -64,7 +64,7 @@ def subdirs(path):
     try:
         entries = sorted(os.scandir(path), key=lambda e: e.name)
     except OSError as error:
-        raise SystemExit(f"dev-scan: cannot read {path}: {error}")
+        die(f"cannot read {path}: {error}")
     return [e.path for e in entries if e.is_dir() and not e.name.startswith(".")]
 
 
