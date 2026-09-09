@@ -150,7 +150,7 @@
       "id": "no-em-dash-tools",
       "on": "tool",
       "match": {
-        "content": "—"
+        "content": "\u2014"
       },
       "do": "deny",
       "text": "BLOCKED: Em dashes are forbidden everywhere: replies, code, comments, docs, commits, and external content. Rewrite with a period, comma, colon, parentheses, or ordinary hyphen. Do not work around this by encoding an em dash in generated content."
@@ -159,11 +159,22 @@
       "id": "no-em-dash-responses",
       "on": "response",
       "match": {
-        "text": "—"
+        "text": "\u2014"
       },
       "scope": "all",
       "do": "remind",
       "text": "Em dashes are forbidden everywhere: replies, code, comments, docs, commits, and external content. Rewrite with a period, comma, colon, parentheses, or ordinary hyphen. Do not work around this by encoding an em dash in generated content."
+    },
+    {
+      "id": "no-env-dumps",
+      "on": "tool",
+      "match": {
+        "tool": "^Bash$",
+        "input": "(^|[[:space:];&|(){}`])(launchctl[[:space:]]+print|printenv|env)([[:space:]]|$)"
+      },
+      "unless": "(grep[[:space:]]+-c|wc[[:space:]]+-|\\|[[:space:]]*(grep|awk|cut|sed|rg)[^|]*(-c\\b|count)|env[[:space:]]+[A-Za-z_]+=|printenv[[:space:]]+[A-Za-z_])",
+      "do": "deny",
+      "text": "Blocked: this command dumps the whole environment, and Rio's API keys have leaked into agent transcripts twice that way. Never print an environment wholesale. Ask for the one thing you need instead: `launchctl getenv NAME`, `printenv NAME`, or `keyfor NAME`. If you only need a count or a yes/no, pipe through `grep -c` or test the exit status, and never echo a secret value."
     }
   ]
 }
