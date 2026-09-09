@@ -7,15 +7,35 @@
 #
 #   dev-ls              # everything
 #   dev-ls straightaway # only rows matching a repo / branch / route name
+#   dev-ls --json       # same rows as JSON, for tools (Raycast) not humans
 #
 # Health: 💚 answering · 💛 answering oddly (4xx or slow) · ❤️ not answering
 #         (a 502 means portless is up but the server behind it died).
+#
+# --json never treats "nothing running" as an error: it prints [] and exits 0,
+# because an empty list is a normal state for a caller, not a failure.
 set -uo pipefail
 
 ROUTES="$HOME/.portless/routes.json"
-FILTER="${1:-}"
 
-[ -r "$ROUTES" ] || { echo "dev-ls: no portless routes at $ROUTES. Nothing running? Start one with: dev-up" >&2; exit 1; }
+JSON=0
+FILTER=""
+for arg in "$@"; do
+  case "$arg" in
+    --json) JSON=1 ;;
+    -h|--help) sed -n '3,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -*) echo "dev-ls: unknown option $arg" >&2; exit 2 ;;
+    *) FILTER="$arg" ;;
+  esac
+done
+
+die_empty() {
+  if [ "$JSON" = 1 ]; then echo "[]"; exit 0; fi
+  echo "dev-ls: $1" >&2
+  exit 1
+}
+
+[ -r "$ROUTES" ] || die_empty "no portless routes at $ROUTES. Nothing running? Start one with: dev-up"
 
 # --- helpers ---------------------------------------------------------------
 
@@ -32,6 +52,7 @@ etime_secs() {
 
 humanize() {
   local t="$1"
+  [ "$t" -lt 0 ] && { echo "gone"; return; }
   if   [ "$t" -lt 3600 ];  then echo "$((t/60))m"
   elif [ "$t" -lt 86400 ]; then echo "$((t/3600))h $(((t%3600)/60))m"
   else echo "$((t/86400))d $(((t%86400)/3600))h"
@@ -46,6 +67,7 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 jq -r '.[] | [.pid, .hostname, .tailscaleUrl] | @tsv' "$ROUTES" > "$TMP/routes"
+[ -s "$TMP/routes" ] || die_empty "no dev servers running. Start one with: dev-up"
 
 # One lsof for every pid at once; cwd lookups are the slow part.
 PIDS="$(cut -f1 "$TMP/routes" | paste -sd, -)"
@@ -62,6 +84,9 @@ done < "$TMP/routes"
 wait
 
 # --- build rows ------------------------------------------------------------
+# One TSV row per server, raw values only. Both renderers below read this file,
+# so the human list and the JSON can never drift apart.
+# columns: rank health uptimeSecs repo branch name url httpCode pid cwd
 
 : > "$TMP/rows"
 while IFS=$'\t' read -r pid host url; do
@@ -79,7 +104,7 @@ while IFS=$'\t' read -r pid host url; do
   # The route's first label. If portless derived it from the directory it tells
   # Rio nothing new, so prefer the branch. An explicit --name (e2e-ui) wins.
   label="${host%%.*}"
-  if [ "$label" = "$(slug "$repo")" ] || [ -n "${branch:-}" ] && [ "$label" = "$(slug "$(basename "$cwd")")" ]; then
+  if [ "$label" = "$(slug "$repo")" ] || [ "$label" = "$(slug "$(basename "${cwd:-$host}")")" ]; then
     variant="${branch#*/}"
     [ -n "$variant" ] || variant="$label"
   else
@@ -87,35 +112,55 @@ while IFS=$'\t' read -r pid host url; do
   fi
 
   etime="$(ps -o etime= -p "$pid" 2>/dev/null | tr -d ' ')"
-  if [ -n "$etime" ]; then up="$(humanize "$(etime_secs "$etime")")"; else up="gone"; fi
+  if [ -n "$etime" ]; then secs_up="$(etime_secs "$etime")"; else secs_up=-1; fi
 
-  read -r code secs < "$TMP/h.$pid"
+  read -r code latency < "$TMP/h.$pid"
   case "$code" in
-    2??|3??) if awk "BEGIN{exit !($secs > 2)}"; then light="💛"; rank=1; else light="💚"; rank=0; fi ;;
-    4??)     light="💛"; rank=1 ;;
-    *)       light="❤️"; rank=2 ;;
+    2??|3??) if awk "BEGIN{exit !($latency > 2)}"; then health="yellow"; rank=1; else health="green"; rank=0; fi ;;
+    4??)     health="yellow"; rank=1 ;;
+    *)       health="red";    rank=2 ;;
   esac
 
-  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$rank" "$light" "$up" "$repo:$variant" "$url" "$code" >> "$TMP/rows"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$rank" "$health" "$secs_up" "$repo" "$branch" "$repo:$variant" "$url" "$code" "$pid" "$cwd" \
+    >> "$TMP/rows"
 done < "$TMP/routes"
-
-# --- print -----------------------------------------------------------------
 
 if [ -n "$FILTER" ]; then
   grep -i -- "$FILTER" "$TMP/rows" > "$TMP/f" || true
   mv "$TMP/f" "$TMP/rows"
 fi
 
-[ -s "$TMP/rows" ] || { echo "dev-ls: nothing running${FILTER:+ matching \"$FILTER\"}. Start one with: dev-up" >&2; exit 1; }
+sort -t$'\t' -k1,1n -k6,6 -o "$TMP/rows" "$TMP/rows"
+
+# --- render ----------------------------------------------------------------
+
+if [ "$JSON" = 1 ]; then
+  jq -R -s -c 'split("\n") | map(select(length > 0) | split("\t") | {
+    health:     .[1],
+    uptimeSecs: (.[2] | tonumber),
+    repo:       .[3],
+    branch:     .[4],
+    name:       .[5],
+    url:        .[6],
+    httpCode:   .[7],
+    pid:        (.[8] | tonumber),
+    cwd:        .[9]
+  })' "$TMP/rows"
+  exit 0
+fi
+
+[ -s "$TMP/rows" ] || die_empty "nothing running${FILTER:+ matching \"$FILTER\"}. Start one with: dev-up"
 
 rule="$(printf '%*s' 52 '' | tr ' ' '_')"
 echo "$rule"
 echo
-sort -t$'\t' -k1,1n -k4,4 "$TMP/rows" | while IFS=$'\t' read -r rank light up name url code; do
+while IFS=$'\t' read -r rank health secs_up repo branch name url code pid cwd; do
+  case "$health" in green) light="💚" ;; yellow) light="💛" ;; *) light="❤️" ;; esac
   note=""
   [ "$rank" = 2 ] && note="  (not answering: $code)"
-  printf '%s %s%s\n' "$light" "$up" "$note"
+  printf '%s %s%s\n' "$light" "$(humanize "$secs_up")" "$note"
   printf '%s\n' "$name"
   printf '%s\n\n' "$url"
-done
+done < "$TMP/rows"
 echo "$rule"
