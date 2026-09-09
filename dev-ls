@@ -5,9 +5,17 @@
 # routes) and adds the parts that make it readable: repo name, which worktree
 # or branch it is, how long it has been up, and whether it still answers.
 #
-#   dev-ls              # everything
+#   dev-ls              # everything, each row numbered
 #   dev-ls straightaway # only rows matching a repo / branch / route name
 #   dev-ls --json       # same rows as JSON, for tools (Raycast) not humans
+#
+#   dev-ls kill 2       # stop the server on row 2 (or: dev-ls kill straightaway)
+#   dev-ls kill --all   # stop every server listed
+#   dev-ls restart 2    # stop it, then dev-up again in the same checkout
+#   dev-ls prune        # reap dead routes portless is still advertising
+#
+# A target is a row number from the list, or any text matching exactly one row.
+# An ambiguous or unmatched target fails loudly rather than guessing.
 #
 # Health: 💚 answering · 💛 answering oddly (4xx or slow) · ❤️ not answering
 #         (a 502 means portless is up but the server behind it died).
@@ -18,16 +26,35 @@ set -uo pipefail
 
 ROUTES="$HOME/.portless/routes.json"
 
+# Rows below are \x1f-delimited, not tab-delimited: `read` collapses runs of
+# whitespace, so a server with no branch used to shift every column after it
+# (the list printed a pid where the HTTP code belongs). \x1f is not whitespace.
+US=$'\x1f'
+
+ACTION="list"
+case "${1:-}" in
+  kill|restart|prune) ACTION="$1"; shift ;;
+esac
+
 JSON=0
 FILTER=""
+TARGET=""
 for arg in "$@"; do
   case "$arg" in
     --json) JSON=1 ;;
-    -h|--help) sed -n '3,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '3,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --all) [ "$ACTION" = "kill" ] || { echo "dev-ls: --all only works with kill" >&2; exit 2; }
+           TARGET="--all" ;;
     -*) echo "dev-ls: unknown option $arg" >&2; exit 2 ;;
-    *) FILTER="$arg" ;;
+    *) if [ "$ACTION" = "list" ]; then FILTER="$arg"; else TARGET="$arg"; fi ;;
   esac
 done
+
+if [ "$ACTION" = "prune" ]; then exec portless prune; fi
+if [ "$ACTION" != "list" ] && [ -z "$TARGET" ]; then
+  echo "dev-ls: $ACTION needs a target. Run dev-ls to see the row numbers." >&2
+  exit 2
+fi
 
 die_empty() {
   if [ "$JSON" = 1 ]; then echo "[]"; exit 0; fi
@@ -121,8 +148,9 @@ while IFS=$'\t' read -r pid host url; do
     *)       health="red";    rank=2 ;;
   esac
 
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-    "$rank" "$health" "$secs_up" "$repo" "$branch" "$repo:$variant" "$url" "$code" "$pid" "$cwd" \
+  printf '%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s\n' \
+    "$rank" "$US" "$health" "$US" "$secs_up" "$US" "$repo" "$US" "$branch" "$US" \
+    "$repo:$variant" "$US" "$url" "$US" "$code" "$US" "$pid" "$US" "$cwd" \
     >> "$TMP/rows"
 done < "$TMP/routes"
 
@@ -131,12 +159,63 @@ if [ -n "$FILTER" ]; then
   mv "$TMP/f" "$TMP/rows"
 fi
 
-sort -t$'\t' -k1,1n -k6,6 -o "$TMP/rows" "$TMP/rows"
+sort -t"$US" -k1,1n -k6,6 -o "$TMP/rows" "$TMP/rows"
+
+# --- actions ---------------------------------------------------------------
+# kill / restart resolve their target against the same sorted rows the list
+# prints, so a row number Rio just read still means the same server.
+
+if [ "$ACTION" != "list" ]; then
+  [ -s "$TMP/rows" ] || die_empty "nothing running${FILTER:+ matching \"$FILTER\"}"
+
+  if [ "$TARGET" = "--all" ]; then
+    cp "$TMP/rows" "$TMP/hit"
+  elif printf '%s' "$TARGET" | grep -qx '[0-9]\+'; then
+    sed -n "${TARGET}p" "$TMP/rows" > "$TMP/hit"
+    [ -s "$TMP/hit" ] || { echo "dev-ls: no row $TARGET. Run dev-ls to see the rows." >&2; exit 1; }
+  else
+    grep -i -- "$TARGET" "$TMP/rows" > "$TMP/hit" || true
+    n="$(wc -l < "$TMP/hit" | tr -d ' ')"
+    if [ "$n" = 0 ]; then
+      echo "dev-ls: nothing matching \"$TARGET\". Run dev-ls to see what is up." >&2; exit 1
+    elif [ "$n" != 1 ] && [ "$ACTION" = "restart" ]; then
+      echo "dev-ls: \"$TARGET\" matches $n servers; restart takes one. Matches:" >&2
+      cut -d"$US" -f6 "$TMP/hit" >&2; exit 1
+    fi
+  fi
+
+  while IFS="$US" read -r rank health secs_up repo branch name url code pid cwd; do
+    if [ "$ACTION" = "restart" ] && [ -z "$cwd" ]; then
+      echo "dev-ls: $name has no live checkout to restart (its process is already gone)." >&2
+      echo "        Run: dev-ls prune" >&2
+      exit 1
+    fi
+    if kill "$pid" 2>/dev/null; then
+      for _ in 1 2 3 4 5 6 7 8 9 10; do
+        kill -0 "$pid" 2>/dev/null || break
+        sleep 0.5
+      done
+      kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null
+      echo "🏁 stopped $name (pid $pid)"
+    else
+      echo "🏁 $name was already gone (pid $pid)"
+    fi
+    if [ "$ACTION" = "restart" ]; then
+      portless prune >/dev/null 2>&1 || true
+      echo "▶️ restarting in $cwd"
+      ( cd "$cwd" && exec dev-up )
+      exit $?
+    fi
+  done < "$TMP/hit"
+
+  portless prune >/dev/null 2>&1 || true
+  exit 0
+fi
 
 # --- render ----------------------------------------------------------------
 
 if [ "$JSON" = 1 ]; then
-  jq -R -s -c 'split("\n") | map(select(length > 0) | split("\t") | {
+  jq -R -s -c 'split("\n") | map(select(length > 0) | split("\u001f") | {
     health:     .[1],
     uptimeSecs: (.[2] | tonumber),
     repo:       .[3],
@@ -155,12 +234,15 @@ fi
 rule="$(printf '%*s' 52 '' | tr ' ' '_')"
 echo "$rule"
 echo
-while IFS=$'\t' read -r rank health secs_up repo branch name url code pid cwd; do
+i=0
+while IFS="$US" read -r rank health secs_up repo branch name url code pid cwd; do
+  i=$((i+1))
   case "$health" in green) light="💚" ;; yellow) light="💛" ;; *) light="❤️" ;; esac
   note=""
   [ "$rank" = 2 ] && note="  (not answering: $code)"
-  printf '%s %s%s\n' "$light" "$(humanize "$secs_up")" "$note"
+  printf '%s. %s %s%s\n' "$i" "$light" "$(humanize "$secs_up")" "$note"
   printf '%s\n' "$name"
   printf '%s\n\n' "$url"
 done < "$TMP/rows"
 echo "$rule"
+echo "kill: dev-ls kill <n>  ·  restart: dev-ls restart <n>  ·  new: dev-up"
