@@ -6,7 +6,7 @@
 #              Omit to use claude-code-action's default (Sonnet tier).
 #   REPO_PATH  Target repo (default: cwd).
 #
-# Requires: gh (authed), Anthropic key in Keychain (com.rio.api.anthropic).
+# Requires: gh (authed), Anthropic key in the keyfor store (ANTHROPIC_API_KEY).
 
 set -euo pipefail
 
@@ -110,7 +110,7 @@ jobs:
 ${MODEL_LINE}            --allowed-tools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh issue view:*)"
 EOF
 
-keyfor ANTHROPIC_API_KEY \
+"$HOME/scripts/keyfor" ANTHROPIC_API_KEY \
   | gh secret set ANTHROPIC_API_KEY --repo "$REPO" \
   || { echo "ERROR: failed to set ANTHROPIC_API_KEY secret" >&2; exit 1; }
 

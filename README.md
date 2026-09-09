@@ -31,13 +31,10 @@ Several commands here are symlinks into `~/.dotfiles/scripts/` so they stay on P
 - `check-brew-sync.sh`
 - `drift-check.sh`
 - `install-git-hooks.sh`
-- `keychain-to-launchd-env.sh`
 - `maintenance-doctor.sh`
 - `path_drift_audit.py`
 - `re-sync-codex-skills.sh`
-- `remove-keychain-api-key.sh`
 - `setup-hammerspoon-cli.sh`
-- `setup-keychain-api-key.sh`
 - `validate-recent-projects.sh`
 
 Archived or old one-off scripts live in `archive/`.
