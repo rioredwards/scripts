@@ -59,7 +59,17 @@ while IFS= read -r pid; do
   fi
 done < <(printf '%s\n' "$existing" | sed -n 's/.*(pid \([0-9]*\)).*/\1/p')
 
-# ── 3. A herdr pane, split off one that already lives in this repo ────────────
+# ── 3. Is the portless proxy up? ──────────────────────────────────────────────
+# If it is not, `portless run` tries to start it on port 443, which needs sudo,
+# and the pane sits at a password prompt nobody can answer until the timeout.
+# Start it ourselves on the unprivileged port instead, before opening a pane.
+if ! pgrep -f 'portless proxy start' >/dev/null 2>&1; then
+  say "dev-up: portless proxy is down, starting it on 1355 (no sudo needed)"
+  portless proxy start --port 1355 --https >/dev/null 2>&1 \
+    || die "could not start the portless proxy. Run it yourself and read the error: portless proxy start --port 1355 --https"
+fi
+
+# ── 4. A herdr pane, split off one that already lives in this repo ────────────
 command -v herdr >/dev/null || die "herdr not installed; long-running servers must run in a herdr pane. Run: brew install herdr"
 herr="$(mktemp)"; trap 'rm -f "$herr"' EXIT
 if ! snap="$(herdr api snapshot 2>"$herr")"; then
@@ -86,20 +96,24 @@ pane="$(herdr pane split "$src" --direction right --cwd "$ROOT" --no-focus | pyt
 [[ -n "$pane" ]] || die "herdr pane split returned no pane id. Rerun: dev-up. If it repeats, the server is wedged: herdr server stop && herdr (this exits pane processes, so it is Rio's call)"
 sleep 1  # let the shell reach its prompt
 
-# ── 4. Run through portless and wait for the tailnet URL ──────────────────────
+# ── 5. Run through portless and wait for the tailnet URL ──────────────────────
 herdr pane run "$pane" "portless run --tailscale ${CMD[*]}" >/dev/null
 herdr pane wait-output "$pane" --source recent-unwrapped \
-  --regex 'Tailscale -> https://|🔴|EADDRINUSE|Error:|error:|Traceback|exit code' \
+  --regex 'Tailscale -> https://|🔴|EADDRINUSE|Error:|error:|Traceback|exit code|elevated privileges|Password:' \
   --timeout "$TIMEOUT_MS" >/dev/null 2>&1 || true
 tail="$(herdr pane read "$pane" --source recent-unwrapped --lines 80 2>/dev/null || true)"
 url="$(printf '%s\n' "$tail" | sed -n 's/.*Tailscale -> \(https:\/\/[^[:space:]]*\).*/\1/p' | tail -1)"
+# A password prompt never answers itself: say so now instead of timing out.
+if [[ -z "$url" ]] && printf '%s' "$tail" | grep -q 'elevated privileges\|Password:'; then
+  die "portless is asking for a sudo password in pane $pane (it wants port 443). Nothing can type it there. Start the proxy on the unprivileged port first: portless proxy start --port 1355 --https"
+fi
 if [[ -z "$url" ]]; then
   say "dev-up: no tailnet URL after ${DEV_UP_TIMEOUT:-90}s. If the tail below shows a slow boot, retry: DEV_UP_TIMEOUT=180 dev-up. Pane $pane tail:"
   printf '%s\n' "$tail" | tail -30 >&2
   exit 1
 fi
 
-# ── 5. Is it actually answering? ──────────────────────────────────────────────
+# ── 6. Is it actually answering? ──────────────────────────────────────────────
 # portless prints the URL before the app behind it is listening, so poll until
 # something other than the proxy's 502 comes back.
 deadline=$(( SECONDS + ${DEV_UP_TIMEOUT:-90} ))
