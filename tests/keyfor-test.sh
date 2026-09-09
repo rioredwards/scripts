@@ -10,7 +10,10 @@ trap 'rm -rf "$tmp"' EXIT
 
 export KEYFOR_AGE_IDENTITY="$tmp/key.txt"
 export KEYFOR_SECRETS_FILE="$tmp/keys.env.age"
-age-keygen -o "$KEYFOR_AGE_IDENTITY" 2>/dev/null
+# ssh sessions get a bare PATH with no Homebrew, same as launchd
+AGE_KEYGEN="$(command -v age-keygen 2>/dev/null || print -- /opt/homebrew/bin/age-keygen)"
+[[ -x "$AGE_KEYGEN" ]] || { print -u2 -- "no age-keygen, cannot run tests"; exit 1 }
+"$AGE_KEYGEN" -o "$KEYFOR_AGE_IDENTITY" 2>/dev/null
 
 pass=0 fail=0
 ok()   { print -- "  ok: $1"; (( ++pass )) }
