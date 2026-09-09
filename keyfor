@@ -35,8 +35,24 @@ AGE_IDENTITY="${KEYFOR_AGE_IDENTITY:-$HOME/.config/age/key.txt}"
 
 die() { print -u2 -- "keyfor: $*"; exit 1; }
 
+# launchd jobs and hooks start with a bare PATH that has no Homebrew in it, so
+# resolve the binaries by hand rather than assuming the caller's PATH.
+AGE_BIN=""
+AGE_KEYGEN_BIN=""
+
+resolve_bin() {
+  local name="$1" found
+  found="$(command -v "$name" 2>/dev/null)" && { print -r -- "$found"; return }
+  [[ -x "/opt/homebrew/bin/$name" ]] && { print -r -- "/opt/homebrew/bin/$name"; return }
+  [[ -x "/usr/local/bin/$name" ]] && { print -r -- "/usr/local/bin/$name"; return }
+  return 1
+}
+
 require_age() {
-  command -v age >/dev/null 2>&1 || die "age is not installed: brew install age"
+  [[ -n "$AGE_BIN" ]] || AGE_BIN="$(resolve_bin age)" \
+    || die "age is not installed: brew install age"
+  [[ -n "$AGE_KEYGEN_BIN" ]] || AGE_KEYGEN_BIN="$(resolve_bin age-keygen)" \
+    || die "age-keygen is not installed: brew install age"
   [[ -r "$AGE_IDENTITY" ]] || die "no age identity at $AGE_IDENTITY
      copy it from your other Mac, or create one: age-keygen -o $AGE_IDENTITY"
 }
@@ -45,18 +61,19 @@ decrypt() {
   require_age
   [[ -f "$SECRETS_FILE" ]] || die "no secret store at $SECRETS_FILE
      create the first key with: keyfor --set <ENV_NAME>"
-  age -d -i "$AGE_IDENTITY" "$SECRETS_FILE" 2>/dev/null \
+  "$AGE_BIN" -d -i "$AGE_IDENTITY" "$SECRETS_FILE" 2>/dev/null \
     || die "could not decrypt $SECRETS_FILE with $AGE_IDENTITY
      wrong identity, or the store is corrupt"
 }
 
 encrypt_lines() {
   local recipient tmp
-  recipient="$(age-keygen -y "$AGE_IDENTITY" 2>/dev/null)" \
+  require_age
+  recipient="$("$AGE_KEYGEN_BIN" -y "$AGE_IDENTITY" 2>/dev/null)" \
     || die "could not derive a recipient from $AGE_IDENTITY"
   mkdir -p "${SECRETS_FILE:h}"
   tmp="$(mktemp "${SECRETS_FILE}.XXXXXX")"
-  if ! print -rl -- "$@" | age -r "$recipient" -o "$tmp" 2>/dev/null; then
+  if ! print -rl -- "$@" | "$AGE_BIN" -r "$recipient" -o "$tmp" 2>/dev/null; then
     rm -f "$tmp"
     die "encryption failed, $SECRETS_FILE left unchanged"
   fi

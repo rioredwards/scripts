@@ -50,6 +50,12 @@ grep -q 'rotated' "$KEYFOR_SECRETS_FILE" && bad "plaintext found in store file" 
 check "--run exports only that var" "$("$KEYFOR" --run OPENAI_API_KEY -- zsh -c 'print -- $OPENAI_API_KEY')" 'rotated'
 check "--run does not leak others" "$("$KEYFOR" --run OPENAI_API_KEY -- zsh -c 'print -- ${RESEND_API_KEY:-unset}')" 'unset'
 
+# --- works where launchd and hooks live: no Homebrew on PATH
+check "bare PATH still resolves age" "$(PATH=/usr/bin:/bin "$KEYFOR" OPENAI_API_KEY)" 'rotated'
+print -r -- 'set-under-bare-path' | PATH=/usr/bin:/bin "$KEYFOR" --set DEEPSEEK_API_KEY >/dev/null
+check "bare PATH can write too" "$("$KEYFOR" DEEPSEEK_API_KEY)" 'set-under-bare-path'
+"$KEYFOR" --rm DEEPSEEK_API_KEY >/dev/null
+
 # --- rm removes
 "$KEYFOR" --rm RESEND_API_KEY >/dev/null
 "$KEYFOR" RESEND_API_KEY >/dev/null 2>&1 && bad "rm did not remove" || ok "rm removes the key"
