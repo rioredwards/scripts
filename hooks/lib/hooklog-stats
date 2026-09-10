@@ -4,27 +4,44 @@
 #   hooklog-stats              summary: fires, blocks, nudges, slowest
 #   hooklog-stats blocks       every block/deny, newest first: the false-positive review
 #   hooklog-stats <hook>       one hook's recent activity
-#   hooklog-stats raw          the log path, for your own jq
+#   hooklog-stats raw          the log paths, for your own jq
+#
+# Reads both logs hooklog writes (actions JSON + quiet-runs TSV) and their .1 rotations.
 set -uo pipefail
 
 LOG="${AGENT_HOOK_LOG:-$HOME/.local/state/agent-hooks/hooks.jsonl}"
+RUNS="$(dirname "$LOG")/runs.tsv"
 command -v jq >/dev/null 2>&1 || { echo "FAIL jq is required" >&2; exit 2; }
-[ -r "$LOG" ] || { echo "No hook log yet at $LOG" >&2; exit 1; }
+[ -r "$LOG" ] || [ -r "$RUNS" ] || { echo "No hook log yet at $LOG" >&2; exit 1; }
 
 MODE="${1:-summary}"
 
+# Existing files only, oldest first.
+files() { for f in "$1.1" "$1"; do [ -r "$f" ] && printf '%s\n' "$f"; done; }
+
+actions() { files "$LOG" | xargs cat 2>/dev/null; }
+
+# Every run, as JSON: quiet TSV rows become records that did nothing.
+events() {
+  actions
+  files "$RUNS" | xargs cat 2>/dev/null \
+    | jq -R -c 'split("\t") | {ts: .[0], event: .[1], hook: .[2], ms: (.[3] | tonumber),
+                              exit: 0, decision: null, nudged: false, tool: null}'
+}
+
 case "$MODE" in
-  raw) printf '%s\n' "$LOG"; exit 0 ;;
+  raw) printf '%s\n%s\n' "$LOG" "$RUNS"; exit 0 ;;
 
   blocks)
-    jq -r 'select(.decision == "deny" or .decision == "block")
+    actions | jq -r 'select(.decision == "deny" or .decision == "block")
            | "\(.ts)  \(.hook)  \(.event)\(if .tool then "/"+.tool else "" end)\n    \(.reason // "" | .[0:160])"' \
-      "$LOG" | tail -60
+      | tail -60
     ;;
 
   summary)
+    ALL="$(events | jq -s -c '.')"
     printf '%-26s %7s %7s %7s %7s %8s\n' HOOK FIRES NUDGES BLOCKS ERRORS "P50 ms"
-    jq -s -r '
+    printf '%s' "$ALL" | jq -r '
       group_by(.hook)[]
       | { hook: .[0].hook,
           fires: length,
@@ -34,22 +51,21 @@ case "$MODE" in
           # is broken, and nothing surfaces that today.
           errors: ([.[] | select(.exit != 0 and .exit != 2)] | length),
           p50: ([.[] | .ms] | sort | .[(length/2 | floor)]) }
-      | [.hook, .fires, .nudges, .blocks, .errors, .p50] | @tsv' "$LOG" \
-    | sort -k2 -rn \
+      | [.hook, .fires, .nudges, .blocks, .errors, .p50] | @tsv' \
+    | sort -t$'\t' -k2 -rn \
     | awk -F'\t' '{printf "%-26s %7s %7s %7s %7s %8s\n", $1,$2,$3,$4,$5,$6}'
 
     echo
-    silent="$(jq -s -r 'group_by(.hook)[]
+    silent="$(printf '%s' "$ALL" | jq -r 'group_by(.hook)[]
       | select(([.[] | select(.nudged or .decision != null)] | length) == 0)
-      | .[0].hook' "$LOG" | paste -sd, -)"
+      | .[0].hook' | paste -sd, -)"
     [ -n "$silent" ] && printf 'Never acted (fired, did nothing): %s\n' "$silent"
-    total="$(wc -l < "$LOG" | tr -d ' ')"
-    printf 'Total: %s events. Blocks: hooklog-stats blocks\n' "$total"
+    printf '%s' "$ALL" | jq -r '"Total: \(length) events since \(map(.ts) | min). Blocks: hooklog-stats blocks"'
     ;;
 
   *)
-    jq -r --arg h "$MODE" 'select(.hook | test($h))
+    events | jq -s -r --arg h "$MODE" 'map(select(.hook | test($h))) | sort_by(.ts)[]
            | "\(.ts)  \(.event)\(if .tool then "/"+.tool else "" end)  exit=\(.exit) \(.ms)ms \(.decision // "-")"' \
-      "$LOG" | tail -40
+      | tail -40
     ;;
 esac

@@ -11,7 +11,14 @@
 # byte, and its exit code is passed through. A hook that denies, nudges, or
 # bounces behaves exactly as it did unwrapped.
 #
-#   AGENT_HOOK_LOG    log path (default ~/.local/state/agent-hooks/hooks.jsonl).
+# Two logs, because ~98% of runs do nothing and a full JSON record for each one
+# filled 10MB in under a day:
+#   hooks.jsonl   runs that acted (block, deny, nudge, nonzero exit): full JSON.
+#   runs.tsv      quiet runs: ts, event, hook, ms. Enough for fire counts and latency.
+# Each rotates to .1 at 10MB, so roughly 3 weeks of actions and 12 days of runs.
+#
+#   AGENT_HOOK_LOG    actions log path (default ~/.local/state/agent-hooks/hooks.jsonl);
+#                     runs.tsv sits beside it.
 #                     Machine-local on purpose: ~/.agents is a symlink into the
 #                     dotfiles repo, which auto-commits every 60s and syncs to the
 #                     other Mac. Hook activity is per-machine and must not go there.
@@ -41,6 +48,7 @@ rm -f "$err"
 log_and_exit() { exit "$CODE"; }
 LOG="${AGENT_HOOK_LOG:-$HOME/.local/state/agent-hooks/hooks.jsonl}"
 [ "$LOG" = "off" ] && log_and_exit
+RUNS="$(dirname "$LOG")/runs.tsv"
 command -v jq >/dev/null 2>&1 || log_and_exit
 mkdir -p "$(dirname "$LOG")" 2>/dev/null || log_and_exit
 
@@ -53,13 +61,15 @@ if [ "$start" != "0" ]; then
   MS="$(awk -v a="$start" -v b="$end" 'BEGIN{printf "%d", (b-a)*1000}' 2>/dev/null || echo 0)"
 fi
 
-# Rotate before the log outgrows the tools that read it.
-if [ -f "$LOG" ]; then
-  size="$(wc -c < "$LOG" 2>/dev/null | tr -d ' ')"
-  [ "${size:-0}" -gt 10000000 ] && mv -f "$LOG" "$LOG.1" 2>/dev/null
-fi
+# Rotate before a log outgrows the tools that read it.
+for f in "$LOG" "$RUNS"; do
+  [ -f "$f" ] || continue
+  size="$(wc -c < "$f" 2>/dev/null | tr -d ' ')"
+  [ "${size:-0}" -gt 10000000 ] && mv -f "$f" "$f.1" 2>/dev/null
+done
 
-jq -nc \
+# One jq call builds the record and picks its log: "R<tab>tsv" or "A<tab>json".
+LINE="$(jq -nr \
   --arg event "$EVENT" --arg hook "$NAME" --arg cmd "$CMD" \
   --argjson code "$CODE" --argjson ms "${MS:-0}" \
   --arg out "$OUT" --arg err "$ERRTXT" \
@@ -88,6 +98,14 @@ jq -nc \
                   + (if $code == 2 then $err else "" end)) | .[0:400]) as $r
                 | if $r == "" then null else $r end),
       cmd:     ($cmd | .[0:200])
-    }' >> "$LOG" 2>/dev/null
+    }
+  | if .decision == null and (.nudged | not) and .reason == null and .exit == 0
+    then "R\t" + ([.ts, .event, .hook, (.ms | tostring)] | @tsv)
+    else "A\t" + tojson end' 2>/dev/null)"
+
+case "$LINE" in
+  R$'\t'*) printf '%s\n' "${LINE#R$'\t'}" >> "$RUNS" 2>/dev/null ;;
+  A$'\t'*) printf '%s\n' "${LINE#A$'\t'}" >> "$LOG" 2>/dev/null ;;
+esac
 
 log_and_exit
