@@ -13,9 +13,11 @@
 #
 # Two logs, because ~98% of runs do nothing and a full JSON record for each one
 # filled 10MB in under a day:
-#   hooks.jsonl   runs that acted (block, deny, nudge, nonzero exit): full JSON.
+#   hooks.jsonl   runs that acted (block, deny, nudge, nonzero exit, non-JSON
+#                 stdout): full JSON.
 #   runs.tsv      quiet runs: ts, event, hook, ms. Enough for fire counts and latency.
-# Each rotates to .1 at 10MB, so roughly 3 weeks of actions and 12 days of runs.
+# Each rotates to .1 at 10MB. Current + .1 hold about 2 months of actions and
+# 2 weeks of runs at Mac Mini volume.
 #
 #   AGENT_HOOK_LOG    actions log path (default ~/.local/state/agent-hooks/hooks.jsonl);
 #                     runs.tsv sits beside it.
@@ -94,7 +96,10 @@ LINE="$(jq -nr \
       # drops the entire record, which is how the first version lost every
       # quiet hook.
       reason:  (((($o.hookSpecificOutput.permissionDecisionReason // $o.permissionDecisionReason
-                   // $o.hookSpecificOutput.additionalContext // $o.additionalContext // "")
+                   // $o.hookSpecificOutput.additionalContext // $o.additionalContext
+                   # Output that is not JSON (plain-text context, or a malformed
+                   # deny) is never quiet: keep it so it cannot vanish into runs.tsv.
+                   // (if $o == null then $out else "" end))
                   + (if $code == 2 then $err else "" end)) | .[0:400]) as $r
                 | if $r == "" then null else $r end),
       cmd:     ($cmd | .[0:200])
