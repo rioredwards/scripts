@@ -20,18 +20,17 @@
 # boundary happened to land. Resetting on each user turn makes the trigger mean
 # what it should: "this agent has taken N actions since a human last touched it."
 #
-# CONTEXT the reviewer sees (two complementary sources: this is the whole point):
-#   1. session-handoff `peek`: the SAME clean extraction /session-handoff uses.
-#      Wrapper-stripped original task + narrative (assistant reasoning + notable
-#      errors), deduped, indexed. Far cleaner than a raw `jq` grab, and it nails
-#      the original task through /clear + hook banners + <system-reminder> noise.
-#      BUT session-handoff filters out tool_use blocks, so on its own it is blind
-#      to the mechanical spin signal.
-#   2. raw tool-call trace (this script): `TOOL <name> <input>` from the tail of
+# CONTEXT the reviewer sees (three complementary sources):
+#   1. conversation (jq over the JSONL): every message Rio wrote, each paired
+#      with the tail of the agent message it answered. This sets the task, so a
+#      redirect or a bare "yes" is judged against what it actually meant.
+#   2. session-handoff `peek`: recent assistant reasoning + notable errors,
+#      deduped. It filters out tool_use blocks, so it is blind to loops.
+#   3. raw tool-call trace (this script): `TOOL <name> <input>` from the tail of
 #      the JSONL, the exact sequence peek drops. This is what reveals "same action
 #      3x" and "thrashing one file", the highest-confidence loop evidence.
-#   If session-handoff is missing/fails, we fall back to a self-contained jq
-#   extraction so the hook still works.
+#   If session-handoff is missing/fails, the narrative falls back to a
+#   self-contained jq extraction so the hook still works.
 #
 # Settings follow the agent-hooks convention: profile vars live in
 # ~/.dotfiles/zsh/profiles/agent-hooks.sh, loaded by agent-hooks-env.sh; any var
@@ -104,38 +103,56 @@ LOG_DIR="$HOME/.cache/spin-check"
 mkdir -p "$LOG_DIR"
 LOG="${AGENT_SPIN_CHECK_LOG:-$LOG_DIR/fires.log}"
 
-# --- ORIGINAL TASK + NARRATIVE via session-handoff peek -------------------
+# --- CONVERSATION: every message Rio wrote, each after the reply it answered
+# Judging drift against only the first message flagged healthy sessions as
+# DRIFT after Rio redirected them (0 of 51 flags confirmed right, Sep 2-10).
+# The last message alone is no better: it is often just "yes". Pairing each of
+# Rio's messages with the end of the agent message before it tells the reviewer
+# what "yes" approved, and a later ask visibly replaces the earlier one.
+# Skips tool results, compaction summaries, interrupts and wrapper text. Keeps
+# Rio's first message plus the most recent THREAD_KEEP exchanges.
+THREAD_KEEP=20
+THREAD="$(jq -rc '
+  if .type=="assistant" then
+    (.message.content // [])[]? | select(.type=="text")
+    | "A\t" + ((.text // "") | gsub("\\s+"; " ") | .[-400:])
+  elif .type=="user" and (.isMeta // false | not) and (.isCompactSummary // false | not) then
+    (.message.content // empty)
+    | (if type=="string" then . else (map(select(.type=="text") | .text) | join(" ")) end)
+    | gsub("\\s+"; " ")
+    | select(test("^ *(<|$|\\[Request interrupted|Caveat:|Base directory for this skill|This session is being continued)") | not)
+    | "U\t" + .[0:500]
+  else empty end
+' "$TRANSCRIPT" 2>/dev/null | awk -F'\t' -v keep="$THREAD_KEEP" '
+  $1=="A" { a=$2; next }
+  $1=="U" { n++; p[n]="AGENT: " (a=="" ? "(no reply text)" : "..." a) "\nRIO: " $2; a="" }
+  END {
+    if (n == 0) exit
+    print p[1]
+    start = n - keep + 1; if (start < 2) start = 2
+    if (start > 2) printf "\n(%d earlier exchanges omitted)\n", start - 2
+    for (i = start; i <= n; i++) print "\n" p[i]
+  }')"
+[ -n "$THREAD" ] || THREAD="(unknown, could not extract; do NOT judge task drift)"
+
+# --- NARRATIVE via session-handoff peek -----------------------------------
 # Reuse the /session-handoff extraction: wrapper-stripped, deduped, indexed.
-# `.session.first` = the real first ask (survives /clear + hook banners +
-# <system-reminder> preamble that a naive jq grab trips on). `.messages` =
-# recent assistant reasoning + notable errors/results, already trimmed.
-TASK=""
+# `.messages` = recent assistant reasoning + notable errors/results, trimmed.
 NARRATIVE=""
 CTX_SOURCE="fallback"
 if command -v session-handoff >/dev/null 2>&1; then
   PEEK="$(session-handoff peek "claude:${SESSION_ID}" --format json --messages 16 --chars 6000 2>/dev/null || true)"
   if [ -n "$PEEK" ]; then
-    TASK="$(printf '%s' "$PEEK" | jq -r '.session.first // .session.title // empty' 2>/dev/null | cut -c1-600)"
-    [ -n "$TASK" ] && CTX_SOURCE="session-handoff peek"
     NARRATIVE="$(printf '%s' "$PEEK" | jq -r '
       .messages[]?
       | (.role // "?" | ascii_upcase) + ": " + ((.text // "") | gsub("\\s+"; " ") | .[0:400])
     ' 2>/dev/null | tail -n 14)"
+    [ -n "$NARRATIVE" ] && CTX_SOURCE="session-handoff peek"
   fi
 fi
 
 # Fallback: self-contained jq extraction if session-handoff is unavailable or
 # returned nothing (keeps the hook working on machines without the CLI).
-if [ -z "$TASK" ]; then
-  TASK="$(jq -rc '
-    select(.type=="user")
-    | (.message.content // empty)
-    | if type=="string" then .
-      else (map(select(.type=="text") | .text) | join(" "))
-      end
-  ' "$TRANSCRIPT" 2>/dev/null | grep -vE '^[[:space:]]*(<|$)' | head -n1 | cut -c1-600)"
-  [ -n "$TASK" ] || TASK="(unknown, could not extract; do NOT judge task drift)"
-fi
 if [ -z "$NARRATIVE" ]; then
   NARRATIVE="$(tail -n 120 "$TRANSCRIPT" 2>/dev/null | jq -rc '
     select(.type=="user" or .type=="assistant")
@@ -161,7 +178,6 @@ TRACE="$(tail -n 200 "$TRANSCRIPT" 2>/dev/null | jq -rc '
 
 # Nothing to judge on -> stay silent.
 [ -n "$NARRATIVE$TRACE" ] || exit 0
-[ -n "$TASK" ] || TASK="(unknown, could not extract; do NOT judge task drift)"
 [ -n "$TRACE" ] || TRACE="(no tool calls captured)"
 [ -n "$NARRATIVE" ] || NARRATIVE="(no narrative captured)"
 
@@ -177,7 +193,8 @@ progress is still progress.
 
 COURSE-CORRECT only on unmistakable evidence of:
 - LOOP: same failing action 3+ times, or thrashing one file.
-- DRIFT: abandoned the ORIGINAL TASK for something unrelated.
+- DRIFT: abandoned what Rio CURRENTLY wants for something unrelated. Rio's
+  latest messages set the task, not his first.
 - WRONG SOURCE: spelunking vendor code, system files or huge logs when docs,
   \`--help\` or the web rank higher on the §4 ladder in
   $EXPLORE_REF/explore-core.md.
@@ -186,14 +203,17 @@ COURSE-CORRECT only on unmistakable evidence of:
   $EXPLORE_REF/tool-scout.md.
 - CONSTRAINT TAX: an elaborate workaround serving a constraint Rio or the docs
   set; the constraint may be what's wrong. Ask Rio.
-- OVERRUN: effort far past what the ORIGINAL TASK implies. Ask Rio.
+- OVERRUN: effort far past what Rio's latest request implies. Ask Rio.
 - PING-PONG: trading turns with another agent without converging.
 
 Output \`COURSE-CORRECT: <=2 sentences\` citing evidence and one concrete
 alternative. No generic advice or preamble. When in doubt, ON TRACK.
 
-ORIGINAL TASK:
-$TASK
+CONVERSATION (every message from Rio, oldest first, each shown after the tail
+of the agent message it answered. Later messages override earlier ones: a
+short "yes" or "go" approves what the agent proposed just before it, and a new
+ask replaces the old task):
+$THREAD
 
 RECENT NARRATIVE (assistant reasoning + notable errors, trimmed, keyhole):
 $NARRATIVE
