@@ -23,11 +23,10 @@ export HOOK_AGENT HOOK_SESSION_ID HOOK_CWD HOOK_TRANSCRIPT_PATH
 
 reply="$(printf '%s' "$payload" | jq -r '.last_assistant_message // empty')"
 
-if [ -n "$reply" ]; then
-  # Fully detach phone delivery so Codex can complete the Stop hook now.
-  (
-    printf '%s' "$reply" | "$scripts_root/hooks/turn-end/dispatch"
-  ) </dev/null >/dev/null 2>&1 &
-fi
+# Dispatch even an empty reply: it indexes the session first, then skips the
+# note. Fully detach so Codex can complete the Stop hook now.
+(
+  printf '%s' "$reply" | "$scripts_root/hooks/turn-end/dispatch"
+) </dev/null >/dev/null 2>&1 &
 
 printf '%s\n' '{"continue": true}'

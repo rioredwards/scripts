@@ -4,6 +4,15 @@
 set -eu
 
 scripts_root="${SCRIPTS:-$HOME/scripts}"
+log_dir="$HOME/.cache/note-on-turn"
+mkdir -p "$log_dir"
+
+# Index first, before anything below can exit. Every agent turn, including
+# subagents, delegates and empty replies, is the one automatic trigger that
+# keeps the agent-sessions index fresh (agent-sessions#13). Detached with its
+# own stdio so the hook never waits on the pass.
+"$HOME/dev/agent-sessions/bin/index-session" \
+  </dev/null >>"$log_dir/index-session.log" 2>&1 &
 
 # Load agent-hooks profile (AGENT_SPEAK, etc.). Env vars already set win over profile.
 # shellcheck source=/dev/null
@@ -29,9 +38,6 @@ if [ -n "${AGENT_DELEGATE:-}" ] ||
    { [ "${HOOK_AGENT:-}" != claude ] && [ -n "${CLAUDECODE:-}" ]; }; then
   exit 0
 fi
-
-log_dir="$HOME/.cache/note-on-turn"
-mkdir -p "$log_dir"
 
 # Perf markers. One line per stage into perf.log, seconds since the turn ended,
 # so the wait between Rio reading the reply and the audio/page landing can be
@@ -422,5 +428,3 @@ case "$AGENT_TEXT" in
       mark text-phone; } &
     ;;
 esac
-
-"$HOME/dev/agent-sessions/bin/index-session" >>"$log_dir/index-session.log" 2>&1 &
