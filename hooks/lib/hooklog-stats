@@ -12,7 +12,8 @@ set -uo pipefail
 LOG="${AGENT_HOOK_LOG:-$HOME/.local/state/agent-hooks/hooks.jsonl}"
 RUNS="$(dirname "$LOG")/runs.tsv"
 command -v jq >/dev/null 2>&1 || { echo "FAIL jq is required" >&2; exit 2; }
-[ -r "$LOG" ] || [ -r "$RUNS" ] || { echo "No hook log yet at $LOG" >&2; exit 1; }
+[ -r "$LOG" ] || [ -r "$LOG.1" ] || [ -r "$RUNS" ] || [ -r "$RUNS.1" ] \
+  || { echo "No hook log yet at $LOG" >&2; exit 1; }
 
 MODE="${1:-summary}"
 
