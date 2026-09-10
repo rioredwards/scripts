@@ -2,7 +2,7 @@
 # reply-cap-lib.sh: shared brains for the reply-length cap.
 #
 # Two hooks need the same answer to one question: "is this reply about to be
-# bounced for length?" reply-cap.sh asks so it can block. The note-on-turn
+# bounced for length?" reply-cap.sh asks so it can block. The turn-end
 # adapter asks so it can skip a turn that is about to be rewritten: otherwise
 # a bounced reply costs Rio two phone texts, two audio clips and two summarizer
 # runs, which is exactly why the cap got removed the first time.

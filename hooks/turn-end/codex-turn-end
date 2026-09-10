@@ -6,7 +6,7 @@ payload="$(cat)"
 
 # A reply about to be bounced and rewritten: over the length cap, or tripping
 # an `on: response` rule: fires Stop again on the rewrite. Skip this pass so
-# one turn costs Rio one phone note, not two. Same guard as claude-note-on-turn.
+# one turn costs Rio one phone note, not two. Same guard as claude-turn-end.
 if [ -f "$scripts_root/hooks/lib/reply-cap-lib.sh" ]; then
   . "$scripts_root/hooks/lib/reply-cap-lib.sh"
   if reply_will_be_rewritten "$payload"; then
@@ -26,7 +26,7 @@ reply="$(printf '%s' "$payload" | jq -r '.last_assistant_message // empty')"
 if [ -n "$reply" ]; then
   # Fully detach phone delivery so Codex can complete the Stop hook now.
   (
-    printf '%s' "$reply" | "$scripts_root/hooks/note-on-turn/note-from-reply"
+    printf '%s' "$reply" | "$scripts_root/hooks/turn-end/dispatch"
   ) </dev/null >/dev/null 2>&1 &
 fi
 

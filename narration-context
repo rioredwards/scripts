@@ -131,7 +131,7 @@ if [ -n "$sid" ] && command -v jq >/dev/null 2>&1; then
     # record is usually a hook banner, a `<local-command-caveat>`, a slash
     # command or a system-reminder preamble. agent-sessions already solved this
     #: `peek`'s `.session.first` is wrapper-stripped and deduped, measured
-    # against a corpus rather than guessed at: and note-from-reply already
+    # against a corpus rather than guessed at: and turn-end/dispatch already
     # refreshes its index after every turn, so the current session is in there.
     # spin-check.sh reads the same field for the same reason.
     #

@@ -116,7 +116,7 @@ fi
 
 # Stop. Exit 2 hands stderr back to the agent and makes it answer again.
 # Verified on Claude. Codex uses the same payload field names (see
-# note-on-turn/codex-note-on-turn) but its blocking contract is unconfirmed.
+# turn-end/codex-turn-end) but its blocking contract is unconfirmed.
 printf 'Rule triggered (%s): %s\n' "$IDS" "$MSG" >&2
 printf 'Open the retry with a `---` line and `\xf0\x9f\x94\x84 Revised reply:` so Rio can tell it apart from the bounced one, which the desktop app leaves on screen. Then stop again.\n' >&2
 exit 2

@@ -2,7 +2,7 @@
 set -eu
 
 # Optional verbosity knob. `balanced` maps to the original prompt so existing
-# stdin-only callers (note-from-reply, text-phone-summary) are unaffected.
+# stdin-only callers (turn-end/dispatch, text-phone-summary) are unaffected.
 level="balanced"
 strict=0
 while [ "$#" -gt 0 ]; do

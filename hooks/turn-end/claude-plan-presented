@@ -22,4 +22,4 @@ export AGENT_NARRATE_EXTRA_FACT
 AGENT_NARRATE_DEPTH="${AGENT_NARRATE_DEPTH:-deep}"
 export AGENT_NARRATE_DEPTH
 
-printf '%s' "$payload" | jq -r '.tool_input.plan // empty' | "$scripts_root/hooks/note-on-turn/note-from-reply"
+printf '%s' "$payload" | jq -r '.tool_input.plan // empty' | "$scripts_root/hooks/turn-end/dispatch"

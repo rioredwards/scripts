@@ -5,4 +5,4 @@ scripts_root="${SCRIPTS:-$HOME/scripts}"
 HOOK_AGENT=opencode
 export HOOK_AGENT
 
-exec "$scripts_root/hooks/note-on-turn/note-from-reply"
+exec "$scripts_root/hooks/turn-end/dispatch"

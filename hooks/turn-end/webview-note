@@ -13,7 +13,7 @@
 # The player exists because the caller now waits for the synth before invoking
 # this. It used to fire alongside the synth and reach the screen ~25s early, so
 # binding the two would have meant either blocking the turn on TTS or popping
-# the window twice; the chain in note-from-reply removed that constraint.
+# the window twice; the chain in turn-end/dispatch removed that constraint.
 #
 # Overwrites one stable path per machine rather than accumulating a file per
 # turn: nothing here is worth keeping, and the web view reloads from disk.
@@ -41,7 +41,7 @@ log="$log_dir/webview-note.log"
 stamp() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
 # Perf marker on the caller's timeline (PERF_T0/PERF_RUN exported by
-# note-from-reply); standalone runs just time themselves from now.
+# turn-end/dispatch); standalone runs just time themselves from now.
 mark() { printf '%s +%ss %s\n' "${PERF_RUN:-$$}" "$(( $(date +%s) - ${PERF_T0:-$(date +%s)} ))" "$1" >>"${PERF_LOG:-$log_dir/perf.log}" 2>/dev/null || true; }
 
 if [ ! -f "$renderer" ]; then

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Shared core for all agent note-on-turn hooks.
+# Shared core for all agent turn-end hooks.
 # stdin: reply text. Adapters export optional HOOK_* origin metadata.
 set -eu
 
@@ -262,7 +262,7 @@ fi
 # Skipped when degraded: the phone text already carried the failure; there is no
 # reason to spend TTS on an error string.
 case "${degraded:+skip}${AGENT_SPEAK}" in
-  on|1|true|yes) printf '%s' "$spoken" | "$scripts_root/hooks/note-on-turn/speak-note" ;;
+  on|1|true|yes) printf '%s' "$spoken" | "$scripts_root/hooks/turn-end/speak-note" ;;
 esac
 
 # Write a local audio file of the summary into the agent-audio dir when the
@@ -385,20 +385,20 @@ if [ -n "$audio_wanted" ] || [ -n "$webview_wanted" ]; then
       fi
       if [ -n "$merge_file" ]; then
         audio_path="$(printf '%s' "$spoken" \
-          | "$scripts_root/hooks/note-on-turn/audio-note-to-file" -w -m "$merge_file" -t "$title")" \
+          | "$scripts_root/hooks/turn-end/audio-note-to-file" -w -m "$merge_file" -t "$title")" \
           || audio_path=""
         rm -f "$merge_file"
       else
         audio_path="$(printf '%s' "$spoken" \
-          | "$scripts_root/hooks/note-on-turn/audio-note-to-file" -w)" || audio_path=""
+          | "$scripts_root/hooks/turn-end/audio-note-to-file" -w)" || audio_path=""
       fi
     fi
     if [ -n "$webview_wanted" ]; then
       if [ -n "$audio_path" ] && [ -f "$audio_path" ]; then
         printf '%s' "$wv_payload" \
-          | "$scripts_root/hooks/note-on-turn/webview-note" -a "$audio_path"
+          | "$scripts_root/hooks/turn-end/webview-note" -a "$audio_path"
       else
-        printf '%s' "$wv_payload" | "$scripts_root/hooks/note-on-turn/webview-note"
+        printf '%s' "$wv_payload" | "$scripts_root/hooks/turn-end/webview-note"
       fi
     fi
   } &

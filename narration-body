@@ -7,7 +7,7 @@
 #
 # Every surface renders the body: the phone text, the spoken audio, the web
 # view, the sidecar: and none of them should show the title line. Both callers
-# (note-from-reply, content-pipeline) have to strip it the same way, so the rule
+# (turn-end/dispatch, content-pipeline) have to strip it the same way, so the rule
 # lives here instead of as a sed copied into each of them.
 #
 # Input with no title line passes through untouched: clips predate the prompt

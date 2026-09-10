@@ -1,6 +1,6 @@
 #!/bin/sh
 # Repeated narrate-turn failures must text the phone (scripts#8).
-# Runs the real note-from-reply against a stubbed scripts_root and a fake HOME,
+# Runs the real turn-end/dispatch against a stubbed scripts_root and a fake HOME,
 # so no real Shortcuts, LLMs, or logs are touched.
 set -eu
 
@@ -12,10 +12,10 @@ trap 'rm -rf "$tmp"' EXIT
 HOME="$tmp/home"; export HOME
 mkdir -p "$HOME"
 
-# Stub scripts_root: real note-from-reply, everything it calls stubbed.
+# Stub scripts_root: real turn-end/dispatch, everything it calls stubbed.
 sr="$tmp/scripts"; export SCRIPTS="$sr"
-mkdir -p "$sr/hooks/note-on-turn"
-cp "$repo/hooks/note-on-turn/note-from-reply" "$sr/hooks/note-on-turn/"
+mkdir -p "$sr/hooks/turn-end"
+cp "$repo/hooks/turn-end/dispatch" "$sr/hooks/turn-end/"
 printf '#!/bin/sh\n' > "$sr/agent-hooks-env.sh"
 printf '#!/bin/sh\nexit 0\n' > "$sr/narration-context"
 printf '#!/bin/sh\ncat\n' > "$sr/narration-spoken"
@@ -39,7 +39,7 @@ chmod +x "$sr"/agent-hooks-env.sh "$sr"/narration-* "$sr"/agent-toggle "$sr"/sc 
 run_turn() { printf 'a reply' | HOOK_AGENT=claude AGENT_DELEGATE= \
   AGENT_SPEAK=off AGENT_AUDIO_FILE=off AGENT_WEBVIEW=off AGENT_TEXT=off \
   AGENT_NARRATE_ALERT_AFTER=3 AGENT_NARRATE_ALERT_EVERY=1800 \
-  sh "$sr/hooks/note-on-turn/note-from-reply"; }
+  sh "$sr/hooks/turn-end/dispatch"; }
 
 fail() { echo "FAIL: $1"; cat "$tmp/sc.log" 2>/dev/null; exit 1; }
 calls() { grep -c 'CALL' "$tmp/sc.log" 2>/dev/null || echo 0; }

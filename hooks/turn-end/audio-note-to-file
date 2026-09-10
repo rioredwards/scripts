@@ -48,7 +48,7 @@ mkdir -p "$log_dir"
 log="$log_dir/audio-note.log"
 
 # Perf marker on the caller's timeline (PERF_T0/PERF_RUN exported by
-# note-from-reply); standalone runs just time themselves from now.
+# turn-end/dispatch); standalone runs just time themselves from now.
 mark() { printf '%s +%ss %s\n' "${PERF_RUN:-$$}" "$(( $(date +%s) - ${PERF_T0:-$(date +%s)} ))" "$1" >>"${PERF_LOG:-$log_dir/perf.log}" 2>/dev/null || true; }
 
 # Only generate on the designated host so a stowed profile doesn't make every
