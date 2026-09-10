@@ -76,11 +76,13 @@ class RulesTests(unittest.TestCase):
         reads = [
             'echo "== a =="; ls ~/scripts/hooks/rules/; echo "== b =="; sed -n 1p f 2>/dev/null',
             'echo "== a =="; ls ' + home + 'dev; cat f 2>/dev/null',
+            "echo x > /dev/null; ls ~/scripts/hooks/rules/",
         ]
         writes = [
             ("echo x > ~/dev/agent-skills/LEDGER.md", "utils:system"),
             ("printf x > ~/scripts/hooks/rules/rules.json 2>/dev/null", "utils:system"),
             ("echo " + home + "dev > notes.txt", "hardcoded home"),
+            ("echo x >/dev/null_other; cat ~/dev/agent-skills/f", "utils:system"),
         ]
         for cmd in reads:
             with self.subTest(read=cmd):

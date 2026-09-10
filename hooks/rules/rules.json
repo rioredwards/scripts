@@ -47,7 +47,7 @@
       "on": "tool",
       "match": {
         "tool": "^Bash$",
-        "input": "(?s)^(?=.*/Users/rio(redwards|edwards)/).*(<<|sed[[:space:]]+-i|perl[[:space:]]+-[a-z]*i|(echo|printf)[^|>;&]*>[[:space:]]*(?!/dev/null))"
+        "input": "(?s)^(?=.*/Users/rio(redwards|edwards)/).*(<<|sed[[:space:]]+-i|perl[[:space:]]+-[a-z]*i|(echo|printf)[^|>;&]*>(?![[:space:]]*/dev/null([^[:alnum:]_./-]|$)))"
       },
       "do": "remind",
       "text": "This shell command writes a hardcoded home path into a file (heredoc, redirect, or in-place edit). The command runs, but the file it leaves behind is broken on Rio's other Mac, two machines, two usernames (`rioredwards`, `rioedwards`). Write `$HOME`, `~`, or a dir handle ($DEV, $SCRIPTS, $DOTFILES, $SKILLS) into the file instead. Keep the literal path only if it must name one specific machine, and say why."
@@ -78,7 +78,7 @@
       "on": "tool",
       "match": {
         "tool": "^Bash$",
-        "input": "(?s)^(?=.*(agent-skills/|hooks/rules/|\\.agents/AGENTS\\.md)).*(<<|>>|sed[[:space:]]+-i|(echo|printf)[^|>;&]*>[[:space:]]*(?!/dev/null))"
+        "input": "(?s)^(?=.*(agent-skills/|hooks/rules/|\\.agents/AGENTS\\.md)).*(<<|>>|sed[[:space:]]+-i|(echo|printf)[^|>;&]*>(?![[:space:]]*/dev/null([^[:alnum:]_./-]|$)))"
       },
       "do": "remind",
       "text": "This shell command writes into Rio's agentic system (skills, ledger, hooks, agent rules). All system changes go through the `utils:system` skill, invoke it FIRST if you haven't this session. If it is already loaded, carry on."
