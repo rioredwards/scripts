@@ -67,10 +67,12 @@ block a stop, so it would match rules and let the reply through anyway.
 
 ## Em dashes
 
-`no-em-dash-tools` denies literal U+2014 in any tool input. Edit `old_string`
-and patch removal/context lines are excluded so existing characters can be removed. `no-em-dash-responses`
-bounces replies, including retries and delegates. Existing hook registrations
-cover Claude and Codex on both Macs.
+File writes only (Rio, 2026-09-10: replies and other tool text are fine).
+`no-em-dash-files` denies literal U+2014 in Write/Edit/MultiEdit/NotebookEdit and
+apply_patch input. Edit `old_string` and patch removal/context lines are excluded so
+existing characters can be removed. `no-em-dash-shell-writes` denies it in shell
+commands that write a file (`cat`/`echo`/`printf` redirect, `tee`, `sed -i`,
+`perl -i`); `git commit` and `gh pr/issue/api/release` are exempt.
 
 Coverage is hook-visible text, not tool results, streamed commentary, or text
 constructed by executed code. These rules do not scan or rewrite existing files.

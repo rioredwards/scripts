@@ -20,7 +20,8 @@ class RulesTests(unittest.TestCase):
             input=json.dumps(payload), text=True, capture_output=True, env=env,
         )
 
-    def test_responses_and_retries(self):
+    def test_em_dash_replies_pass(self):
+        """Em dashes only matter in files; replies are never bounced for them."""
         for agent in ("claude", "codex"):
             for retry in (False, True):
                 for delegate in (False, True):
@@ -29,14 +30,13 @@ class RulesTests(unittest.TestCase):
                             "last_assistant_message": "one" + DASH + "two",
                             "stop_hook_active": retry,
                         }, agent, delegate)
-                        self.assertEqual(result.returncode, 2)
-                        self.assertIn("no-em-dash-responses", result.stderr)
+                        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_payload_delegate(self):
         result = self.run_hook("response", {
-            "last_assistant_message": DASH, "agent_id": "test-subagent",
+            "last_assistant_message": "fallback", "agent_id": "test-subagent",
         })
-        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_clean_response_and_ordinary_retry(self):
         for text, retry, delegate in (("Okay - done.", False, False),
@@ -48,28 +48,41 @@ class RulesTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_tool_inputs(self):
-        cases = [
+        """Em dashes are denied only when they are being written into a file."""
+        blocked = [
             ("Write", {"content": DASH}),
-            ("Bash", {"command": "pwd", "description": DASH}),
-            ("mcp__service__update", {"command": "update", "body": DASH}),
-            ("mcp__service__update", {"old_string": DASH}),
-            ("Write", {"file_path": "/tmp/" + DASH, "content": "okay"}),
             ("Edit", {"old_string": "before", "new_string": DASH}),
-            ("Bash", {"command": "echo " + DASH}),
-            ("exec_command", {"cmd": "echo " + DASH}),
-            ("mcp__service__update", {"body": DASH}),
+            ("MultiEdit", {"edits": [{"old_string": "a", "new_string": DASH}]}),
+            ("NotebookEdit", {"new_source": DASH}),
             ("apply_patch", "*** Begin Patch\n+" + DASH),
+            ("Bash", {"command": "echo " + DASH + " > notes.md"}),
+            ("Bash", {"command": "cat > app.ts <<EOF\n" + DASH + "\nEOF"}),
+            ("Bash", {"command": "printf x" + DASH + " | tee out.txt"}),
+            ("Bash", {"command": "sed -i '' 's/-/" + DASH + "/' f.md"}),
+            ("exec_command", {"cmd": "echo " + DASH + " >> notes.md"}),
+        ]
+        allowed = [
+            ("Bash", {"command": "pwd", "description": DASH}),
+            ("Bash", {"command": "echo " + DASH}),
+            ("Bash", {"command": "grep -rn " + DASH + " src 2>/dev/null"}),
+            ("Bash", {"command": "echo " + DASH + " 2>&1"}),
+            ("Bash", {"command": "git commit -m \"$(cat <<'EOF'\na " + DASH + " b\n\nCo-Authored-By: X <x@y.z>\nEOF\n)\""}),
+            ("exec_command", {"cmd": "echo " + DASH}),
+            ("mcp__service__update", {"command": "update", "body": DASH}),
         ]
         for agent in ("claude", "codex"):
-            for name, data in cases:
-                with self.subTest(agent=agent, tool=name):
-                    result = self.run_hook("tool", {
-                        "tool_name": name, "tool_input": data,
-                    }, agent)
+            for name, data in blocked:
+                with self.subTest(agent=agent, blocked=data):
+                    result = self.run_hook("tool", {"tool_name": name, "tool_input": data}, agent)
                     self.assertEqual(result.returncode, 0)
                     verdict = json.loads(result.stdout)["hookSpecificOutput"]
                     self.assertEqual(verdict["permissionDecision"], "deny")
                     self.assertIn("Em dashes", verdict["permissionDecisionReason"])
+            for name, data in allowed:
+                with self.subTest(agent=agent, allowed=data):
+                    result = self.run_hook("tool", {"tool_name": name, "tool_input": data}, agent)
+                    self.assertEqual(result.returncode, 0)
+                    self.assertNotIn("Em dashes", result.stdout)
 
     def test_dev_null_redirect_is_not_a_write(self):
         home = "/Users/rio" + "redwards/"
@@ -117,13 +130,16 @@ class RulesTests(unittest.TestCase):
                             for h in group["hooks"] if "rules/run.sh" in h.get("command", "")]
                 self.assertEqual(len(commands), 1)
                 payload = {"hook_event_name": event, "tool_name": "Write",
-                           "tool_input": {"content": DASH}, "last_assistant_message": DASH}
+                           "tool_input": {"content": DASH}, "last_assistant_message": "fallback"}
                 result = subprocess.run(commands[0], shell=True, input=json.dumps(payload),
                                         text=True, capture_output=True)
                 if event == "PreToolUse":
                     self.assertEqual(json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
-                else:
+                elif event == "Stop":
                     self.assertEqual(result.returncode, 2, result.stderr)
+                else:
+                    # SubagentStop runs as a delegate: ordinary rules skip, and none are scope all.
+                    self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_ordinary_rule_still_runs(self):
         result = self.run_hook("response", {"last_assistant_message": "fallback"})

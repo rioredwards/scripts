@@ -147,23 +147,25 @@
       "text": "BLOCKED: this looks like a hand-rolled dev-server start. Rio's rule: never guess how to run an app. Run `dev-up` instead -- it finds the repo's start script, runs it through portless in a herdr pane, waits until the app answers, and prints the tailnet URL. That is the whole job; do not inspect ports, panes, or other worktrees first. If dev-up exits 2 (no start script), say so and offer to add one. If it exits 1, read the pane tail it printed, report the cause, and recommend the one-shot fix. If the command you were about to run IS the repo's own start script, re-run it prefixed with `RIO_RUN_OK=1 `."
     },
     {
-      "id": "no-em-dash-tools",
+      "id": "no-em-dash-files",
       "on": "tool",
       "match": {
+        "tool": "^(Write|Edit|MultiEdit|NotebookEdit)$|(^|[._])apply_patch$",
         "content": "\u2014"
       },
       "do": "deny",
-      "text": "BLOCKED: Em dashes are forbidden everywhere: replies, code, comments, docs, commits, and external content. Rewrite with a period, comma, colon, parentheses, or ordinary hyphen. Do not work around this by encoding an em dash in generated content."
+      "text": "BLOCKED: Em dashes are not allowed in files (code, comments, docs, configs). Rewrite with a period, comma, colon, parentheses, or ordinary hyphen. Do not work around this by encoding an em dash."
     },
     {
-      "id": "no-em-dash-responses",
-      "on": "response",
+      "id": "no-em-dash-shell-writes",
+      "on": "tool",
       "match": {
-        "text": "\u2014"
+        "tool": "^(Bash|exec_command|shell)$",
+        "input": "(?s)^(?=.*\u2014).*(sed[[:space:]]+-i|perl[[:space:]]+-[a-z]*i|\\btee[[:space:]]|(cat|echo|printf)[^|>;&]*>(?![[:space:]]*(/dev/null([^[:alnum:]_./-]|$)|&)))"
       },
-      "scope": "all",
-      "do": "remind",
-      "text": "Em dashes are forbidden everywhere: replies, code, comments, docs, commits, and external content. Rewrite with a period, comma, colon, parentheses, or ordinary hyphen. Do not work around this by encoding an em dash in generated content."
+      "unless": "(git[[:space:]]+commit|gh[[:space:]]+(pr|issue|api|release))",
+      "do": "deny",
+      "text": "BLOCKED: this shell command writes an em dash into a file. Em dashes are not allowed in files (code, comments, docs, configs). Rewrite with a period, comma, colon, parentheses, or ordinary hyphen. Do not work around this by encoding an em dash."
     },
     {
       "id": "no-env-dumps",
