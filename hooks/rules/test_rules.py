@@ -71,6 +71,27 @@ class RulesTests(unittest.TestCase):
                     self.assertEqual(verdict["permissionDecision"], "deny")
                     self.assertIn("Em dashes", verdict["permissionDecisionReason"])
 
+    def test_dev_null_redirect_is_not_a_write(self):
+        home = "/Users/rio" + "redwards/"
+        reads = [
+            'echo "== a =="; ls ~/scripts/hooks/rules/; echo "== b =="; sed -n 1p f 2>/dev/null',
+            'echo "== a =="; ls ' + home + 'dev; cat f 2>/dev/null',
+        ]
+        writes = [
+            ("echo x > ~/dev/agent-skills/LEDGER.md", "utils:system"),
+            ("printf x > ~/scripts/hooks/rules/rules.json 2>/dev/null", "utils:system"),
+            ("echo " + home + "dev > notes.txt", "hardcoded home"),
+        ]
+        for cmd in reads:
+            with self.subTest(read=cmd):
+                out = self.run_hook("tool", {"tool_name": "Bash", "tool_input": {"command": cmd}}).stdout
+                self.assertNotIn("utils:system", out)
+                self.assertNotIn("hardcoded home", out)
+        for cmd, expected in writes:
+            with self.subTest(write=cmd):
+                out = self.run_hook("tool", {"tool_name": "Bash", "tool_input": {"command": cmd}}).stdout
+                self.assertIn(expected, out)
+
     def test_removing_existing_character(self):
         result = self.run_hook("tool", {"tool_name": "Edit", "tool_input": {
             "old_string": DASH, "new_string": ",", "file_path": "/tmp/test",
