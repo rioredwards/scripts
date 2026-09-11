@@ -40,6 +40,7 @@ printf 'a reply' | HOOK_AGENT=claude AGENT_DELEGATE=1 sh "$sr/hooks/turn-end/dis
 indexed 2 || fail "delegate turn: want 2 index runs, got $(runs)"
 
 [ ! -e "$tmp/notified" ] || fail "skipped turn notified: $(cat "$tmp/notified")"
+[ ! -e "$HOME/.cache/note-on-turn/perf.log" ] || fail "skipped turn reached the notify pipeline"
 
 # A normal reply, with the narration pipeline stubbed to succeed.
 for s in narration-context agent-toggle; do printf '#!/bin/sh\nexit 0\n' > "$sr/$s"; done
