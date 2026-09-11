@@ -146,12 +146,12 @@ def cmd_apps():
 
 
 def cmd_worktrees(repo_dir):
-    """Every live checkout, main first.
+    """Every live checkout, main first, then most recently committed.
 
     `git worktree list` is the only honest source. Three directory naming
     conventions coexist on disk and none reliably encodes the branch, so names
     are never parsed. Entries git marks prunable, or whose directory is gone,
-    are dropped.
+    are dropped. Each row carries what deleting it would lose (see git_facts).
     """
     out = git(repo_dir, "worktree", "list", "--porcelain")
     if out is None:
@@ -182,7 +182,40 @@ def cmd_worktrees(repo_dir):
             current["skip"] = True
     flush()
 
+    head = git(repo_dir, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+    base = head.strip() if head else None
+    for worktree in worktrees:
+        worktree.update(git_facts(worktree["dir"], base))
+    worktrees.sort(key=lambda w: (not w["isMain"], -w["lastCommit"]))
     return worktrees
+
+
+def git_counts(path, *args):
+    out = git(path, *args)
+    if out is None:
+        die(f"git {' '.join(args)} failed in {path}")
+    return [int(n) for n in out.split()]
+
+
+def git_facts(path, base):
+    """What deleting this checkout would lose.
+
+    Unpushed means on no remote at all, not ahead of its upstream: upstreams
+    are unreliable (missing, or set to the default branch itself). Ahead and
+    behind are against origin/HEAD, so 0 ahead means merged. With no
+    origin/HEAD there is nothing to judge by, so those are null, not guessed.
+    """
+    status = git(path, "status", "--porcelain")
+    if status is None:
+        die(f"git status failed in {path}")
+    lines = [line for line in status.split("\n") if line]
+    untracked = sum(1 for line in lines if line.startswith("??"))
+    facts = {"lastCommit": last_commit(path), "changed": len(lines) - untracked, "untracked": untracked}
+    if base is None:
+        return {**facts, "unpushed": None, "ahead": None, "behind": None, "base": None}
+    [unpushed] = git_counts(path, "rev-list", "--count", "HEAD", "--not", "--remotes")
+    behind, ahead = git_counts(path, "rev-list", "--left-right", "--count", f"{base}...HEAD")
+    return {**facts, "unpushed": unpushed, "ahead": ahead, "behind": behind, "base": base.removeprefix("origin/")}
 
 
 def titleize(name):
