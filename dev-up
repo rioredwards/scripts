@@ -41,6 +41,8 @@ else
   [[ ${#CMD[@]} -gt 0 ]] || die "no start script found (looked for skeleton/scripts/start_dev.sh, scripts/start_dev.sh, scripts/dev, bin/dev, a package.json dev script). Check RUNBOOK.md, or run: dev-up -- <command>"
 fi
 
+command -v portless >/dev/null || die "portless not found on PATH ($PATH). Installed already? This shell's PATH is missing its directory. Otherwise run: brew install portless"
+
 # ── 2. Already running for this checkout? ─────────────────────────────────────
 # portless lists routes with their supervisor pid; a pid whose cwd is this
 # checkout is our server. Print its tailscale URL and stop.
