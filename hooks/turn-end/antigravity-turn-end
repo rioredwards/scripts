@@ -4,6 +4,12 @@ set -eu
 stdin_json="$(cat)"
 transcript_path="$(echo "$stdin_json" | jq -r '.transcriptPath // .transcript_path // empty')"
 
+# Name the session that ended, so dispatch indexes only that session.
+HOOK_AGENT=antigravity
+HOOK_SESSION_ID="$(echo "$stdin_json" | jq -r '.conversationId // empty')"
+HOOK_TRANSCRIPT_PATH="$transcript_path"
+export HOOK_AGENT HOOK_SESSION_ID HOOK_TRANSCRIPT_PATH
+
 if [ -n "$transcript_path" ] && [ -f "$transcript_path" ]; then
   jq -s -r '[.[] | select(.source == "MODEL" and .type == "PLANNER_RESPONSE" and has("content") and .content != "")] | last | .content // empty' "$transcript_path"
 else

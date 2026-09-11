@@ -1,6 +1,8 @@
 #!/bin/sh
 # Shared core for all agent turn-end hooks.
-# stdin: reply text. Adapters export optional HOOK_* origin metadata.
+# stdin: reply text. Adapters export HOOK_AGENT and HOOK_SESSION_ID (plus
+# HOOK_TRANSCRIPT_PATH for agents with a transcript file): the session that
+# ended. Other HOOK_* origin metadata is optional.
 set -eu
 
 scripts_root="${SCRIPTS:-$HOME/scripts}"
@@ -9,9 +11,10 @@ mkdir -p "$log_dir"
 
 # Index first, before anything below can exit. Every agent turn, including
 # subagents, delegates and empty replies, is the one automatic trigger that
-# keeps the agent-sessions index fresh (agent-sessions#13). Detached with its
-# own stdio so the hook never waits on the pass.
+# keeps the agent-sessions index fresh (agent-sessions#13). It updates only the
+# session that ended. Detached with its own stdio so the hook never waits on it.
 "$HOME/dev/agent-sessions/bin/index-session" \
+  "${HOOK_AGENT:-}" "${HOOK_SESSION_ID:-}" "${HOOK_TRANSCRIPT_PATH:-}" \
   </dev/null >>"$log_dir/index-session.log" 2>&1 &
 
 # Load agent-hooks profile (AGENT_SPEAK, etc.). Env vars already set win over profile.
