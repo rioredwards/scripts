@@ -87,6 +87,17 @@ LINE="$(jq -nr \
       session: ($p.session_id // null),
       cwd:     ($p.cwd // null),
       tool:    ($p.tool_name // null),
+      # What the agent tried: the command, file edit, or reply the hook judged.
+      # Without it a block says why but not what, and a false positive is unjudgeable.
+      input:   ($p.tool_input // $p.last_assistant_message // $p.prompt
+                | if . == null then null
+                  elif type == "string" then .
+                  elif (.command | type) == "string" then .command
+                  elif (.cmd | type) == "string" then .cmd
+                  elif (.file_path | type) == "string"
+                    then .file_path + ": " + ((.new_string // .content // .edits // "") | tostring)
+                  else tostring end
+                | if . == null then null else gsub("\\s+"; " ") | .[0:300] end),
       # What the hook actually did, not just that it ran.
       decision: ($o.hookSpecificOutput.permissionDecision // $o.permissionDecision
                  // $o.decision // (if $code == 2 then "block" else null end)),

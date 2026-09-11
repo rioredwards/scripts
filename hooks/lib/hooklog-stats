@@ -35,8 +35,9 @@ case "$MODE" in
 
   blocks)
     actions | jq -r 'select(.decision == "deny" or .decision == "block")
-           | "\(.ts)  \(.hook)  \(.event)\(if .tool then "/"+.tool else "" end)\n    \(.reason // "" | .[0:160])"' \
-      | tail -60
+           | "\(.ts)  \(.hook)  \(.event)\(if .tool then "/"+.tool else "" end)\n    \(.reason // "" | .[0:160])"
+             + (if .input then "\n    tried: \(.input | .[0:160])" else "" end)' \
+      | tail -90
     ;;
 
   summary)
