@@ -70,7 +70,7 @@ if ! pgrep -f 'portless proxy start' >/dev/null 2>&1; then
 fi
 
 # ── 4. A herdr pane, split off one that already lives in this repo ────────────
-command -v herdr >/dev/null || die "herdr not installed; long-running servers must run in a herdr pane. Run: brew install herdr"
+command -v herdr >/dev/null || die "herdr not found on PATH ($PATH). Long-running servers must run in a herdr pane. Installed already? This shell's PATH is missing its directory. Otherwise run: brew install herdr"
 herr="$(mktemp)"; trap 'rm -f "$herr"' EXIT
 if ! snap="$(herdr api snapshot 2>"$herr")"; then
   # herdr reports why on stderr as JSON (protocol_mismatch, no socket, ...).
