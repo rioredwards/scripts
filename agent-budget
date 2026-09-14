@@ -10,8 +10,9 @@
 #   agent-budget clear                                # drop it
 #
 # State lives in the repo's .git dir (per worktree, never committed). Counted:
-# added+deleted lines vs base, committed or not, untracked files included.
-# Lockfiles and snapshots are ignored.
+# added lines vs base, committed or not, untracked files included. Deleted lines
+# are free: removing code is rewarded, not penalized. Lockfiles and snapshots
+# are ignored.
 #
 # Exit codes: 0 within budget · 1 over · 3 no budget set · 2 usage/infra error
 set -u
@@ -64,7 +65,7 @@ case "$cmd" in
     git merge-base --is-ancestor "$BASE" HEAD 2>/dev/null || die "budget base $(git rev-parse --short "$BASE") is stale (rebase/branch switch), re-run: agent-budget set <loc>"
 
     # shellcheck disable=SC2086
-    tracked="$(git diff --numstat "$BASE" -- . $EXCLUDES | awk '$1!="-"{s+=$1+$2} END{print s+0}')"
+    tracked="$(git diff --numstat "$BASE" -- . $EXCLUDES | awk '$1!="-"{s+=$1} END{print s+0}')"
     untracked_lines=0; untracked_n=0
     for f in $(git ls-files --others --exclude-standard); do
       case "$f" in *lock.yaml|*lock.json|*.lock|*.snap|*Package.resolved) continue ;; esac
