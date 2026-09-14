@@ -177,6 +177,25 @@
       "unless": "(grep[[:space:]]+-c|wc[[:space:]]+-|\\|[[:space:]]*(grep|awk|cut|sed|rg)[^|]*(-c\\b|count)|env[[:space:]]+[A-Za-z_]+=|printenv[[:space:]]+[A-Za-z_])",
       "do": "deny",
       "text": "Blocked: this command dumps the whole environment, and Rio's API keys have leaked into agent transcripts twice that way. Never print an environment wholesale. Ask for the one thing you need instead: `launchctl getenv NAME`, `printenv NAME`, or `keyfor NAME`. If you only need a count or a yes/no, pipe through `grep -c` or test the exit status, and never echo a secret value."
+    },
+    {
+      "id": "railway-mcp-read-only",
+      "on": "tool",
+      "match": {
+        "tool": "^mcp__railway__(set-|create-|delete-|update-|connect-|generate-|redeploy|restart-service|accept-deploy|railway-agent|list-variables)"
+      },
+      "do": "deny",
+      "text": "BLOCKED: railway is read-only for agents. Writes (deploy, restart, variables, services, domains) and variable values are Rio's. Read deploy state with get-status, list-deployments, get-logs, or get-service-metrics, and ask Rio for the rest."
+    },
+    {
+      "id": "railway-cli-read-only",
+      "on": "tool",
+      "match": {
+        "tool": "^Bash$",
+        "input": "(^|[[:space:];&|(){}`])railway[[:space:]]+(-[^[:space:]]+[[:space:]]+)*((add|agent|api|bucket|cdn|ca|code|config|connect|delete|rm|remove|deploy|down|environment|env|flag|flags|init|new|link|login|logout|run|local|shell|ssh|up|variables|variable|vars|volume|tcp-proxy|unlink|redeploy|restart|sandbox|sbx|postgres|mysql|private-network|outbound-network|project|projects|open|setup|skills|mcp|upgrade)([[:space:]]|$)|(deployment|deployments|domain|service)[[:space:]]+(?!list([[:space:]]|$))[^[:space:]]+)"
+      },
+      "do": "deny",
+      "text": "BLOCKED: railway CLI is read-only for agents. Writes, deploys, and anything that exposes variables (variables, run, shell, ssh, connect, api) are Rio's. Allowed: railway status, logs, metrics, list, deployment list, service list, domain list, docs."
     }
   ]
 }

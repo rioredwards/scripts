@@ -146,6 +146,44 @@ class RulesTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("no-fallbacks", result.stderr)
 
+    def test_railway_is_read_only(self):
+        """Railway writes and variable values are Rio's; deploy state and logs stay readable."""
+        ids = {"projectId": "p", "serviceId": "s"}
+        blocked = [
+            ("mcp__railway__set-variables", ids),
+            ("mcp__railway__list-variables", ids),
+            ("mcp__railway__redeploy", ids),
+            ("mcp__railway__restart-service", ids),
+            ("mcp__railway__delete-service", ids),
+            ("mcp__railway__accept-deploy", ids),
+            ("mcp__railway__railway-agent", {"prompt": "restart it"}),
+            ("Bash", {"command": "railway up"}),
+            ("Bash", {"command": "railway logs && railway up --detach"}),
+            ("Bash", {"command": "railway variables"}),
+            ("Bash", {"command": "railway run python3 x.py"}),
+            ("Bash", {"command": "railway shell"}),
+            ("Bash", {"command": "railway service delete"}),
+            ("Bash", {"command": "cd app; railway redeploy -y"}),
+        ]
+        allowed = [
+            ("mcp__railway__get-status", ids),
+            ("mcp__railway__list-deployments", ids),
+            ("mcp__railway__get-logs", ids),
+            ("Bash", {"command": "railway status"}),
+            ("Bash", {"command": "railway logs --deployment abc"}),
+            ("Bash", {"command": "railway deployment list"}),
+            ("Bash", {"command": "grep railway README.md"}),
+        ]
+        for tool, inp in blocked:
+            with self.subTest(blocked=(tool, inp)):
+                result = self.run_hook("tool", {"tool_name": tool, "tool_input": inp})
+                self.assertEqual(json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
+                self.assertIn("railway", result.stdout)
+        for tool, inp in allowed:
+            with self.subTest(allowed=(tool, inp)):
+                result = self.run_hook("tool", {"tool_name": tool, "tool_input": inp})
+                self.assertNotIn("deny", result.stdout)
+
     def test_plugin_snapshots_are_read_only(self):
         """Installed snapshots reject writes; the source repo and reads stay open."""
         snap = "/Users/x/.cl" + "aude/rem" + "ote/plugins/h1/skills/triage/SKILL.md"
