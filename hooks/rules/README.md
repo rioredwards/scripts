@@ -78,3 +78,13 @@ Coverage is hook-visible text, not tool results, streamed commentary, or text
 constructed by executed code. These rules do not scan or rewrite existing files.
 
 Claude subagent registration follows [the hook reference](https://code.claude.com/docs/en/hooks#subagentstop). New registrations require a fresh Claude session.
+
+## Railway
+
+Agents never change prod. `railway-mcp-read-only` denies every Railway MCP write tool
+(set/create/delete/update/connect/generate, redeploy, restart, accept-deploy, railway-agent)
+plus `list-variables`, so values never reach a transcript. `railway-cli-read-only` denies the
+`railway` CLI subcommands that write, deploy, or expose variables (`up`, `down`, `variables`,
+`run`, `shell`, `ssh`, `connect`, `api`, and the rest); `status`, `logs`, `metrics`, `list`,
+`deployment list`, `service list`, `domain list`, `docs` stay open. Deny list, not allow
+list, so `railway logs && railway up` cannot slip through. Ledger: L-0114.
