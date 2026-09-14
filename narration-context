@@ -25,12 +25,12 @@
 #   HOOK_SESSION_ID       turn counter, issue lookup, and the session goal
 #   HOOK_CWD              repo/branch/worktree are derived from this
 #
-# The session goal comes from `session-handoff peek` (agent-sessions), not from
-# parsing the transcript here: see the note at the call site.
+# The session goal comes from `session-handoff peek --overview` (agent-sessions)
+# on every turn, not from parsing the transcript here: see the call site.
 #
-# Per-session state (turn number, goal, resolved issue) is cached under
-# ~/.cache/note-on-turn/sessions/ so the transcript is parsed and the issue
-# looked up once, not on every turn.
+# Per-session state (turn number, resolved issue) is cached under
+# ~/.cache/note-on-turn/sessions/ so the issue is looked up once, not on every
+# turn.
 #
 # Never fails the caller. Any fact that cannot be established is dropped and
 # the block prints without it; a completely empty block prints nothing at all.
@@ -121,27 +121,21 @@ if [ -n "$sid" ] && command -v jq >/dev/null 2>&1; then
     [ -n "$prev" ] || prev='{}'
 
     turn="$(printf '%s' "$prev" | jq -r '(.turn // 0) + 1')"
-    goal="$(printf '%s' "$prev" | jq -r '.goal // ""')"
     issue="$(printf '%s' "$prev" | jq -r '.issue // ""')"
     issue_checked="$(printf '%s' "$prev" | jq -r '.issue_checked // 0')"
 
-    # The session's first user prompt is the closest thing to a stated goal.
-    #
-    # Getting it right is not a `head -1` on the transcript: the first user
-    # record is usually a hook banner, a `<local-command-caveat>`, a slash
-    # command or a system-reminder preamble. agent-sessions already solved this
-    #: `peek`'s `.session.first` is wrapper-stripped and deduped, measured
-    # against a corpus rather than guessed at: and turn-end/dispatch already
-    # refreshes its index after every turn, so the current session is in there.
-    # spin-check.sh reads the same field for the same reason.
-    #
-    # Costs ~60ms and is captured once per session. Unavailable or empty (turn 1
-    # can beat the indexer) leaves it blank, and the fact is simply dropped.
-    if [ -z "$goal" ] && [ -n "${HOOK_AGENT:-}" ] && command -v session-handoff >/dev/null 2>&1; then
+    # The session goal is agent-sessions' summary of the session once it has one,
+    # and its first typed prompt until then (`.session.first` is wrapper-stripped
+    # and deduped, not a `head -1` on the transcript). Read fresh on every turn
+    # (about 100ms) through `peek --overview`, so the goal follows the session as
+    # its summary lands and refreshes; a first prompt cached on turn 1 went stale
+    # the moment the work moved on. Unavailable or empty (turn 1 can beat the
+    # indexer) leaves it blank, and the fact is simply dropped.
+    if [ -n "${HOOK_AGENT:-}" ] && command -v session-handoff >/dev/null 2>&1; then
       goal="$(session-handoff peek "${HOOK_AGENT}:${sid}" \
-                --format json --messages 1 --chars 400 2>/dev/null \
-              | jq -r '.session.first // .session.title // ""' 2>/dev/null \
-              | tr '\n' ' ' | cut -c1-240)"
+                --format json --overview --tokens 200 2>/dev/null \
+              | jq -r 'if (.summary // "") != "" then .summary else (.session.first // .session.title // "") end' 2>/dev/null \
+              | tr '\n' ' ' | cut -c1-600)"
       case "$goal" in '(no preview)'|null) goal="" ;; esac
     fi
 
@@ -162,9 +156,9 @@ if [ -n "$sid" ] && command -v jq >/dev/null 2>&1; then
       fi
     fi
 
-    jq -n --argjson turn "${turn:-1}" --arg goal "$goal" --arg issue "$issue" \
+    jq -n --argjson turn "${turn:-1}" --arg issue "$issue" \
           --argjson checked "${issue_checked:-0}" \
-      '{turn:$turn, goal:$goal, issue:$issue, issue_checked:$checked}' \
+      '{turn:$turn, issue:$issue, issue_checked:$checked}' \
       > "$state_file" 2>/dev/null || true
   fi
 fi
@@ -180,8 +174,9 @@ fi
 # Per-Mac on purpose: ~/.cache is local, and "the Mac Mini" is exactly the fact
 # that should be spoken when Rio's attention moves between machines.
 #
-# Time is unchanged within the same clock hour. Turn, goal and issue are
-# unchanged for the rest of a session once its first turn said them. Caller
+# Time is unchanged within the same clock hour. Turn and issue are unchanged
+# for the rest of a session once its first turn said them; the goal only while
+# it still reads the same (a summary landing or refreshing changes it). Caller
 # facts (-f) are never marked: the caller knows whether its fact is new.
 last_file="$HOME/.cache/note-on-turn/last-facts.json"
 hour="$(date '+%Y-%m-%d-%H' 2>/dev/null || true)"
@@ -199,14 +194,14 @@ if command -v jq >/dev/null 2>&1; then
   same worktree "$worktree" && mark Worktree
   if same session "$sid"; then
     [ -n "$turn" ] && mark Turn
-    [ -n "$goal" ] && mark "Session goal"
+    same goal "$goal" && mark "Session goal"
     [ -n "$issue" ] && mark Issue
   fi
   mkdir -p "$(dirname "$last_file")" 2>/dev/null || true
   jq -n --arg hour "$hour" --arg machine "$machine" --arg agent "$agent" \
         --arg project "$project" --arg branch "$branch" --arg worktree "$worktree" \
-        --arg session "$sid" \
-    '{hour:$hour, machine:$machine, agent:$agent, project:$project, branch:$branch, worktree:$worktree, session:$session}' \
+        --arg session "$sid" --arg goal "$goal" \
+    '{hour:$hour, machine:$machine, agent:$agent, project:$project, branch:$branch, worktree:$worktree, session:$session, goal:$goal}' \
     > "$last_file" 2>/dev/null || true
 fi
 

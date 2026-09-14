@@ -137,11 +137,12 @@ THREAD="$(jq -rc '
 
 # --- NARRATIVE via session-handoff peek -----------------------------------
 # Reuse the /session-handoff extraction: wrapper-stripped, deduped, indexed.
-# `.messages` = recent assistant reasoning + notable errors/results, trimmed.
+# `.messages` = a start-middle-end window of the transcript within a token
+# budget (agent-sessions window.py), so the latest turns are always present.
 NARRATIVE=""
 CTX_SOURCE="fallback"
 if command -v session-handoff >/dev/null 2>&1; then
-  PEEK="$(session-handoff peek "claude:${SESSION_ID}" --format json --messages 16 --chars 6000 2>/dev/null || true)"
+  PEEK="$(session-handoff peek "claude:${SESSION_ID}" --format json --tokens 1500 2>/dev/null || true)"
   if [ -n "$PEEK" ]; then
     NARRATIVE="$(printf '%s' "$PEEK" | jq -r '
       .messages[]?
