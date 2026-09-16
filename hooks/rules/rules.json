@@ -151,7 +151,7 @@
       "on": "tool",
       "match": {
         "tool": "^(Write|Edit|MultiEdit|NotebookEdit)$|(^|[._])apply_patch$",
-        "content": "\u2014"
+        "content": "—"
       },
       "do": "deny",
       "text": "BLOCKED: Em dashes are not allowed in files (code, comments, docs, configs). Rewrite with a period, comma, colon, parentheses, or ordinary hyphen. Do not work around this by encoding an em dash."
@@ -161,7 +161,7 @@
       "on": "tool",
       "match": {
         "tool": "^(Bash|exec_command|shell)$",
-        "input": "(?s)^(?=.*\u2014).*(sed[[:space:]]+-i|perl[[:space:]]+-[a-z]*i|\\btee[[:space:]]|(cat|echo|printf)[^|>;&]*>(?![[:space:]]*(/dev/null([^[:alnum:]_./-]|$)|&)))"
+        "input": "(?s)^(?=.*—).*(sed[[:space:]]+-i|perl[[:space:]]+-[a-z]*i|\\btee[[:space:]]|(cat|echo|printf)[^|>;&]*>(?![[:space:]]*(/dev/null([^[:alnum:]_./-]|$)|&)))"
       },
       "unless": "(git[[:space:]]+commit|gh[[:space:]]+(pr|issue|api|release))",
       "do": "deny",
@@ -196,6 +196,28 @@
       },
       "do": "deny",
       "text": "BLOCKED: railway CLI is read-only for agents. Writes, deploys, and anything that exposes variables (variables, run, shell, ssh, connect, api) are Rio's. Allowed: railway status, logs, metrics, list, deployment list, service list, domain list, docs."
+    },
+    {
+      "id": "tooling-must-still-run",
+      "on": "tool",
+      "match": {
+        "tool": "^(Edit|Write|NotebookEdit)$",
+        "content": "(/Users/[^/]+|~|\\$HOME)/(scripts|tools|\\.dotfiles)/"
+      },
+      "unless": "agent-skills/|hooks/rules/|\\.agents/AGENTS\\.md",
+      "do": "remind",
+      "text": "You are changing one of Rio's personal tools. Before you finish, run it once the way he would: no special flags, no warm state, no session you already have open. His rule: the work is done when the next person can run it, not when the code is written. A tool left broken turns a one-minute task into his whole morning. If you genuinely cannot run it here (needs credentials, a device, his screen), name it as unverified in your reply instead of leaving it assumed. Nudge, not a block."
+    },
+    {
+      "id": "tooling-must-still-run-bash",
+      "on": "tool",
+      "match": {
+        "tool": "^Bash$",
+        "input": "(?s)^(?=.*(/Users/[^/]+|~|\\$HOME)/(scripts|tools|\\.dotfiles)/).*(<<|>>|sed[[:space:]]+-i|(echo|printf)[^|>;&]*>(?![[:space:]]*/dev/null([^[:alnum:]_./-]|$)))"
+      },
+      "unless": "agent-skills/|hooks/rules/|\\.agents/AGENTS\\.md",
+      "do": "remind",
+      "text": "This writes into one of Rio's personal tools. Before you finish, run it once the way he would: no special flags, no warm state. The work is done when the next person can run it, not when the code is written. If you cannot run it here, name it as unverified in your reply. Nudge, not a block."
     }
   ]
 }
