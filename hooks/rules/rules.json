@@ -126,6 +126,17 @@
       "text": "BLOCKED: Rio never wants a PR opened as a draft unless he asked for one in this conversation. Re-run without `--draft`/`-d`. If he did explicitly ask, prefix the command with `RIO_DRAFT_OK=1 `."
     },
     {
+      "id": "no-piped-git-push",
+      "on": "tool",
+      "match": {
+        "tool": "^(Bash|exec_command|shell)$",
+        "input": "(^|[\\n;&|(){}`[:space:]])git([[:space:]]+-[^[:space:]]+([[:space:]]+[^-[:space:]][^[:space:]]*)?)*[[:space:]]+push(([^\\n;|&]|>&)*)\\|(?!\\|)"
+      },
+      "unless": "pipefail|PIPESTATUS",
+      "do": "deny",
+      "text": "Blocked: a pipe hides git push's exit code, so a push the pre-push hook refused ends with exit 0 and gets reported as done. Run `git push` unpiped; its output is short. If you must pipe it, start the command with `set -o pipefail;`."
+    },
+    {
       "id": "no-handmade-svg",
       "on": "tool",
       "match": {

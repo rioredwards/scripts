@@ -146,6 +146,34 @@ class RulesTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("no-fallbacks", result.stderr)
 
+    def test_piped_git_push_is_blocked(self):
+        """A pipe turns a refused push into exit 0; unpiped or pipefail pushes pass."""
+        blocked = [
+            "git push 2>&1 | tail -12",
+            "cd repo && git push -u origin feat/x 2>&1 | tail",
+            "git -C ~/repo push |& tee push.log",
+            "git -c core.hooksPath=.githooks push origin HEAD | cat",
+            "out=$(git push 2>&1 | tail -3)",
+        ]
+        allowed = [
+            "git push",
+            "git push -u origin feat/x 2>&1",
+            "set -o pipefail && git push 2>&1 | tail -12",
+            "git push 2>&1 | tail -5; echo ${PIPESTATUS[0]}",
+            "git push && gh pr view 1 | head",
+            "git log --oneline @{u}..HEAD | head",
+            "git stash push -m wip | cat",
+        ]
+        for command in blocked:
+            with self.subTest(blocked=command):
+                out = self.run_hook("tool", {"tool_name": "Bash", "tool_input": {"command": command}})
+                self.assertIn("git push's exit code", out.stdout)
+                self.assertEqual(json.loads(out.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
+        for command in allowed:
+            with self.subTest(allowed=command):
+                out = self.run_hook("tool", {"tool_name": "Bash", "tool_input": {"command": command}})
+                self.assertNotIn("git push's exit code", out.stdout + out.stderr)
+
     def test_railway_is_read_only(self):
         """Railway writes and variable values are Rio's; deploy state and logs stay readable."""
         ids = {"projectId": "p", "serviceId": "s"}
