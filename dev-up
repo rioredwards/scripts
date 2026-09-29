@@ -6,7 +6,9 @@
 # tailnet-reachable port) inside a herdr pane, waits for the URL, remembers it
 # for the statusline, and prints it. No port hunting, no pane surveys, no
 # guessing. If a server for this checkout is already up, prints its URL and
-# does nothing else.
+# does nothing else. Also self-heals the two things that used to strand it:
+# a dead Tailscale Serve mapping squatting on 443 (reclaimed, so the app keeps
+# its usual URL) and a stopped herdr server (started headless).
 #
 #   dev-up                 # detect the start script, start, print URL
 #   dev-up -- <command...> # start this exact command instead of detecting
@@ -71,14 +73,127 @@ if ! pgrep -f 'portless proxy start' >/dev/null 2>&1; then
     || die "could not start the portless proxy. Run it yourself and read the error: portless proxy start --port 1355 --https"
 fi
 
+# ── 3b. Reclaim Tailscale Serve ports whose backend is dead ──────────────────
+# portless only removes its `tailscale serve` mapping on a graceful exit (it
+# traps SIGINT/SIGTERM, not SIGHUP), so when herdr stops and kills the pane the
+# mapping outlives the app, and the next run drifts from :443 to :8443 and
+# every doc pointing at the usual URL breaks. Reclaim a mapping in portless's
+# port range only if nothing listens on its proxied local port AND no live
+# portless supervisor owns that port (portless registers the mapping before the
+# app listens). A live backend is never touched: see serve_explain below.
+serve_check() {  # $1 = reclaim | explain [URL]
+  SERVE_MODE="$1" SERVE_URL="${2:-}" python3 - <<'PY'
+import json, os, re, socket, subprocess, sys
+from urllib.parse import urlparse
+
+PORTLESS_PORTS = {443, *range(8443, 8451)}
+
+def sh(*a):
+    return subprocess.run(a, capture_output=True, text=True)
+
+def status():
+    r = sh("tailscale", "serve", "status", "--json")
+    if r.returncode:
+        sys.exit(f"dev-up: `tailscale serve status --json` failed: {(r.stderr or r.stdout).strip()}. Is Tailscale up? Run: tailscale status")
+    return json.loads(r.stdout or "{}").get("Web", {})
+
+def backends(handlers):
+    """Local proxy ports of a mapping, or None if any handler is not a local proxy."""
+    ports = []
+    for h in handlers.values():
+        u = urlparse(h.get("Proxy", ""))
+        if u.hostname not in ("127.0.0.1", "localhost", "::1") or not u.port:
+            return None
+        ports.append(u.port)
+    return ports or None
+
+def alive(port):
+    with socket.socket() as s:
+        s.settimeout(1)
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+def pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+def routes():
+    f = os.path.join(os.environ.get("PORTLESS_STATE_DIR", os.path.expanduser("~/.portless")), "routes.json")
+    try:
+        return json.load(open(f))
+    except FileNotFoundError:
+        return []
+
+def owner(https_port):
+    for r in routes():
+        if r.get("tailscaleHttpsPort") == https_port:
+            return r
+    return None
+
+def mappings():
+    out = {}
+    for key, cfg in status().items():
+        m = re.search(r":(\d+)$", key)
+        if m:
+            out[int(m.group(1))] = backends(cfg.get("Handlers", {}))
+    return out
+
+mode = os.environ["SERVE_MODE"]
+if mode == "reclaim":
+    for port, bk in sorted(mappings().items()):
+        if port not in PORTLESS_PORTS or not bk or any(alive(b) for b in bk):
+            continue
+        o = owner(port)
+        if o and pid_alive(o.get("pid", 0)):
+            print(f"dev-up: leaving dead serve mapping :{port} -> {bk} alone, live portless supervisor pid {o['pid']} ({o['hostname']}) owns it", file=sys.stderr)
+            continue
+        print(f"dev-up: reclaiming stale tailscale serve :{port} (backend 127.0.0.1:{bk[0]} is dead, no live portless owner)", file=sys.stderr)
+        r = sh("tailscale", "serve", f"--https={port}", "off")
+        if r.returncode or port in mappings():
+            sys.exit(f"dev-up: could not remove stale serve :{port}: {(r.stderr or r.stdout).strip()}. Run it yourself: tailscale serve --https={port} off")
+else:  # explain: the started app is not on the usual 443, say who holds it
+    url = urlparse(os.environ["SERVE_URL"])
+    if not url.port or url.port == 443:
+        sys.exit(0)
+    held = mappings().get(443, "absent")
+    if held == "absent":
+        why = "nothing maps :443 now (it was held while this app started)"
+    else:
+        o = owner(443)
+        who = f"portless app {o['hostname']} (pid {o['pid']})" if o else "a mapping portless did not create"
+        state = "alive" if held and any(alive(b) for b in held) else "dead but owned by a live supervisor"
+        why = f"held by {who}, backend {held} {state}"
+    print(f"dev-up: WARNING this app is on :{url.port}, NOT the usual https://{url.hostname} (443). 443 is {why}. "
+          f"Stop that app (or run: tailscale serve --https=443 off) and rerun dev-up if this app should own 443.", file=sys.stderr)
+PY
+}
+serve_check reclaim
+
 # ── 4. A herdr pane, split off one that already lives in this repo ────────────
 command -v herdr >/dev/null || die "herdr not found on PATH ($PATH). Long-running servers must run in a herdr pane. Installed already? This shell's PATH is missing its directory. Otherwise run: brew install herdr"
 herr="$(mktemp)"; trap 'rm -f "$herr"' EXIT
-if ! snap="$(herdr api snapshot 2>"$herr")"; then
-  # herdr reports why on stderr as JSON (protocol_mismatch, no socket, ...).
-  hmsg="$(python3 -c 'import json,sys
-try: print(json.load(open(sys.argv[1]))["error"]["message"])
-except Exception: pass' "$herr" 2>/dev/null)"
+herdr_err() {  # $1 = code | message: field of herdr's JSON error on stderr
+  python3 -c 'import json,sys
+try: print(json.load(open(sys.argv[1]))["error"][sys.argv[2]])
+except Exception: pass' "$herr" "$1" 2>/dev/null
+}
+if ! snap="$(herdr api snapshot 2>"$herr")" && [[ "$(herdr_err code)" == server_not_running ]]; then
+  # The server dies with a reboot or `herdr server stop`. Start it headless (no
+  # TUI needed; Rio's `herdr` attaches to it later). It outlives this shell.
+  hlog="${TMPDIR:-/tmp}/dev-up-herdr-server.log"
+  say "dev-up: herdr server is not running, starting it headless (log: $hlog)"
+  (nohup herdr server >"$hlog" 2>&1 </dev/null &)
+  for _ in $(seq 1 20); do
+    sleep 0.5
+    snap="$(herdr api snapshot 2>"$herr")" && break
+  done
+fi
+if [[ -z "${snap:-}" ]]; then
+  hmsg="$(herdr_err message)"
   die "herdr api snapshot failed: ${hmsg:-$(tr -d "\r" <"$herr" | head -3)}"
 fi
 main_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
@@ -93,7 +208,11 @@ pid = pick(lambda c: c==root) or pick(lambda c: c.startswith(root+"/")) \
    or pick(lambda c: c==main) or pick(lambda c: c.startswith(main+"/")) \
    or (panes[0]["pane_id"] if panes else "")
 print(pid)')"
-[[ -n "$src" ]] || die "herdr is running but has no panes. Open Herdr (run: herdr), then rerun: dev-up"
+if [[ -z "$src" ]]; then
+  # Fresh server, nothing to split from: give it a workspace rooted in this repo.
+  src="$(herdr workspace create --cwd "$ROOT" --no-focus | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["root_pane"]["pane_id"])')"
+  [[ -n "$src" ]] || die "herdr has no panes and workspace create returned none. Run: herdr workspace create --cwd $ROOT"
+fi
 pane="$(herdr pane split "$src" --direction right --cwd "$ROOT" --no-focus | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["pane"]["pane_id"])')"
 [[ -n "$pane" ]] || die "herdr pane split returned no pane id. Rerun: dev-up. If it repeats, the server is wedged: herdr server stop && herdr (this exits pane processes, so it is Rio's call)"
 sleep 1  # let the shell reach its prompt
@@ -132,5 +251,6 @@ case "$code" in
 esac
 
 dev-url set "$url" >/dev/null 2>&1 || true
+serve_check explain "$url"
 say "dev-up: ${CMD[*]} is up in herdr pane $pane (HTTP $code)"
 printf '%s pane=%s\n' "$url" "$pane"
