@@ -43,6 +43,9 @@ else
   [[ ${#CMD[@]} -gt 0 ]] || die "no start script found (looked for skeleton/scripts/start_dev.sh, scripts/start_dev.sh, scripts/dev, bin/dev, a package.json dev script). Check RUNBOOK.md, or run: dev-up -- <command>"
 fi
 
+# Tailscale's CLI lives in /usr/local/bin, which ssh's non-interactive PATH lacks.
+command -v tailscale >/dev/null || PATH="$PATH:/usr/local/bin"
+command -v tailscale >/dev/null || die "tailscale not found on PATH ($PATH). Install Tailscale (https://tailscale.com/download), then rerun: dev-up"
 command -v portless >/dev/null || die "portless not found on PATH ($PATH). Installed already? This shell's PATH is missing its directory. Otherwise run: brew install portless"
 
 # ── 2. Already running for this checkout? ─────────────────────────────────────
