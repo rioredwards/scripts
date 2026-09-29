@@ -81,7 +81,7 @@ fi
 # traps SIGINT/SIGTERM, not SIGHUP), so when herdr stops and kills the pane the
 # mapping outlives the app, and the next run drifts from :443 to :8443 and
 # every doc pointing at the usual URL breaks. Reclaim a mapping in portless's
-# port range only if nothing listens on its proxied local port AND no live
+# port range (443, 8443+) only if nothing listens on its proxied local port AND no live
 # portless supervisor owns that port (portless registers the mapping before the
 # app listens). A live backend is never touched: see serve_explain below.
 serve_check() {  # $1 = reclaim | explain [URL]
@@ -89,7 +89,7 @@ serve_check() {  # $1 = reclaim | explain [URL]
 import json, os, re, socket, subprocess, sys
 from urllib.parse import urlparse
 
-PORTLESS_PORTS = {443, *range(8443, 8451)}
+PORTLESS_PORTS = {443, *range(8443, 9000)}  # portless counts past 8450 once its pool is full
 
 def sh(*a):
     return subprocess.run(a, capture_output=True, text=True)
