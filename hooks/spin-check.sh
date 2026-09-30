@@ -3,7 +3,7 @@
 #
 # Fires from a global PostToolUse hook. Every Nth tool call SINCE RIO LAST SPOKE
 # it sends a digest of
-# the recent transcript to a DIFFERENT model (gpt-5.6-luna via agent-router) and asks
+# the recent transcript to a DIFFERENT model (gpt-6-luna via agent-router) and asks
 # the one question a stuck agent never asks itself: "am I spinning or tunnel-
 # visioned?" If the outside model says yes, its course-correction is injected
 # back into the running session (stderr + exit 2: the PostToolUse feedback path).
@@ -39,7 +39,7 @@
 #   AGENT_SPIN_CHECK           on | off   (default off: dormant until enabled)
 #   AGENT_SPIN_CHECK_EVERY     fire every Nth tool call since Rio's last
 #                              message                         (default 20)
-#   AGENT_SPIN_CHECK_MODEL     reviewer model                  (default gpt-5.6-luna)
+#   AGENT_SPIN_CHECK_MODEL     reviewer model                  (default gpt-6-luna)
 #   AGENT_SPIN_CHECK_PROVIDER  agent-router provider           (default codex)
 #   AGENT_SPIN_CHECK_TIMEOUT   seconds to wait on the reviewer (default 90)
 #   AGENT_SPIN_CHECK_LOG       audit log path (default ~/.cache/spin-check/fires.log;
@@ -86,7 +86,7 @@ fi
 
 EVERY="${AGENT_SPIN_CHECK_EVERY:-20}"
 PROVIDER="${AGENT_SPIN_CHECK_PROVIDER:-codex}"
-MODEL="${AGENT_SPIN_CHECK_MODEL:-gpt-5.6-luna}"
+MODEL="${AGENT_SPIN_CHECK_MODEL:-gpt-6-luna}"
 WAIT="${AGENT_SPIN_CHECK_TIMEOUT:-90}"
 
 # Canonical source-priority and don't-hand-roll rules live in the explore skill;
