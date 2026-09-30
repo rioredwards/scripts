@@ -234,6 +234,8 @@ class RulesTests(unittest.TestCase):
             ("Bash", {"command": "grep -rn foo %s" % snap}),
             ("Bash", {"command": "cp a.md b.md; cat %s" % snap}),
             ("Bash", {"command": "claude plugin update utils@rio-agent-skills"}),
+            # a file that mentions the path is not a write into it
+            ("Write", {"file_path": src, "content": "import('%s')" % old}),
             # documenting the path inside the source repo is not a write to it
             ("Bash", {"command": "cd ~/dev/agent-skills && cat > R.md <<EOF\n%s\nEOF" % snap}),
         ]
