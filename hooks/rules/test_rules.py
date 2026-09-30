@@ -222,6 +222,7 @@ class RulesTests(unittest.TestCase):
             ("Write", {"file_path": old, "content": "hi"}),
             ("Bash", {"command": "cd %s && python3 - <<EOF\nx\nEOF" % snap}),
             ("Bash", {"command": "echo hi > %s" % snap}),
+            ("Bash", {"command": "cd %s && echo hi > a.md" % snap}),
             ("Bash", {"command": "cp a.md %s" % snap}),
             ("Bash", {"command": "mv a.md %s" % snap}),
             ("Bash", {"command": "sed -i '' s/a/b/ %s" % snap}),
@@ -233,6 +234,7 @@ class RulesTests(unittest.TestCase):
             ("Bash", {"command": "diff %s %s" % (src, snap)}),
             ("Bash", {"command": "grep -rn foo %s" % snap}),
             ("Bash", {"command": "cp a.md b.md; cat %s" % snap}),
+            ("Bash", {"command": "cd %s && grep -n x a.md 2>/dev/null; head b.md >&2" % snap}),
             ("Bash", {"command": "claude plugin update utils@rio-agent-skills"}),
             # a file that mentions the path is not a write into it
             ("Write", {"file_path": src, "content": "import('%s')" % old}),
