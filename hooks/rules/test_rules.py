@@ -69,6 +69,7 @@ class RulesTests(unittest.TestCase):
             ("Bash", {"command": "git commit -m \"$(cat <<'EOF'\na " + DASH + " b\n\nCo-Authored-By: X <x@y.z>\nEOF\n)\""}),
             ("exec_command", {"cmd": "echo " + DASH}),
             ("mcp__service__update", {"command": "update", "body": DASH}),
+            ("Bash", {"command": "python3 -c 'print(\"<script type=application/json>" + DASH + "\")'"}),
         ]
         for agent in ("claude", "codex"):
             for name, data in blocked:

@@ -172,7 +172,7 @@
       "on": "tool",
       "match": {
         "tool": "^(Bash|exec_command|shell)$",
-        "input": "(?s)^(?=.*—).*(sed[[:space:]]+-i|perl[[:space:]]+-[a-z]*i|\\btee[[:space:]]|(cat|echo|printf)[^|>;&]*>(?![[:space:]]*(/dev/null([^[:alnum:]_./-]|$)|&)))"
+        "input": "(?s)^(?=.*—).*(sed[[:space:]]+-i|perl[[:space:]]+-[a-z]*i|\\btee[[:space:]]|\\b(cat|echo|printf)\\b[^|>;&]*>(?![[:space:]]*(/dev/null([^[:alnum:]_./-]|$)|&)))"
       },
       "unless": "(git[[:space:]]+commit|gh[[:space:]]+(pr|issue|api|release))",
       "do": "deny",
