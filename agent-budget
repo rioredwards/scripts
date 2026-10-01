@@ -24,7 +24,7 @@ STATE="$GIT_DIR/agent-budget"
 WARNED="$GIT_DIR/agent-budget-warned"
 
 # Paths that inflate a diff without being code anyone wrote.
-EXCLUDES=':(exclude,glob)**/pnpm-lock.yaml :(exclude,glob)**/package-lock.json :(exclude,glob)**/yarn.lock :(exclude,glob)**/*.lock :(exclude,glob)**/*.snap :(exclude,glob)**/Cargo.lock :(exclude,glob)**/Package.resolved'
+EXCLUDES=':(exclude,glob)**/pnpm-lock.yaml :(exclude,glob)**/package-lock.json :(exclude,glob)**/yarn.lock :(exclude,glob)**/*.lock :(exclude,glob)**/*.snap :(exclude,glob)**/Cargo.lock :(exclude,glob)**/Package.resolved :(exclude,glob)**/migrations/meta/*_snapshot.json'
 
 cmd="${1:-status}"; [ $# -gt 0 ] && shift
 
