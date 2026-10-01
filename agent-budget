@@ -67,8 +67,8 @@ case "$cmd" in
     # shellcheck disable=SC2086
     tracked="$(git diff --numstat "$BASE" -- . $EXCLUDES | awk '$1!="-"{s+=$1} END{print s+0}')"
     untracked_lines=0; untracked_n=0
-    for f in $(git ls-files --others --exclude-standard); do
-      case "$f" in *lock.yaml|*lock.json|*.lock|*.snap|*Package.resolved) continue ;; esac
+    # shellcheck disable=SC2086
+    for f in $(git ls-files --others --exclude-standard -- . $EXCLUDES); do
       untracked_n=$((untracked_n+1))
       n="$(wc -l < "$f" 2>/dev/null | tr -d ' ')"; untracked_lines=$((untracked_lines + ${n:-0}))
     done
