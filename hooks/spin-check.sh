@@ -20,7 +20,7 @@
 # boundary happened to land. Resetting on each user turn makes the trigger mean
 # what it should: "this agent has taken N actions since a human last touched it."
 #
-# CONTEXT the reviewer sees (three complementary sources):
+# CONTEXT the reviewer sees (complementary sources):
 #   1. conversation (jq over the JSONL): every message Rio wrote, each paired
 #      with the tail of the agent message it answered. This sets the task, so a
 #      redirect or a bare "yes" is judged against what it actually meant.
@@ -29,6 +29,8 @@
 #   3. raw tool-call trace (this script): `TOOL <name> <input>` from the tail of
 #      the JSONL, the exact sequence peek drops. This is what reveals "same action
 #      3x" and "thrashing one file", the highest-confidence loop evidence.
+#   4. the latest subagent brief and 5. the latest agent message, whole: where
+#      unasked rewrites of Rio's text and unchecked claims live (L-0006, L-0012).
 #   If session-handoff is missing/fails, the narrative falls back to a
 #   self-contained jq extraction so the hook still works.
 #
@@ -110,7 +112,9 @@ LOG="${AGENT_SPIN_CHECK_LOG:-$LOG_DIR/fires.log}"
 # Rio's messages with the end of the agent message before it tells the reviewer
 # what "yes" approved, and a later ask visibly replaces the earlier one.
 # Skips tool results, compaction summaries, interrupts and wrapper text. Keeps
-# Rio's first message plus the most recent THREAD_KEEP exchanges.
+# Rio's first message plus the most recent THREAD_KEEP exchanges. Desktop
+# quote-replies start with `<!-- reply -->`; strip it, or the wrapper filter
+# drops exactly the messages where Rio pushes back on a quoted line.
 THREAD_KEEP=20
 THREAD="$(jq -rc '
   if .type=="assistant" then
@@ -119,6 +123,7 @@ THREAD="$(jq -rc '
   elif .type=="user" and (.isMeta // false | not) and (.isCompactSummary // false | not) then
     (.message.content // empty)
     | (if type=="string" then . else (map(select(.type=="text") | .text) | join(" ")) end)
+    | sub("^\\s*<!-- reply -->"; "")
     | gsub("\\s+"; " ")
     | select(test("^ *(<|$|\\[Request interrupted|Caveat:|Base directory for this skill|This session is being continued)") | not)
     | "U\t" + .[0:500]
@@ -177,6 +182,32 @@ TRACE="$(tail -n 200 "$TRANSCRIPT" 2>/dev/null | jq -rc '
   | "TOOL " + (.name // "?") + " " + ((.input | tostring) | gsub("\\s+"; " ") | .[0:200])
 ' 2>/dev/null | tail -n 24)"
 
+# --- LATEST SUBAGENT BRIEF: what an orchestrator told a helper to change ---
+# The trace trims each input to 200 chars, so a brief's change list (where an
+# unasked rewrite of Rio's wording hides) is invisible there.
+BRIEF="$(tail -n 200 "$TRANSCRIPT" 2>/dev/null | jq -rc '
+  select(.type=="assistant")
+  | (.message.content // [])[]?
+  | select(.type=="tool_use" and (.name=="Agent" or .name=="Task"))
+  | (.input.prompt // "") | gsub("\\s+"; " ") | .[0:3000]
+' 2>/dev/null | tail -n 1)"
+[ -n "$BRIEF" ] || BRIEF="(none in view)"
+
+# --- LATEST AGENT MESSAGE, whole: the narrative cuts each to 400 chars, which
+# hides the claims and announced changes a report makes past its opening.
+# Only one written since the last incoming message: an older one read as the
+# answer to Rio's newest message (a stale "still waiting on you" after "merged").
+LAST_MSG="$(tail -n 200 "$TRANSCRIPT" 2>/dev/null | jq -rc '
+  if .type=="assistant" then
+    (.message.content // [])[]? | select(.type=="text")
+    | "A\t" + ((.text // "") | gsub("\\s+"; " ") | .[0:2500])
+  elif .type=="user" and (.isMeta // false | not)
+    and ((.message.content | type)=="string"
+         or ([.message.content[]? | select(.type=="text")] | length) > 0) then "U"
+  else empty end
+' 2>/dev/null | awk -F'\t' '$1=="U" { m="" } $1=="A" { m=$2 } END { print m }')"
+[ -n "$LAST_MSG" ] || LAST_MSG="(none since the last incoming message)"
+
 # Nothing to judge on -> stay silent.
 [ -n "$NARRATIVE$TRACE" ] || exit 0
 [ -n "$TRACE" ] || TRACE="(no tool calls captured)"
@@ -206,6 +237,11 @@ COURSE-CORRECT only on unmistakable evidence of:
   set; the constraint may be what's wrong. Ask Rio.
 - OVERRUN: effort far past what Rio's latest request implies. Ask Rio.
 - PING-PONG: trading turns with another agent without converging.
+- UNASKED EDIT: changing wording, labels, copy or an approved design Rio did
+  not ask to change, including via a subagent brief. Keep his text; ask Rio.
+- UNVERIFIED CLAIM: the agent states as fact what code, a rule, a legacy app or
+  a past decision says, with no tool call in view that checked it. Verify it
+  or label it a guess.
 
 Output \`COURSE-CORRECT: <=2 sentences\` citing evidence and one concrete
 alternative. No generic advice or preamble. When in doubt, ON TRACK.
@@ -221,6 +257,12 @@ $NARRATIVE
 
 RECENT TOOL CALLS (the action sequence: read this for loops/thrash):
 $TRACE
+
+LATEST SUBAGENT BRIEF (what the agent told a helper to build or change):
+$BRIEF
+
+LATEST AGENT MESSAGE (whole: check its claims and announced changes):
+$LAST_MSG
 EOF
 
 # Debug escape hatch: dump the assembled prompt and exit before calling the
