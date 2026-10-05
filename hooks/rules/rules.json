@@ -253,7 +253,7 @@
       "id": "ask-needs-step-5",
       "on": "response",
       "match": {
-        "text": "(?i)❓|\\byour call\\b|\\b(want|like) me to\\b[^?\\n]*\\?|\\b(shall|should) I\\b[^?\\n]*\\?"
+        "text": "(?i)❓|\\byour (call|pick)\\b|\\b((want|like) me|should|shall (i|we)|(ok|okay) to|approve|which (one|of|do you|should|would)|(can|may) (i|we)|go ahead|do you (want|prefer)|yes ?/ ?no|or (leave|keep|skip|drop|not)|worth)\\b[^?\\n]*\\?|(^|\\n)[^\\w\\n]*(want|build|include|add|bump|kill|merge|fold|re-?run|run|file|close|keep|drop|ship|push|delete|remove|switch|split|start|use|try|open|turn|move|revive|raise|apply|fix|make|land|commit|update|install|restart|send|draft|park|defer|skip|exclude|replace|promote|port|wire|enable|disable|retry|archive|post|resume|queue)\\b[^?\\n]*\\?|▶️[^?\\n]*\\?|\\b(right|ok|okay|yes)\\?"
       },
       "unless": "(?i)why you:",
       "do": "remind",

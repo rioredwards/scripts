@@ -51,6 +51,14 @@ class RulesTests(unittest.TestCase):
         for text, code in (("❓ Your call on the key: keep or remove?", 2),
                            ("❓ Merge to prod?\nWhy you: it ships to customers.", 0),
                            ("Want me to make that edit in agent-skills?", 2),
+                           ('Build the age gate?', 2),
+                           ('▶️ Next card: #445?', 2),
+                           ('Should the webview be mini-only?', 2),
+                           ('Two-line guard, or leave it?', 2),
+                           ('Yes / no / change?', 2),
+                           ('Okay to merge?', 2),
+                           ('Merged? No, the PR waits on CI.', 0),
+                           ('Tests pass. Built the age gate.', 0),
                            ("Kept the key and labeled it.", 0)):
             with self.subTest(text=text):
                 result = self.run_hook("response", {"last_assistant_message": text})
