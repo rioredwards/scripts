@@ -19,7 +19,10 @@ CMD="$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)"
 SID="$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)"
 [ -n "$CMD" ] && [ -n "$SID" ] || exit 0
 
+# Cheap prefilter, then the real check: an actual invocation, not a quoted mention.
 printf '%s' "$CMD" | grep -Eq 'gh[[:space:]]+issue[[:space:]]+(create|edit)' || exit 0
+printf '%s' "$CMD" | "$(dirname "$0")/lib/cmd-invokes" 'gh\s+issue\s+(create|edit)'
+[ $? -eq 1 ] && exit 0  # 1 = not invoked; a broken helper (2+) stays gated, loudly
 
 # Issue URLs from the tool response only (not the command, which may merely
 # reference other issues). `gh issue create/edit` print the issue URL.

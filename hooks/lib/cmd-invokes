@@ -1,0 +1,41 @@
+#!/usr/bin/perl
+# cmd-invokes: exit 0 if the shell command on stdin actually runs a command
+# matching REGEX (a perl regex for the command words, e.g. 'gh\s+issue\s+create').
+#
+#   printf '%s' "$CMD" | cmd-invokes 'gh\s+issue\s+(create|edit)'
+#
+# "Runs" means at command position (start, or after ; & | ( { ` newline,
+# then/do/else, env assignments, command/exec/env/sudo/time/nohup) and outside
+# inert quotes. Quoted text is inert unless it is a shell payload (after -c or
+# `ssh host`) or a double-quoted string holding $( ) or backticks. So
+# `jq 'test("gh issue create")'` and `grep "gh issue edit"` do not match.
+use strict;
+use warnings;
+
+my $want = shift @ARGV or die "usage: cmd-invokes REGEX < command\n";
+
+sub strip {
+  my ($s) = @_;
+  my ($out, $i, $n) = ('', 0, length $s);
+  while ($i < $n) {
+    my $c = substr($s, $i, 1);
+    if ($c eq '\\') { $out .= substr($s, $i, 2); $i += 2; next; }
+    if ($c ne "'" && $c ne '"') { $out .= $c; $i++; next; }
+    my $j = $i + 1;
+    while ($j < $n && substr($s, $j, 1) ne $c) {
+      $j++ if $c eq '"' && substr($s, $j, 1) eq '\\';
+      $j++;
+    }
+    my $body = substr($s, $i + 1, $j - $i - 1);
+    my $payload = $out =~ /(?:-c|\bssh(?:\s+-\S+)*\s+\S+)\s+$/;
+    if ($payload) { $out .= "\n" . strip($body) . "\n"; }
+    elsif ($c eq '"' && $body =~ /\$\(|`/) { $out .= "\n" . strip($body) . "\n"; }
+    else { $out .= '""'; }
+    $i = $j + 1;
+  }
+  return $out;
+}
+
+my $cmd = strip(do { local $/; <STDIN> } // '');
+my $prefix = '(?:^|[\n;&|({`])\s*(?:\w+=\S*\s+)*(?:(?:then|do|else|!|command|exec|env|sudo|time|nohup)\s+)*(?:\S*/)?';
+exit($cmd =~ /$prefix(?:$want)(?:\s|$|[;&|)])/m ? 0 : 1);
