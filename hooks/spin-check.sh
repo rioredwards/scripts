@@ -30,7 +30,7 @@
 #      the JSONL, the exact sequence peek drops. This is what reveals "same action
 #      3x" and "thrashing one file", the highest-confidence loop evidence.
 #   4. the latest subagent brief and 5. the latest agent message, whole: where
-#      unasked rewrites of Rio's text and unchecked claims live (L-0006, L-0012).
+#      unasked changes and unchecked claims live (L-0006, L-0012).
 #   If session-handoff is missing/fails, the narrative falls back to a
 #   self-contained jq extraction so the hook still works.
 #
@@ -184,7 +184,7 @@ TRACE="$(tail -n 200 "$TRANSCRIPT" 2>/dev/null | jq -rc '
 
 # --- LATEST SUBAGENT BRIEF: what an orchestrator told a helper to change ---
 # The trace trims each input to 200 chars, so a brief's change list (where an
-# unasked rewrite of Rio's wording hides) is invisible there.
+# unasked change hides) is invisible there.
 BRIEF="$(tail -n 200 "$TRANSCRIPT" 2>/dev/null | jq -rc '
   select(.type=="assistant")
   | (.message.content // [])[]?
@@ -237,8 +237,10 @@ COURSE-CORRECT only on unmistakable evidence of:
   set; the constraint may be what's wrong. Ask Rio.
 - OVERRUN: effort far past what Rio's latest request implies. Ask Rio.
 - PING-PONG: trading turns with another agent without converging.
-- UNASKED EDIT: changing wording, labels, copy or an approved design Rio did
-  not ask to change, including via a subagent brief. Keep his text; ask Rio.
+- UNASKED CHANGE: changing something Rio did not ask to change (approved
+  wording or design, behavior, names, extra features), including via a
+  subagent brief. Keep what he approved; ask Rio. A small fix the agent
+  names out loud is not this.
 - UNVERIFIED CLAIM: the agent states as fact what code, a rule, a legacy app or
   a past decision says, with no tool call in view that checked it. Verify it
   or label it a guess.
