@@ -253,7 +253,7 @@
       "id": "ask-needs-step-5",
       "on": "response",
       "match": {
-        "text": "(?i)❓|\\byour call\\b"
+        "text": "(?i)❓|\\byour call\\b|\\b(want|like) me to\\b[^?\\n]*\\?|\\b(shall|should) I\\b[^?\\n]*\\?"
       },
       "unless": "(?i)why you:",
       "do": "remind",

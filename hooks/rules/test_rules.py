@@ -50,6 +50,7 @@ class RulesTests(unittest.TestCase):
     def test_asks_must_name_step_5(self):
         for text, code in (("❓ Your call on the key: keep or remove?", 2),
                            ("❓ Merge to prod?\nWhy you: it ships to customers.", 0),
+                           ("Want me to make that edit in agent-skills?", 2),
                            ("Kept the key and labeled it.", 0)):
             with self.subTest(text=text):
                 result = self.run_hook("response", {"last_assistant_message": text})
