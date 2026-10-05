@@ -66,8 +66,11 @@ case "$cmd" in
     git merge-base --is-ancestor "$BASE" HEAD 2>/dev/null || die "budget base $(git rev-parse --short "$BASE") is stale (rebase/branch switch), re-run: agent-budget set <loc>"
     # Rebased onto a newer integration branch? The old base is still an ancestor, but
     # everything upstream added since would count as ours. Measure from the split point.
+    # Skipped when working on that branch itself: pushed work would stop counting.
+    upstream="$(git rev-parse --abbrev-ref -q '@{upstream}' 2>/dev/null || true)"
     for ref in origin/dev origin/HEAD; do
       git rev-parse --verify -q "$ref^{commit}" >/dev/null || continue
+      [ "$(git rev-parse --abbrev-ref "$ref")" = "$upstream" ] && continue
       mb="$(git merge-base HEAD "$ref" 2>/dev/null)" || continue
       [ "$mb" != "$BASE" ] && git merge-base --is-ancestor "$BASE" "$mb" && BASE="$mb"
     done
