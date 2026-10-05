@@ -47,6 +47,14 @@ class RulesTests(unittest.TestCase):
             }, delegate=delegate)
             self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_asks_must_name_step_5(self):
+        for text, code in (("❓ Your call on the key: keep or remove?", 2),
+                           ("❓ Step 5: this merges to prod. Merge?", 0),
+                           ("Kept the key and labeled it.", 0)):
+            with self.subTest(text=text):
+                result = self.run_hook("response", {"last_assistant_message": text})
+                self.assertEqual(result.returncode, code, result.stderr)
+
     def test_tool_inputs(self):
         """Em dashes are denied only when they are being written into a file."""
         blocked = [

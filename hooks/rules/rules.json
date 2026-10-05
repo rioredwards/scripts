@@ -248,6 +248,16 @@
       },
       "do": "remind",
       "text": "Your reply cites a PR or issue by number alone. Rio rarely knows what exists, let alone the numbers. Name each one by its title as a markdown link, e.g. [Fix label printing (#924)](https://github.com/owner/repo/pull/924). Look titles up with `gh pr view N --json title,url` or `gh issue view N --json title,url`."
+    },
+    {
+      "id": "ask-needs-step-5",
+      "on": "response",
+      "match": {
+        "text": "(?i)❓|\\byour call\\b"
+      },
+      "unless": "(?i)step 5",
+      "do": "remind",
+      "text": "Your reply puts a decision to Rio. Only decision ladder step 5 may reach him: hard to undo, a big rewrite if wrong, risky (merge, spend, prod data, lost work), or a load-bearing departure from the standard. Tiny and easy to undo? Make the obvious call, label it in the code if off-standard, and report it in one line. A real step 5? Keep the question and name it: \"Step 5: <which reason>\". Not a question at all? Drop the ❓."
     }
   ]
 }
