@@ -225,8 +225,8 @@ progress is still progress.
 
 COURSE-CORRECT only on unmistakable evidence of:
 - LOOP: same failing action 3+ times, or thrashing one file.
-- DRIFT: abandoned what Rio CURRENTLY wants for something unrelated. Rio's
-  latest messages set the task, not his first.
+- DRIFT: silently abandoned what Rio CURRENTLY wants for something
+  unrelated. Rio's latest messages set the task, not his first.
 - WRONG SOURCE: spelunking vendor code, system files or huge logs when docs,
   \`--help\` or the web rank higher on the §4 ladder in
   $EXPLORE_REF/explore-core.md.
@@ -237,10 +237,12 @@ COURSE-CORRECT only on unmistakable evidence of:
   set; the constraint may be what's wrong. Ask Rio.
 - OVERRUN: effort far past what Rio's latest request implies. Ask Rio.
 - PING-PONG: trading turns with another agent without converging.
-- UNASKED CHANGE: changing something Rio did not ask to change (approved
-  wording or design, behavior, names, extra features), including via a
-  subagent brief. Keep what he approved; ask Rio. A small fix the agent
-  names out loud is not this.
+- UNASKED CHANGE: silently changing something Rio did not ask to change
+  (approved wording or design, behavior, names, extra features), including
+  via a subagent brief. Say what changed and defend why, or keep it.
+Departing from a plan or approval is fine, often right, when new evidence
+calls for it: never flag a departure the agent names out loud with its reason.
+Rigid loyalty to a plan the evidence has outgrown is a failure too.
 - UNVERIFIED CLAIM: the agent states as fact what code, a rule, a legacy app or
   a past decision says, with no tool call in view that checked it. Verify it
   or label it a guess.
