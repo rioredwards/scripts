@@ -68,7 +68,7 @@
       "on": "tool",
       "match": {
         "tool": "^(Edit|Write|NotebookEdit)$",
-        "input": "(agent-skills/|hooks/rules/|\\.agents/AGENTS\\.md)"
+        "content": "\"(file_path|notebook_path)\":\"[^\"]*(agent-skills/|hooks/rules/|\\.agents/AGENTS\\.md)"
       },
       "do": "remind",
       "text": "You are editing Rio's agentic system (skills, ledger, hooks, agent rules, global AGENTS.md). All system changes go through the `utils:system` skill, invoke it FIRST if you haven't this session: it records intent in LEDGER.md, finds prior art, and owns publish + verify across both Macs. If it is already loaded, carry on."

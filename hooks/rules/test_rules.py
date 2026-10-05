@@ -251,6 +251,23 @@ class RulesTests(unittest.TestCase):
                 out = self.run_hook("tool", {"tool_name": tool, "tool_input": inp})
                 self.assertNotIn("read-only snapshots", out.stdout + out.stderr)
 
+    def test_system_edits_route_to_system_skill(self):
+        """Edit/Write into Rio's system files get the utils:system nudge; other paths do not."""
+        hit = [
+            ("Edit", {"file_path": "/Users/x/dev/agent-skills/LEDGER.md", "old_string": "a", "new_string": "b"}),
+            ("Write", {"file_path": "/Users/x/.dotfiles/.agents/AGENTS.md", "content": "hi"}),
+            ("Edit", {"file_path": "/Users/x/scripts/hooks/rules/rules.json", "old_string": "a", "new_string": "b"}),
+        ]
+        miss = [("Write", {"file_path": "/Users/x/dev/app/README.md", "content": "hi"})]
+        for tool, inp in hit:
+            with self.subTest(hit=inp):
+                out = self.run_hook("tool", {"tool_name": tool, "tool_input": inp})
+                self.assertIn("utils:system", out.stdout)
+        for tool, inp in miss:
+            with self.subTest(miss=inp):
+                out = self.run_hook("tool", {"tool_name": tool, "tool_input": inp})
+                self.assertNotIn("utils:system", out.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
