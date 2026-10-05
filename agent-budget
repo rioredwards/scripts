@@ -10,7 +10,8 @@
 #   agent-budget clear                                # drop it
 #
 # State lives in the repo's .git dir (per worktree, never committed). Counted:
-# added lines vs base, committed or not, untracked files included. Deleted lines
+# added lines vs base (or the newer split point from origin/dev or origin's default
+# branch, after a rebase), committed or not, untracked files included. Deleted lines
 # are free: removing code is rewarded, not penalized. Lockfiles and snapshots
 # are ignored.
 #
@@ -63,6 +64,13 @@ case "$cmd" in
     # A base that isn't an ancestor of HEAD (rebase, branch switch) inflates the diff
     # into a false OVER BUDGET. Fail loud instead of gating falsely.
     git merge-base --is-ancestor "$BASE" HEAD 2>/dev/null || die "budget base $(git rev-parse --short "$BASE") is stale (rebase/branch switch), re-run: agent-budget set <loc>"
+    # Rebased onto a newer integration branch? The old base is still an ancestor, but
+    # everything upstream added since would count as ours. Measure from the split point.
+    for ref in origin/dev origin/HEAD; do
+      git rev-parse --verify -q "$ref^{commit}" >/dev/null || continue
+      mb="$(git merge-base HEAD "$ref" 2>/dev/null)" || continue
+      [ "$mb" != "$BASE" ] && git merge-base --is-ancestor "$BASE" "$mb" && BASE="$mb"
+    done
 
     # shellcheck disable=SC2086
     tracked="$(git diff --numstat "$BASE" -- . $EXCLUDES | awk '$1!="-"{s+=$1} END{print s+0}')"
