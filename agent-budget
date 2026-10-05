@@ -11,9 +11,9 @@
 #
 # State lives in the repo's .git dir (per worktree, never committed). Counted:
 # added lines vs base (or the newer split point from origin/dev or origin's default
-# branch, after a rebase), committed or not, untracked files included. Deleted lines
-# are free: removing code is rewarded, not penalized. Lockfiles and snapshots
-# are ignored.
+# branch, after a rebase), committed or not, untracked files included, renames as
+# their edits only. Deleted lines are free: removing code is rewarded, not
+# penalized. Lockfiles and snapshots are ignored.
 #
 # Exit codes: 0 within budget · 1 over · 3 no budget set · 2 usage/infra error
 set -u
@@ -75,18 +75,21 @@ case "$cmd" in
       [ "$mb" != "$BASE" ] && git merge-base --is-ancestor "$BASE" "$mb" && BASE="$mb"
     done
 
+    # Untracked files join a scratch copy of the index as intent-to-add, so a plain
+    # `mv` pairs as a rename just like `git mv` or a commit. The real index is untouched.
+    idx="$(mktemp)" || die "mktemp failed"; trap 'rm -f "$idx"' EXIT
+    # cp -p keeps the mtime git's racy-clean check compares against. No index yet: git starts one.
+    real="$(git rev-parse --git-path index)"
+    if [ -e "$real" ]; then cp -p "$real" "$idx" || die "copying index failed"; else rm -f "$idx"; fi
+    # Whole repo (:/), so a cwd inside an ignored dir can't fail; --sparse reaches files
+    # outside the cone. The diff's pathspec below does the scoping and excluding.
+    err="$(GIT_INDEX_FILE="$idx" git add -N --sparse -- :/ 2>&1 >/dev/null)" || die "scratch index: $err"
+    # -M30%: a rename edited past git's default 50% similarity counts its edits, not the whole file.
+    # One diff serves both counts: --numstat lines for LOC, --summary "create mode" lines for new files.
     # shellcheck disable=SC2086
-    tracked="$(git diff --numstat "$BASE" -- . $EXCLUDES | awk '$1!="-"{s+=$1} END{print s+0}')"
-    untracked_lines=0; untracked_n=0
-    # shellcheck disable=SC2086
-    for f in $(git ls-files --others --exclude-standard -- . $EXCLUDES); do
-      untracked_n=$((untracked_n+1))
-      n="$(wc -l < "$f" 2>/dev/null | tr -d ' ')"; untracked_lines=$((untracked_lines + ${n:-0}))
-    done
-    loc=$((tracked + untracked_lines))
-    # shellcheck disable=SC2086
-    added="$(git diff --name-only --diff-filter=A "$BASE" -- . $EXCLUDES | wc -l | tr -d ' ')"
-    newfiles=$((added + untracked_n))
+    diff="$(GIT_INDEX_FILE="$idx" git diff -M30% --numstat --summary "$BASE" -- . $EXCLUDES)" || die "git diff failed"
+    loc="$(printf '%s\n' "$diff" | awk -F'\t' 'NF==3 && $1!="-"{s+=$1} END{print s+0}')"
+    newfiles="$(printf '%s\n' "$diff" | grep -c '^ create mode ')"
 
     over=0
     [ "$loc" -gt "$LOC" ] && over=1

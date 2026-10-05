@@ -19,7 +19,7 @@ fi
 git rev-parse -q --verify "$base^{commit}" >/dev/null || { echo "pr-loc: unknown ref: $base" >&2; exit 2; }
 mb=$(git merge-base "$base" HEAD 2>/dev/null) || { echo "pr-loc: no merge-base with $base" >&2; exit 2; }
 
-git -c core.quotePath=false diff --numstat "$mb" HEAD | awk -F'\t' '
+git -c core.quotePath=false diff -M30% --numstat "$mb" HEAD | awk -F'\t' '
 function kind(p,  f) {
   f = p; sub(/.*\//, "", f)
   if (p ~ /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|Cargo\.lock|poetry\.lock|uv\.lock|Gemfile\.lock|go\.sum|composer\.lock)$/ ||
