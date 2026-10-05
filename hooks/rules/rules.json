@@ -255,9 +255,9 @@
       "match": {
         "text": "(?i)❓|\\byour call\\b"
       },
-      "unless": "(?i)step 5",
+      "unless": "(?i)why you:",
       "do": "remind",
-      "text": "Your reply puts a decision to Rio. Only decision ladder step 5 may reach him: hard to undo, a big rewrite if wrong, risky (merge, spend, prod data, lost work), or a load-bearing departure from the standard. Tiny and easy to undo? Make the obvious call, label it in the code if off-standard, and report it in one line. A real step 5? Keep the question and name it: \"Step 5: <which reason>\". Not a question at all? Drop the ❓."
+      "text": "Your reply puts a decision to Rio. Only decision ladder step 4 (versions built and running, his pick queued, work continues) or step 5 (hard to undo, a big rewrite if wrong, risky: merge, spend, prod data, lost work, or a load-bearing departure from the standard) may reach him. Tiny and easy to undo? Make the obvious call, label it in the code if off-standard, and report it in one line. A real step 4 or 5? Keep it, add a plain `Why you: <reason>` line, and give your pick plus 1-2 alternatives. Headless step 5 goes to the ask queue instead. Not a question at all? Drop the ❓."
     }
   ]
 }
