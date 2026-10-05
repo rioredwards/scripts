@@ -239,6 +239,15 @@
       },
       "do": "deny",
       "text": "Blocked: piping a full pytest run through tail/grep throws away most of its output, and agents then rerun the whole suite (about a minute) just to see more. Run it once into a file and read the file: `pytest -q > \"$TMPDIR/pytest.log\" 2>&1; echo exit=$?`, then grep/tail the log. Piping is fine for focused runs (a test file, `::`, `-k`, `--lf`). If a pre-push hook runs the suite, skip the full run before pushing."
+    },
+    {
+      "id": "pr-issue-titles",
+      "on": "response",
+      "match": {
+        "text": "(?i)(\\[[[:space:]]*((pr|issue)[[:space:]]*)?[A-Za-z0-9_./-]*#[0-9]+[[:space:]]*\\]\\(|(?<![A-Za-z0-9_\\[&])#[0-9]{2,6}\\b(?![^\\[\\]\\n]*\\]\\()|\\b(pr|issue)s?[[:space:]]+#?[0-9]{2,6}\\b(?![^\\[\\]\\n]*\\]\\())"
+      },
+      "do": "remind",
+      "text": "Your reply cites a PR or issue by number alone. Rio rarely knows what exists, let alone the numbers. Name each one by its title as a markdown link, e.g. [Fix label printing (#924)](https://github.com/owner/repo/pull/924). Look titles up with `gh pr view N --json title,url` or `gh issue view N --json title,url`."
     }
   ]
 }
