@@ -244,7 +244,7 @@
       "id": "pr-issue-titles",
       "on": "response",
       "match": {
-        "text": "(?i)(\\[[[:space:]]*((pr|issue)[[:space:]]*)?[A-Za-z0-9_./-]*#[0-9]+[[:space:]]*\\]\\(|(?<![A-Za-z0-9_\\[&])#[0-9]{2,6}\\b(?![^\\[\\]\\n]*\\]\\()|\\b(pr|issue)s?[[:space:]]+#?[0-9]{2,6}\\b(?![^\\[\\]\\n]*\\]\\())"
+        "text": "(?i)(\\[[[:space:]]*((pr|pull[[:space:]]+request|issue)[[:space:]]*#?[0-9]+|[A-Za-z0-9_./-]*#[0-9]+|[0-9]+)[[:space:]]*\\]\\([^[:space:]()]+/(pull|issues)/[0-9]+\\b|\\b[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)?#[0-9]+\\b(?![^\\[\\]\\n]*\\]\\()|\\b(pr|pull[[:space:]]+request|issue)s?[[:space:]]+#?[0-9]+\\b(?![^\\[\\]\\n]*\\]\\())"
       },
       "do": "remind",
       "text": "Your reply cites a PR or issue by number alone. Rio rarely knows what exists, let alone the numbers. Name each one by its title as a markdown link, e.g. [Fix label printing (#924)](https://github.com/owner/repo/pull/924). Look titles up with `gh pr view N --json title,url` or `gh issue view N --json title,url`."

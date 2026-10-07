@@ -64,6 +64,35 @@ class RulesTests(unittest.TestCase):
                 result = self.run_hook("response", {"last_assistant_message": text})
                 self.assertEqual(result.returncode, code, result.stderr)
 
+    def test_pr_issue_titles(self):
+        allowed = [
+            'An account record is a distributor entry. Safeway Store #123, account 45678.',
+            'Store #123; order #456; invoice #789; ticket #42.',
+            'Color #123456 and entity &#123; are ordinary text.',
+            '[Fix label printing (#924)](https://github.com/owner/repo/pull/924)',
+            '[Fix label printing (#7)](https://github.com/owner/repo/issues/7)',
+            'Store #123. [Fix label printing (#924)](https://github.com/owner/repo/pull/924)',
+        ]
+        blocked = [
+            'PR #924 is ready.', 'Issue #7 is open.', 'PR 7 is ready.',
+            'Issues #12 and #13 are open.', 'owner/repo#924 is ready.',
+            'toolbox#7 is open.', 'Pull request #7 is ready.',
+            'Pull requests 12 and 13 are open.',
+            '[#924](https://github.com/owner/repo/pull/924)',
+            '[Issue #7](https://github.com/owner/repo/issues/7)',
+            '[#7](https://github.com/owner/repo/issues/7)',
+            '[PR 7](https://github.com/owner/repo/pull/7)',
+            '[7](https://github.com/owner/repo/issues/7)',
+            '[Fix label printing (#924)](https://github.com/owner/repo/pull/924); issue #7 is open.',
+        ]
+        for agent in ('claude', 'codex'):
+            for text in allowed + blocked:
+                with self.subTest(agent=agent, text=text):
+                    result = self.run_hook('response', {'last_assistant_message': text}, agent)
+                    self.assertEqual(result.returncode, 2 if text in blocked else 0, result.stderr)
+                    if text in blocked:
+                        self.assertIn('pr-issue-titles', result.stderr)
+
     def test_tool_inputs(self):
         """Em dashes are denied only when they are being written into a file."""
         blocked = [
