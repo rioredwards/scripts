@@ -68,6 +68,8 @@ SESSION_ID="$(printf '%s' "$INPUT" | jq -r '.session_id // "unknown"')"
 EVENT="$(printf '%s' "$INPUT" | jq -r '.hook_event_name // empty')"
 TRANSCRIPT="$(printf '%s' "$INPUT" | jq -r '.transcript_path // empty')"
 CWD="$(printf '%s' "$INPUT" | jq -r '.cwd // "?"')"
+. "$HOME/scripts/hooks/lib/delegate.sh"
+hook_is_delegate "$INPUT" && exit 0
 
 # --- per-session tool-call counter ----------------------------------------
 STATE_DIR="${TMPDIR:-/tmp}/claude-spin-check"
@@ -86,6 +88,7 @@ fi
 
 [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ] || exit 0
 
+
 EVERY="${AGENT_SPIN_CHECK_EVERY:-20}"
 PROVIDER="${AGENT_SPIN_CHECK_PROVIDER:-codex}"
 MODEL="${AGENT_SPIN_CHECK_MODEL:-gpt-6-luna}"
@@ -100,6 +103,16 @@ EXPLORE_REF="${SKILLS:-$HOME/dev/agent-skills}/plugins/core/skills/explore/ref"
 COUNT=$(( $(cat "$COUNT_FILE" 2>/dev/null || echo 0) + 1 ))
 printf '%s' "$COUNT" > "$COUNT_FILE"
 [ $(( COUNT % EVERY )) -eq 0 ] || exit 0
+
+SOURCE_AGENT=claude
+if [ "$(head -n 1 "$TRANSCRIPT" | jq -r '.type // empty')" = session_meta ]; then
+  SOURCE_AGENT=codex
+  NORMALIZED="$(mktemp -t spin-transcript)"
+  trap 'rm -f "$NORMALIZED"' EXIT
+  jq -c -f "$HOME/scripts/hooks/lib/spin-transcript.jq" "$TRANSCRIPT" > "$NORMALIZED" || exit 1
+  TRANSCRIPT="$NORMALIZED"
+fi
+
 
 LOG_DIR="$HOME/.cache/spin-check"
 mkdir -p "$LOG_DIR"
@@ -147,7 +160,7 @@ THREAD="$(jq -rc '
 NARRATIVE=""
 CTX_SOURCE="fallback"
 if command -v session-handoff >/dev/null 2>&1; then
-  PEEK="$(session-handoff peek "claude:${SESSION_ID}" --format json --tokens 1500 2>/dev/null || true)"
+  PEEK="$(session-handoff peek "${SOURCE_AGENT}:${SESSION_ID}" --format json --tokens 1500 2>/dev/null || true)"
   if [ -n "$PEEK" ]; then
     NARRATIVE="$(printf '%s' "$PEEK" | jq -r '
       .messages[]?

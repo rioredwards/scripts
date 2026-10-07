@@ -36,8 +36,8 @@ fi
 cat <<EOF
 🚨 Context was just compacted mid-core:loop. Last phase skill loaded: ${PHASE}.${COMP:+ Declared composition: ${COMP}. Hold the declared depth; re-route only with a stated reason.}
 The loop protocol likely got lost in the summary, re-anchor before continuing:
-1. Re-invoke core:loop (Skill tool) to reload the orchestration rules.
-2. Every phase transition begins by invoking that phase's skill (core:<phase>). Never do phase work or spawn phase agents without it.
+1. Reload core:loop (Claude: Skill tool; Codex: read SKILL.md).
+2. Load each phase's skill before phase work or delegation.
 3. Re-read the issue (plan of record) per the loop's re-entry steps.
 EOF
 exit 0

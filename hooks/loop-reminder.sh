@@ -49,6 +49,6 @@ fi
 COMP_LINE=""
 [ -n "$COMP" ] && COMP_LINE=" Declared composition: ${COMP}. Hold the declared depth (no extra ceremony, no skipped floors); re-route only with a stated reason, announced and recorded."
 
-jq -n --arg ctx "📌 core:loop active, last phase skill loaded: ${PHASE}.${COMP_LINE} Protocol: every phase transition begins by invoking that phase's skill (Skill tool, core:<phase>) before any phase work or delegation. If you have moved past '${PHASE}' without doing so, invoke the current phase's skill now. If context was compacted, re-invoke core:loop first." \
+jq -n --arg ctx "📌 core:loop active, last phase skill loaded: ${PHASE}.${COMP_LINE} Protocol: load the phase's skill (Claude: Skill tool; Codex: read its SKILL.md) before phase work or delegation. If you have moved past '${PHASE}' without doing so, load the current phase's skill now. If context was compacted, reload core:loop first." \
   '{hookSpecificOutput:{hookEventName:"PostToolUse",additionalContext:$ctx}}'
 exit 0

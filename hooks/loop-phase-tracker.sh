@@ -14,6 +14,16 @@ command -v jq >/dev/null 2>&1 || exit 0
 
 INPUT="$(cat)"
 SKILL="$(printf '%s' "$INPUT" | jq -r '.tool_input.skill // empty' 2>/dev/null)"
+if [ -z "$SKILL" ]; then
+  # Codex loads skills by reading their SKILL.md, rather than a Skill tool.
+  READ="$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // .tool_input.command // empty')"
+  case "$READ" in
+    *cat\ *|*sed\ *|*head\ *|*/SKILL.md)
+      PHASE="$(printf '%s' "$READ" | grep -oE '(plugins/core/skills|\.(codex|agents)/skills)/[a-z-]+/SKILL.md' | tail -1 | awk -F/ '{print $(NF-1)}')"
+      [ -n "$PHASE" ] && SKILL="core:$PHASE"
+      ;;
+  esac
+fi
 SID="$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)"
 [ -n "$SKILL" ] && [ -n "$SID" ] || exit 0
 
