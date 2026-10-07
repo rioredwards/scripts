@@ -10,9 +10,8 @@
 #   dev-ls --json       # same rows as JSON, for tools (Raycast) not humans
 #
 #   dev-ls kill 2       # stop the server on row 2 (or: dev-ls kill straightaway)
-#   dev-ls kill --all   # stop every server listed
 #   dev-ls restart 2    # stop it, then dev-up again in the same checkout
-#   dev-ls prune        # reap dead routes portless is still advertising
+#   dev-ls prune        # expire owned servers/panes whose 12-hour lease ended
 #
 # A target is a row number from the list, or any text matching exactly one row.
 # An ambiguous or unmatched target fails loudly rather than guessing.
@@ -43,14 +42,14 @@ for arg in "$@"; do
   case "$arg" in
     --json) JSON=1 ;;
     -h|--help) sed -n '3,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    --all) [ "$ACTION" = "kill" ] || { echo "dev-ls: --all only works with kill" >&2; exit 2; }
-           TARGET="--all" ;;
+    --all) echo "dev-ls: broad shutdown is disabled; select one owned server" >&2; exit 2 ;;
     -*) echo "dev-ls: unknown option $arg" >&2; exit 2 ;;
     *) if [ "$ACTION" = "list" ]; then FILTER="$arg"; else TARGET="$arg"; fi ;;
   esac
 done
 
-if [ "$ACTION" = "prune" ]; then exec portless prune; fi
+LEASE_TOOL="$(cd "$(dirname "$0")" && pwd)/dev-lease"
+if [ "$ACTION" = "prune" ]; then exec /usr/bin/python3 "$LEASE_TOOL" sweep; fi
 if [ "$ACTION" != "list" ] && [ -z "$TARGET" ]; then
   echo "dev-ls: $ACTION needs a target. Run dev-ls to see the row numbers." >&2
   exit 2
@@ -168,9 +167,7 @@ sort -t"$US" -k1,1n -k6,6 -o "$TMP/rows" "$TMP/rows"
 if [ "$ACTION" != "list" ]; then
   [ -s "$TMP/rows" ] || die_empty "nothing running${FILTER:+ matching \"$FILTER\"}"
 
-  if [ "$TARGET" = "--all" ]; then
-    cp "$TMP/rows" "$TMP/hit"
-  elif printf '%s' "$TARGET" | grep -qx '[0-9]\+'; then
+  if printf '%s' "$TARGET" | grep -qx '[0-9]\+'; then
     sed -n "${TARGET}p" "$TMP/rows" > "$TMP/hit"
     [ -s "$TMP/hit" ] || { echo "dev-ls: no row $TARGET. Run dev-ls to see the rows." >&2; exit 1; }
   else
@@ -178,8 +175,8 @@ if [ "$ACTION" != "list" ]; then
     n="$(wc -l < "$TMP/hit" | tr -d ' ')"
     if [ "$n" = 0 ]; then
       echo "dev-ls: nothing matching \"$TARGET\". Run dev-ls to see what is up." >&2; exit 1
-    elif [ "$n" != 1 ] && [ "$ACTION" = "restart" ]; then
-      echo "dev-ls: \"$TARGET\" matches $n servers; restart takes one. Matches:" >&2
+    elif [ "$n" != 1 ]; then
+      echo "dev-ls: \"$TARGET\" matches $n servers; select exactly one. Matches:" >&2
       cut -d"$US" -f6 "$TMP/hit" >&2; exit 1
     fi
   fi
@@ -190,25 +187,14 @@ if [ "$ACTION" != "list" ]; then
       echo "        Run: dev-ls prune" >&2
       exit 1
     fi
-    if kill "$pid" 2>/dev/null; then
-      for _ in 1 2 3 4 5 6 7 8 9 10; do
-        kill -0 "$pid" 2>/dev/null || break
-        sleep 0.5
-      done
-      kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null
-      echo "🏁 stopped $name (pid $pid)"
-    else
-      echo "🏁 $name was already gone (pid $pid)"
-    fi
+    /usr/bin/python3 "$LEASE_TOOL" stop-pid "$pid" || exit 1
     if [ "$ACTION" = "restart" ]; then
-      portless prune >/dev/null 2>&1 || true
       echo "▶️ restarting in $cwd"
       ( cd "$cwd" && exec dev-up )
       exit $?
     fi
   done < "$TMP/hit"
 
-  portless prune >/dev/null 2>&1 || true
   exit 0
 fi
 

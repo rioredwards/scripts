@@ -21,6 +21,22 @@
 # Agents: this IS the sanctioned dev-server start (RIO_RUN_OK is implied).
 set -euo pipefail
 
+if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
+  sed -n '3,21p' "$0"; exit 0
+fi
+LEASE_TOOL="$(cd "$(dirname "$0")" && pwd)/dev-lease"
+lease=""; herr=""
+herdr() { command herdr --session "${DEV_HERDR_SESSION:-default}" "$@"; }
+cleanup() {
+  status=$?
+  if [[ $status != 0 && -n "$lease" ]]; then
+    /usr/bin/python3 "$LEASE_TOOL" stop "$lease" >&2 || say "dev-up: cleanup failed; inspect lease $lease"
+  fi
+  [[ -z "$herr" ]] || rm -f "$herr"
+  return "$status"
+}
+trap cleanup EXIT
+
 say()  { printf '%s\n' "$*" >&2; }
 die()  { say "dev-up: $*"; exit 2; }
 
@@ -58,9 +74,10 @@ while IFS= read -r pid; do
   if [[ "$pcwd" == "$ROOT" ]]; then
     url="$(printf '%s\n' "$existing" | awk -v p="(pid $pid)" 'index($0,p){f=1;next} f&&/tailscale:/{print $2;exit}')"
     if [[ -n "$url" ]]; then
+      renewed="$(/usr/bin/python3 "$LEASE_TOOL" renew-pid "$pid")"
       dev-url set "$url" >/dev/null 2>&1 || true
       say "dev-up: already running for this checkout (pid $pid)"
-      printf '%s pane=?\n' "$url"
+      printf '%s pane=? lease=%s reused\n' "$url" "$renewed"
       exit 0
     fi
   fi
@@ -177,8 +194,8 @@ PY
 serve_check reclaim
 
 # ── 4. A herdr pane, split off one that already lives in this repo ────────────
-command -v herdr >/dev/null || die "herdr not found on PATH ($PATH). Long-running servers must run in a herdr pane. Installed already? This shell's PATH is missing its directory. Otherwise run: brew install herdr"
-herr="$(mktemp)"; trap 'rm -f "$herr"' EXIT
+type -P herdr >/dev/null || die "herdr not found on PATH ($PATH). Long-running servers must run in a herdr pane. Installed already? This shell's PATH is missing its directory. Otherwise run: brew install herdr"
+herr="$(mktemp)"
 herdr_err() {  # $1 = code | message: field of herdr's JSON error on stderr
   python3 -c 'import json,sys
 try: print(json.load(open(sys.argv[1]))["error"][sys.argv[2]])
@@ -189,7 +206,7 @@ if ! snap="$(herdr api snapshot 2>"$herr")" && [[ "$(herdr_err code)" == server_
   # TUI needed; Rio's `herdr` attaches to it later). It outlives this shell.
   hlog="${TMPDIR:-/tmp}/dev-up-herdr-server.log"
   say "dev-up: herdr server is not running, starting it headless (log: $hlog)"
-  (nohup herdr server >"$hlog" 2>&1 </dev/null &)
+  (nohup herdr --session "${DEV_HERDR_SESSION:-default}" server >"$hlog" 2>&1 </dev/null &)
   for _ in $(seq 1 20); do
     sleep 0.5
     snap="$(herdr api snapshot 2>"$herr")" && break
@@ -216,12 +233,21 @@ if [[ -z "$src" ]]; then
   src="$(herdr workspace create --cwd "$ROOT" --no-focus | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["root_pane"]["pane_id"])')"
   [[ -n "$src" ]] || die "herdr has no panes and workspace create returned none. Run: herdr workspace create --cwd $ROOT"
 fi
-pane="$(herdr pane split "$src" --direction right --cwd "$ROOT" --no-focus | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["pane"]["pane_id"])')"
+created="$(herdr pane split "$src" --direction right --cwd "$ROOT" --no-focus)"
+pane="$(printf '%s' "$created" | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["pane"]["pane_id"])')"
+terminal="$(printf '%s' "$created" | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["pane"]["terminal_id"])')"
 [[ -n "$pane" ]] || die "herdr pane split returned no pane id. Rerun: dev-up. If it repeats, the server is wedged: herdr server stop && herdr (this exits pane processes, so it is Rio's call)"
+lease="$(/usr/bin/python3 "$LEASE_TOOL" create "$pane" "$terminal")"
 sleep 1  # let the shell reach its prompt
 
 # ── 5. Run through portless and wait for the tailnet URL ──────────────────────
-herdr pane run "$pane" "portless run --tailscale ${CMD[*]}" >/dev/null
+launch="$(python3 - "$LEASE_TOOL" "$lease" "${CMD[@]}" <<'PY'
+import os, shlex, sys
+env = ["DEV_LEASE_DIR=" + os.environ.get("DEV_LEASE_DIR", os.path.expanduser("~/.local/state/dev-leases"))]
+print(shlex.join(["exec", "env"] + env + ["/usr/bin/python3", sys.argv[1], "run", sys.argv[2], "portless", "run", "--tailscale"] + sys.argv[3:]))
+PY
+)"
+herdr pane run "$pane" "$launch" >/dev/null
 herdr pane wait-output "$pane" --source recent-unwrapped \
   --regex 'Tailscale -> https://|🔴|EADDRINUSE|Error:|error:|Traceback|exit code|elevated privileges|Password:' \
   --timeout "$TIMEOUT_MS" >/dev/null 2>&1 || true
@@ -256,4 +282,4 @@ esac
 dev-url set "$url" >/dev/null 2>&1 || true
 serve_check explain "$url"
 say "dev-up: ${CMD[*]} is up in herdr pane $pane (HTTP $code)"
-printf '%s pane=%s\n' "$url" "$pane"
+printf '%s pane=%s lease=%s created\n' "$url" "$pane" "$lease"
