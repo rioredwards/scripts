@@ -229,13 +229,15 @@ pid = pick(lambda c: c==root) or pick(lambda c: c.startswith(root+"/")) \
    or (panes[0]["pane_id"] if panes else "")
 print(pid)')"
 if [[ -z "$src" ]]; then
-  # Fresh server, nothing to split from: give it a workspace rooted in this repo.
-  src="$(herdr workspace create --cwd "$ROOT" --no-focus | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["root_pane"]["pane_id"])')"
-  [[ -n "$src" ]] || die "herdr has no panes and workspace create returned none. Run: herdr workspace create --cwd $ROOT"
+  # Use the new workspace's root, so no unleased spare shell is left behind.
+  created="$(herdr workspace create --cwd "$ROOT" --no-focus)"
+  pane_key=root_pane
+else
+  created="$(herdr pane split "$src" --direction right --cwd "$ROOT" --no-focus)"
+  pane_key=pane
 fi
-created="$(herdr pane split "$src" --direction right --cwd "$ROOT" --no-focus)"
-pane="$(printf '%s' "$created" | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["pane"]["pane_id"])')"
-terminal="$(printf '%s' "$created" | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["pane"]["terminal_id"])')"
+pane="$(printf '%s' "$created" | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"][sys.argv[1]]["pane_id"])' "$pane_key")"
+terminal="$(printf '%s' "$created" | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"][sys.argv[1]]["terminal_id"])' "$pane_key")"
 [[ -n "$pane" ]] || die "herdr pane split returned no pane id. Rerun: dev-up. If it repeats, the server is wedged: herdr server stop && herdr (this exits pane processes, so it is Rio's call)"
 lease="$(/usr/bin/python3 "$LEASE_TOOL" create "$pane" "$terminal")"
 sleep 1  # let the shell reach its prompt
