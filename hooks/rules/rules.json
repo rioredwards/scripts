@@ -183,7 +183,7 @@
       "on": "tool",
       "match": {
         "tool": "^Bash$",
-        "input": "(^|[;&|(\\n`{]|\\$\\()[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*(sudo[[:space:]]+(-[^[:space:]]+[[:space:]]+)*)?(ssh[[:space:]]+(-[oplJFiE][[:space:]]+[^[:space:]]+[[:space:]]+|-[^[:space:]]+[[:space:]]+)*[^-[:space:];&|][^[:space:];&|]*[[:space:]]+['\\\"]?)?(sudo[[:space:]]+(-[^[:space:]]+[[:space:]]+)*)?(launchctl[[:space:]]+print([[:space:]]|$)|(printenv|env)[[:space:]]*($|\\n|[;&|)}`'\\\"]|[0-9]?>))"
+        "input": "(^|[;&|(\\n`{]|\\$\\()[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*((sudo[[:space:]]+(-[^[:space:]]+[[:space:]]+([^-[:space:];&|][^[:space:];&|]*[[:space:]]+)?)*)|((command|builtin|exec|nohup|time)[[:space:]]+(-[clp]+[[:space:]]+)*))*(ssh[[:space:]]+(-[oplJFiE][[:space:]]+[^[:space:]]+[[:space:]]+|-[^[:space:]]+[[:space:]]+)*[^-[:space:];&|][^[:space:];&|]*[[:space:]]+(--[[:space:]]+)?['\\\"]?)?((sudo[[:space:]]+(-[^[:space:]]+[[:space:]]+([^-[:space:];&|][^[:space:];&|]*[[:space:]]+)?)*)|((command|builtin|exec|nohup|time)[[:space:]]+(-[clp]+[[:space:]]+)*))*(launchctl[[:space:]]+(print|export)([[:space:]]|$)|(\\\\?([^[:space:];&|'\\\"]*/)?(print)?env([[:space:]]+(-u[[:space:]]*[^[:space:]]+|-[^[:space:]]+))*|export([[:space:]]+-p)?|set|(declare|typeset)([[:space:]]+-[A-Za-z]+)*)[[:space:]]*($|\\n|[;&|)}`'\\\"]|[0-9]?>))"
       },
       "unless": "(grep[[:space:]]+-c|wc[[:space:]]+-|\\|[[:space:]]*(grep|awk|cut|sed|rg)[^|]*(-c\\b|count))",
       "do": "deny",

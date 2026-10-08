@@ -319,6 +319,10 @@ class RulesTests(unittest.TestCase):
             "ssh mini env", "ssh mini 'env | sort'", "ssh -o BatchMode=yes mini printenv",
             "ssh mini sudo env", "FOO=1 env", "ls\nenv\nls", "launchctl print gui/501",
             "echo a\nenv | sort",
+            "/usr/bin/env", "/usr/bin/env | sort", "/usr/bin/printenv", "command env",
+            "exec env", "time env", "env -0", "env -u FOO", "printenv -0", "sudo -u root env",
+            "ssh mini -- env", "export", "export -p", "set", "set | grep KEY", "declare -x",
+            "typeset -x", "launchctl export",
         ]
         allowed = [
             "env FOO=bar cmd", "/usr/bin/env bash", "printenv HOME", "env -i FOO=1 sh x",
@@ -328,6 +332,9 @@ class RulesTests(unittest.TestCase):
             "gh issue comment 1 --body 'env is dumped here'", "ls .env", "envsubst < a",
             "env | grep -c KEY", "printenv | wc -l", "git commit -m 'fix env handling'",
             "cat .env.example", "source .venv/bin/activate",
+            "/usr/bin/env python3 script.py", "env -u FOO cmd", "command -v env", "sudo -u root ls",
+            "set -euo pipefail", "set -- a b", "if [ -n \"$x\" ]; then set -x; fi", "export FOO=1",
+            "export -f myfn", "declare -A map", "declare -p FOO", "launchctl getenv X",
         ]
         for command in blocked:
             with self.subTest(blocked=command):
