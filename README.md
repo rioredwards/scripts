@@ -23,6 +23,26 @@ Small personal command wrappers and automation helpers. App-sized tools live in 
 - `grok-stt`, `grok-tts` - Grok speech helpers.
 - `agent-audio-prune` - signed Swift binary that caps disposable iCloud audio; source and tests live in `agent-audio-pruner/`.
 - `run-todaybar.sh`, `todaybar-watchdog.sh` - local daily-driver status helpers.
+- `keyfor` - the one way to read an API key: `keyfor NAME` or `keyfor --run NAME -- cmd`. Keys live in an age-encrypted store in `~/.dotfiles`.
+- `agent-budget` - LOC appetite for the work in a repo: `set <loc>`, `status` (exit 1 when over), `clear`. Enforced by `hooks/loc-budget.sh`.
+- `agent-toggle` - flip machine-local agent-hook knobs (speak, audio, text, ...) from anywhere, including over SSH. `agent-toggle` lists them.
+- `agent-hooks-env.sh` - shared profile loader sourced by hook scripts (env, then local, then synced profile).
+- `agy-write-guard` - Antigravity pre-tool hook that denies write tools unless `AGY_WRITE_GUARD=allow`.
+- `automation-cue.sh` - show or hide a fullscreen automation cue via Hammerspoon: `start` | `stop`.
+- `send-to-claude` - send a message to the Claude desktop app and print its reply.
+- `send-to-chatgpt` - drive the ChatGPT web app in a dedicated logged-in Chrome and return its reply.
+- `web-research` - multi-pass Brave search, extract sources, optional `aitt` synthesis. `web-research <topic> [--raw]`.
+- `content-pipeline` - source (stdin, clipboard, text) through an `aitt` transform to output routes.
+- `click-tool` - let an agent see on-screen text with coordinates and click it (OCR plus cliclick).
+- `ax-dialog` - read and click native macOS permission dialogs through the Accessibility tree.
+- `pr-review` - review a GitHub PR locally with Claude Code. `pr-review [--model ID] [PR_NUMBER]`.
+- `install-pr-review` - drop the Claude auto PR-review workflow into a repo. `install-pr-review [REPO_PATH]`.
+- `recap-repo-audio` - spoken re-entry recap for a repo, cached (recon bundle, `aitt`, `grok-tts`).
+- `claude-token-audit.sh` - where Claude Code token and quota burn went, per session, cost-weighted.
+- `narration-context`, `narration-body`, `narration-title`, `narration-render`, `narration-spoken` - stages of the turn-narration pipeline used by `hooks/turn-end/`.
+- `git-commit-selector.sh` - pick a previous commit message with fzf, ready for `git commit -m`.
+- `git-quicklog.sh` - last two commits with short stats.
+- `tests/run-all.sh` - run every test; non-zero exit if any fails.
 
 ## Dotfiles Script Links
 
