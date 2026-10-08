@@ -1,7 +1,7 @@
 #!/bin/sh
 # run.sh: one hook that enforces every rule in rules.json.
 #
-# PILOT. The bet: Rio's guard hooks (rm-guard, issue-skill-guard, reply-cap,
+# PILOT. The bet: Rio's guard hooks (the retired rm-guard, issue-skill-guard, reply-cap,
 # loop-reminder) are all the same 30 lines of jq plumbing with a different
 # regex and a different sentence. If that is true, a new rule should be a
 # JSON entry, not a new script.
@@ -115,8 +115,8 @@ if [ "$KIND" = "tool" ]; then
 fi
 
 # Stop. Exit 2 hands stderr back to the agent and makes it answer again.
-# Verified on Claude. Codex uses the same payload field names (see
-# turn-end/codex-turn-end) but its blocking contract is unconfirmed.
+# Verified on Claude and on Codex (Codex injects the stderr as a hook_prompt
+# and continues the turn; seen in Codex sessions with reply-cap.sh, 2026-09-30).
 printf 'Rule triggered (%s): %s\n' "$IDS" "$MSG" >&2
 printf 'Open the retry with a `---` line and `\xf0\x9f\x94\x84 Revised reply:` so Rio can tell it apart from the bounced one, which the desktop app leaves on screen. Then stop again.\n' >&2
 exit 2

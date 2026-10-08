@@ -60,7 +60,7 @@ block a stop, so it would match rules and let the reply through anyway.
 - **No Node.** A `PreToolUse` hook runs on every tool call; a Node cold start is
   ~50ms of that, every time. `sh` + `jq` is ~5ms. The typed-schema benefit Rio
   wanted from zod is delivered by `validate.sh` + this table instead.
-- **Replaced:** `hooks/rm-guard.sh` (still on disk, unregistered).
+- **Replaced:** `rm-guard.sh` (now in `archive/`).
 - **Not replaced:** `issue-skill-guard.sh` and `loop-reminder.sh` need per-session
   state (marker files, throttles) that this schema has no way to express. If the
   pilot survives, that is the first thing to add.
