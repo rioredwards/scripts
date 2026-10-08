@@ -1,0 +1,1 @@
+../.dotfiles/scripts/check-home-paths.sh

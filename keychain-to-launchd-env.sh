@@ -1,1 +1,0 @@
-../.dotfiles/scripts/keychain-to-launchd-env.sh
