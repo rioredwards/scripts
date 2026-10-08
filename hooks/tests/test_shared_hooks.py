@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -56,6 +57,16 @@ class SharedHooks(unittest.TestCase):
         r = self.run_hook('spin-check.sh', {'session_id': 'delegate-check'},
                           AGENT_SPIN_CHECK='on', AGENT_DELEGATE='1')
         self.assertEqual((r.returncode, r.stdout, r.stderr), (0, '', ''))
+
+    def test_claude_and_codex_register_same_hooks(self):
+        """A guard hook added for one agent must reach the other (ledger: Codex runs the same guard hooks)."""
+        def hooks(path):
+            text = (Path.home() / path).read_text()
+            return set(re.findall(r'scripts/hooks/([\w./-]+?)\\?"(?: (tool|response)\b)?', text))
+        claude, codex = hooks('.dotfiles/.claude/settings.json'), hooks('.dotfiles/.codex/hooks.json')
+        claude_only = {h for h in claude if h[0].startswith('turn-end/claude-')}
+        codex_only = {h for h in codex if h[0].startswith('turn-end/codex-')}
+        self.assertEqual(claude - claude_only, codex - codex_only)
 
 
 if __name__ == '__main__':

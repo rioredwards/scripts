@@ -239,6 +239,17 @@ class RulesTests(unittest.TestCase):
             ("Bash", {"command": "railway shell"}),
             ("Bash", {"command": "railway service delete"}),
             ("Bash", {"command": "cd app; railway redeploy -y"}),
+            ("mcp__railway__deploy-template", ids),
+            ("mcp__railway__reset-bucket-credentials", ids),
+            ("mcp__railway__get-bucket-credentials", ids),
+            ("mcp__railway__retry-domain-certificate", ids),
+            ("mcp__railway__test-webhook", ids),
+            ("Bash", {"command": "railway --service web up"}),
+            ("Bash", {"command": "railway -s web variables"}),
+            ("Bash", {"command": "/opt/homebrew/bin/railway up"}),
+            ("Bash", {"command": "npx @railway/cli up"}),
+            ("Bash", {"command": "sh -c 'railway up'"}),
+            ("Bash", {"command": "railway scale"}),
         ]
         allowed = [
             ("mcp__railway__get-status", ids),
@@ -248,6 +259,9 @@ class RulesTests(unittest.TestCase):
             ("Bash", {"command": "railway logs --deployment abc"}),
             ("Bash", {"command": "railway deployment list"}),
             ("Bash", {"command": "grep railway README.md"}),
+            ("mcp__railway__describe-service", ids),
+            ("Bash", {"command": "railway service logs"}),
+            ("Bash", {"command": "railway --service web status"}),
         ]
         for tool, inp in blocked:
             with self.subTest(blocked=(tool, inp)):
