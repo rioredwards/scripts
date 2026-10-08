@@ -43,7 +43,8 @@
 #                              message                         (default 20)
 #   AGENT_SPIN_CHECK_MODEL     reviewer model                  (default gpt-6-luna)
 #   AGENT_SPIN_CHECK_PROVIDER  agent-router provider           (default codex)
-#   AGENT_SPIN_CHECK_TIMEOUT   seconds to wait on the reviewer (default 90)
+#   AGENT_SPIN_CHECK_TIMEOUT   seconds to wait on the reviewer (default 90). One
+#                              timeout skips the reviewer for the rest of the session.
 #   AGENT_SPIN_CHECK_LOG       audit log path (default ~/.cache/spin-check/fires.log;
 #                              set to "off" to disable)
 #
@@ -75,7 +76,7 @@ hook_is_delegate "$INPUT" && exit 0
 STATE_DIR="${TMPDIR:-/tmp}/claude-spin-check"
 mkdir -p "$STATE_DIR"
 # opportunistic GC so count/log files don't accumulate forever in TMPDIR.
-find "$STATE_DIR" -type f \( -name '*.count' -o -name '*.err' -o -name '*.failed' \) -mtime +1 -delete 2>/dev/null
+find "$STATE_DIR" -type f \( -name '*.count' -o -name '*.err' -o -name '*.failed' -o -name '*.timedout' \) -mtime +1 -delete 2>/dev/null
 COUNT_FILE="$STATE_DIR/${SESSION_ID}.count"
 
 # --- UserPromptSubmit: Rio just spoke, so the clock restarts ---------------
@@ -103,6 +104,11 @@ EXPLORE_REF="${SKILLS:-$HOME/dev/agent-skills}/plugins/core/skills/explore/ref"
 COUNT=$(( $(cat "$COUNT_FILE" 2>/dev/null || echo 0) + 1 ))
 printf '%s' "$COUNT" > "$COUNT_FILE"
 [ $(( COUNT % EVERY )) -eq 0 ] || exit 0
+
+# --- circuit breaker: one reviewer timeout turns the reviewer off for this session
+# Otherwise every EVERY-th call pays the full WAIT again (Mini fires.log: repeated
+# 90s timeouts). Session-scoped on purpose: the next session retries.
+[ -f "$STATE_DIR/${SESSION_ID}.timedout" ] && exit 0
 
 SOURCE_AGENT=claude
 if [ "$(head -n 1 "$TRANSCRIPT" | jq -r '.type // empty')" = session_meta ]; then
@@ -316,7 +322,8 @@ ERR_TAIL="$(tr '\n\t' '  ' < "$ERR_FILE" 2>/dev/null | sed 's/  */ /g' | cut -c1
 FAILURE=""
 case "$RC" in
   0)       [ -n "$VERDICT" ] || FAILURE="reviewer returned an empty verdict (exit 0)" ;;
-  124|142) FAILURE="reviewer timed out after ${WAIT}s" ;;
+  124|142) FAILURE="reviewer timed out after ${WAIT}s, so it is skipped for the rest of this session"
+           : > "$STATE_DIR/${SESSION_ID}.timedout" ;;
   *)       FAILURE="agent-router exited $RC" ;;
 esac
 
@@ -344,7 +351,7 @@ if [ -n "$FAILURE" ]; then
 fi
 
 case "$VERDICT" in
-  ON\ TRACK*|on\ track*|"ON TRACK") exit 0 ;;
+  ON\ TRACK*|on\ track*) exit 0 ;;
 esac
 
 # --- inject the course-correction into the running session ----------------

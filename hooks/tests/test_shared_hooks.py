@@ -60,6 +60,35 @@ class SharedHooks(unittest.TestCase):
             for text in ['Only compare tools', 'publish a new integration', 'git push']:
                 self.assertIn(text, r.stderr)
 
+    def test_reviewer_timeout_trips_breaker_for_the_session(self):
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            bindir = td / 'bin'
+            bindir.mkdir()
+            calls = td / 'calls'
+            router = bindir / 'agent-router'
+            router.write_text(f'#!/bin/sh\necho call >> "{calls}"\nsleep 5\n')
+            router.chmod(0o755)
+            transcript = td / 't.jsonl'
+            events = [{'type': 'user', 'message': {'content': 'do the thing'}},
+                      {'type': 'assistant', 'message': {'content': [
+                          {'type': 'tool_use', 'name': 'Bash', 'input': {'command': 'ls'}}]}}]
+            transcript.write_text(''.join(json.dumps(e) + '\n' for e in events))
+            env = dict(PATH=f'{bindir}:{os.environ["PATH"]}', TMPDIR=str(td), AGENT_SPIN_CHECK='on',
+                       AGENT_SPIN_CHECK_EVERY='1', AGENT_SPIN_CHECK_TIMEOUT='1',
+                       AGENT_SPIN_CHECK_LOG=str(td / 'fires.log'), AGENT_DELEGATE='')
+            payload = {'session_id': 'breaker-test', 'transcript_path': str(transcript)}
+            first = self.run_hook('spin-check.sh', payload, **env)
+            self.assertEqual(first.returncode, 2, first.stderr)
+            self.assertIn('timed out', first.stderr)
+            for _ in range(2):
+                again = self.run_hook('spin-check.sh', payload, **env)
+                self.assertEqual((again.returncode, again.stdout, again.stderr), (0, '', ''))
+            self.assertEqual(calls.read_text().count('call'), 1)
+            # a different session still gets its own reviewer call
+            self.run_hook('spin-check.sh', {**payload, 'session_id': 'breaker-other'}, **env)
+            self.assertEqual(calls.read_text().count('call'), 2)
+
     def test_delegate_drift_check_does_not_recurse(self):
         r = self.run_hook('spin-check.sh', {'session_id': 'delegate-check'},
                           AGENT_SPIN_CHECK='on', AGENT_DELEGATE='1')
