@@ -20,6 +20,13 @@ class SharedHooks(unittest.TestCase):
         marker = Path('/tmp') / f'claude-loop-phase-{sid}'
         stamp = Path('/tmp') / f'claude-loop-remind-{sid}'
         try:
+            # A phase skill used standalone (no core:loop) must not create the marker.
+            for tool_input in [{'skill': 'core:explore'},
+                               {'command': 'cat ~/dev/agent-skills/plugins/core/skills/explore/SKILL.md'}]:
+                self.run_hook('loop-phase-tracker.sh', {'session_id': sid, 'tool_input': tool_input})
+                self.assertFalse(marker.exists())
+            self.run_hook('loop-phase-tracker.sh', {'session_id': sid, 'tool_input': {'skill': 'core:loop'}})
+            self.assertEqual(marker.read_text(), 'loop')
             for tool_input in [{'skill': 'core:plan'},
                                {'command': 'cat ~/dev/agent-skills/plugins/core/skills/plan/SKILL.md'}]:
                 self.run_hook('loop-phase-tracker.sh', {'session_id': sid, 'tool_input': tool_input})

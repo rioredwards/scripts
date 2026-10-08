@@ -2,7 +2,8 @@
 # loop-phase-tracker.sh: POC: track which core:loop phase is active for the statusline.
 #
 # Fires from a PreToolUse hook matched on the Skill tool. When the skill invoked is one
-# of the core:loop phase skills, writes the bare phase name to a session-scoped marker
+# of the core:loop phase skills AND the session is in a loop (core:loop was invoked, so
+# the marker exists), writes the bare phase name to a session-scoped marker
 # file the statusline script reads:
 #   /tmp/claude-loop-phase-<session_id>
 #
@@ -27,9 +28,14 @@ fi
 SID="$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)"
 [ -n "$SKILL" ] && [ -n "$SID" ] || exit 0
 
+# Phase skills used standalone must not mark the session as mid-loop: only core:loop
+# starts the marker; phases update it once it exists.
+MARKER="/tmp/claude-loop-phase-${SID}"
+[ "$SKILL" = "core:loop" ] || [ -e "$MARKER" ] || exit 0
+
 case "$SKILL" in
   core:loop|core:git-cleanup|core:run-dev|core:explore|core:plan|core:implement|core:review|core:validate|core:ship|core:complete|core:retro)
-    printf '%s' "${SKILL#core:}" > "/tmp/claude-loop-phase-${SID}"
+    printf '%s' "${SKILL#core:}" > "$MARKER"
     ;;
 esac
 
