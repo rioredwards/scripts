@@ -13,6 +13,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+# Loading an extensionless script would write a stray .pyc beside it.
+sys.dont_write_bytecode = True
 loader = importlib.machinery.SourceFileLoader("lease", str(Path(__file__).parents[1] / "dev-lease"))
 spec = importlib.util.spec_from_loader(loader.name, loader)
 lease = importlib.util.module_from_spec(spec)
