@@ -183,9 +183,9 @@
       "on": "tool",
       "match": {
         "tool": "^Bash$",
-        "input": "(^|[[:space:];&|(){}`])(launchctl[[:space:]]+print|printenv|env)([[:space:]]|$)"
+        "input": "(^|[;&|(\\n`{]|\\$\\()[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*(sudo[[:space:]]+(-[^[:space:]]+[[:space:]]+)*)?(ssh[[:space:]]+(-[oplJFiE][[:space:]]+[^[:space:]]+[[:space:]]+|-[^[:space:]]+[[:space:]]+)*[^-[:space:];&|][^[:space:];&|]*[[:space:]]+['\\\"]?)?(sudo[[:space:]]+(-[^[:space:]]+[[:space:]]+)*)?(launchctl[[:space:]]+print([[:space:]]|$)|(printenv|env)[[:space:]]*($|\\n|[;&|)}`'\\\"]|[0-9]?>))"
       },
-      "unless": "(grep[[:space:]]+-c|wc[[:space:]]+-|\\|[[:space:]]*(grep|awk|cut|sed|rg)[^|]*(-c\\b|count)|env[[:space:]]+[A-Za-z_]+=|printenv[[:space:]]+[A-Za-z_])",
+      "unless": "(grep[[:space:]]+-c|wc[[:space:]]+-|\\|[[:space:]]*(grep|awk|cut|sed|rg)[^|]*(-c\\b|count))",
       "do": "deny",
       "text": "Blocked: this command dumps the whole environment, and Rio's API keys have leaked into agent transcripts twice that way. Never print an environment wholesale. Ask for the one thing you need instead: `launchctl getenv NAME`, `printenv NAME`, or `keyfor NAME`. If you only need a count or a yes/no, pipe through `grep -c` or test the exit status, and never echo a secret value."
     },

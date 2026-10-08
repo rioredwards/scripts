@@ -311,6 +311,33 @@ class RulesTests(unittest.TestCase):
                 out = self.run_hook("tool", {"tool_name": tool, "tool_input": inp})
                 self.assertNotIn("read-only snapshots", out.stdout + out.stderr)
 
+    def test_env_dumps_only_in_command_position(self):
+        """Only a real environment dump is denied; the word env in prose or a shebang is not."""
+        blocked = [
+            "env", "env | sort", "env|sort", "echo hi; env", "echo hi && env > out.txt",
+            "x=$(env)", "`env`", "printenv", "printenv | cut -d= -f1", "sudo env",
+            "ssh mini env", "ssh mini 'env | sort'", "ssh -o BatchMode=yes mini printenv",
+            "ssh mini sudo env", "FOO=1 env", "ls\nenv\nls", "launchctl print gui/501",
+            "echo a\nenv | sort",
+        ]
+        allowed = [
+            "env FOO=bar cmd", "/usr/bin/env bash", "printenv HOME", "env -i FOO=1 sh x",
+            "echo use env var here", "cat > f.md <<'EOF'\nSet each env var in Vercel\nEOF",
+            "cat > run.sh <<'EOF'\n#!/usr/bin/env bash\necho hi\nEOF",
+            "cat > run.sh <<'EOF'\n#!/usr/bin/env python3\nEOF",
+            "gh issue comment 1 --body 'env is dumped here'", "ls .env", "envsubst < a",
+            "env | grep -c KEY", "printenv | wc -l", "git commit -m 'fix env handling'",
+            "cat .env.example", "source .venv/bin/activate",
+        ]
+        for command in blocked:
+            with self.subTest(blocked=command):
+                out = self.run_hook("tool", {"tool_name": "Bash", "tool_input": {"command": command}})
+                self.assertIn("dumps the whole environment", out.stdout)
+        for command in allowed:
+            with self.subTest(allowed=command):
+                out = self.run_hook("tool", {"tool_name": "Bash", "tool_input": {"command": command}})
+                self.assertNotIn("dumps the whole environment", out.stdout)
+
     def test_system_edits_route_to_system_skill(self):
         """Edit/Write into Rio's system files get the utils:system nudge; other paths do not."""
         hit = [
