@@ -350,8 +350,9 @@ if [ -n "$FAILURE" ]; then
   exit 2
 fi
 
-case "$VERDICT" in
-  ON\ TRACK*|on\ track*) exit 0 ;;
+# Case-insensitive: the reviewer sometimes answers "On track" in title case.
+case "$(printf '%s' "$VERDICT" | tr '[:upper:]' '[:lower:]')" in
+  "on track"*) exit 0 ;;
 esac
 
 # --- inject the course-correction into the running session ----------------
