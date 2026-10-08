@@ -345,6 +345,22 @@ class RulesTests(unittest.TestCase):
                 out = self.run_hook("tool", {"tool_name": "Bash", "tool_input": {"command": command}})
                 self.assertNotIn("dumps the whole environment", out.stdout)
 
+    def test_scratchpad_paths_do_not_route_to_system_skill(self):
+        """Claude scratchpad dirs embed the repo name (-dev-agent-skills/): never a system path."""
+        scratch = "/private/tmp/claude-501/-Users-x-dev-agent-skills/sess/scratchpad/"
+        cmds = [
+            "cat > " + scratch + "a.md <<EOF\nhi\nEOF",
+            "echo hi > " + scratch + "a.md",
+            "sed -i s/a/b/ " + scratch + "a.md",
+        ]
+        for cmd in cmds:
+            with self.subTest(cmd=cmd):
+                out = self.run_hook("tool", {"tool_name": "Bash", "tool_input": {"command": cmd}})
+                self.assertNotIn("utils:system", out.stdout)
+        real = "cat > ~/dev/agent-skills/x.md <<EOF\nhi\nEOF"
+        out = self.run_hook("tool", {"tool_name": "Bash", "tool_input": {"command": real}})
+        self.assertIn("utils:system", out.stdout)
+
     def test_system_edits_route_to_system_skill(self):
         """Edit/Write into Rio's system files get the utils:system nudge; other paths do not."""
         hit = [
@@ -352,7 +368,12 @@ class RulesTests(unittest.TestCase):
             ("Write", {"file_path": "/Users/x/.dotfiles/.agents/AGENTS.md", "content": "hi"}),
             ("Edit", {"file_path": "/Users/x/scripts/hooks/rules/rules.json", "old_string": "a", "new_string": "b"}),
         ]
-        miss = [("Write", {"file_path": "/Users/x/dev/app/README.md", "content": "hi"})]
+        scratch = "/private/tmp/claude-501/-Users-x-dev-agent-skills/sess/scratchpad/notes.md"
+        miss = [
+            ("Write", {"file_path": "/Users/x/dev/app/README.md", "content": "hi"}),
+            ("Write", {"file_path": scratch, "content": "hi"}),
+            ("Edit", {"file_path": scratch, "old_string": "a", "new_string": "b"}),
+        ]
         for tool, inp in hit:
             with self.subTest(hit=inp):
                 out = self.run_hook("tool", {"tool_name": tool, "tool_input": inp})
