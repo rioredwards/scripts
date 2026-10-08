@@ -36,7 +36,7 @@ if [ -f "$tmp/aitt-ok" ]; then printf 'TITLE: t\nfine narration\n'; else
 EOF
 chmod +x "$sr"/agent-hooks-env.sh "$sr"/narration-* "$sr"/agent-toggle "$sr"/sc "$sr"/aitt
 
-run_turn() { printf 'a reply' | HOOK_AGENT=claude AGENT_DELEGATE= \
+run_turn() { printf 'a reply' | HOOK_AGENT=claude AGENT_DELEGATE='' \
   AGENT_SPEAK=off AGENT_AUDIO_FILE=off AGENT_WEBVIEW=off AGENT_TEXT=off \
   AGENT_NARRATE_ALERT_AFTER=3 AGENT_NARRATE_ALERT_EVERY=1800 \
   sh "$sr/hooks/turn-end/dispatch"; }

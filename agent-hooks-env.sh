@@ -60,8 +60,9 @@ _ah_load() {
 _ah_load "$AGENT_HOOKS_LOCAL" local
 _ah_load "$AGENT_HOOKS_PROFILE" profile
 
+# shellcheck disable=SC2034  # AGENT_HOOKS_SRC is read by agy-write-guard after sourcing
 if [ "$_ah_env_override" -eq 1 ]; then
-  AGENT_HOOKS_SRC=env
+  AGENT_HOOKS_SRC='env'
 elif [ "$_ah_local_set" -eq 1 ]; then
   AGENT_HOOKS_SRC=local
 elif [ "$_ah_profile_set" -eq 1 ]; then

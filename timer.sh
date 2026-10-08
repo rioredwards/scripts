@@ -8,9 +8,9 @@ fi
 clear
 
 minutes=$1
-end_time=$(date -j -v +${minutes}M +%s)
+end_time=$(date -j -v "+${minutes}M" +%s)
 
-while [ $(date +%s) -lt $end_time ]; do
+while [ "$(date +%s)" -lt "$end_time" ]; do
   remaining_seconds=$((end_time - $(date +%s)))
   hours=$((remaining_seconds / 3600))
   minutes=$(( (remaining_seconds % 3600) / 60 ))
