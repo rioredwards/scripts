@@ -89,7 +89,7 @@ check "squash keeps both" "$me" 0 "within budget: 20/100"
 # --- #9: a branch made from origin/dev (tracks it) refreshes after a rebase --
 world split; me="$w/me"; cow="$w/cow"
 git -C "$me" checkout -q -b feat origin/dev 2>/dev/null
-[ "$(git -C "$me" rev-parse --abbrev-ref feat@{upstream})" = origin/dev ] || fail "setup: feat should track origin/dev"
+[ "$(git -C "$me" rev-parse --abbrev-ref 'feat@{upstream}')" = origin/dev ] || fail "setup: feat should track origin/dev"
 (cd "$me" && "$budget" set 100 >/dev/null)
 commit "$me" mine 7
 commit "$cow" theirs 900; git -C "$cow" push -q origin dev
