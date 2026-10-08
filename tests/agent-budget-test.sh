@@ -86,6 +86,26 @@ commit "$me" a 10; commit "$me" b 10
 git -C "$me" reset -q --soft HEAD~2; git -C "$me" commit -qm squashed
 check "squash keeps both" "$me" 0 "within budget: 20/100"
 
+# own commit already pushed, then pull --rebase onto newer upstream: pushed work still counts
+world pushed; me="$w/me"; cow="$w/cow"
+(cd "$me" && "$budget" set 100 >/dev/null)
+commit "$me" a 30; git -C "$me" push -q origin dev
+commit "$me" b 5
+git -C "$cow" pull -q; commit "$cow" theirs 500; git -C "$cow" push -q origin dev
+git -C "$me" pull -q --rebase
+check "pull --rebase keeps already-pushed own work" "$me" 0 "within budget: 35/100"
+
+# merge upstream in, keep working, then rebase onto upstream (linearizes the merge)
+world mergerebase; me="$w/me"; cow="$w/cow"
+git -C "$me" checkout -q -b feat
+(cd "$me" && "$budget" set 100 >/dev/null)
+commit "$me" m1 10
+commit "$cow" theirs 400; git -C "$cow" push -q origin dev
+git -C "$me" fetch -q; git -C "$me" merge -q --no-edit origin/dev
+commit "$me" m2 5
+git -C "$me" rebase -q origin/dev
+check "rebase after a merge counts only the replayed commits" "$me" 0 "within budget: 15/100"
+
 # --- #9: a branch made from origin/dev (tracks it) refreshes after a rebase --
 world split; me="$w/me"; cow="$w/cow"
 git -C "$me" checkout -q -b feat origin/dev 2>/dev/null

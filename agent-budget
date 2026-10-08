@@ -47,6 +47,12 @@ range_diff() { git diff -M30% --numstat --summary "$1" "$2" -- . $EXCLUDES; }
 # is_anc A B: A is B or an ancestor of B.
 is_anc() { git merge-base --is-ancestor "$1" "$2" 2>/dev/null; }
 
+# on_line <sha> B: the full sha is on B's first-parent line (B's own history, not merged-in work).
+on_line() {
+  last="$(git rev-list --first-parent "$2" "^$1" 2>/dev/null | tail -n 1)"
+  [ -n "$last" ] && [ "$(git rev-parse -q --verify "$last^1")" = "$1" ]
+}
+
 # resolve_base: walk the HEAD reflog (oldest first) from SET_AT and move the base past
 # commits that arrived rather than being written here. In: BASE CARRY CARRY_FILES SET_AT.
 # Out: RB (base) RC (lines already written before it) RF (new files before it).
@@ -72,20 +78,23 @@ resolve_base() {
       pull*|merge*) kind=merge ;;
     esac
     [ -n "$kind" ] || continue
-    [ "$new" != "$RB" ] || continue
-    is_anc "$RB" "$new" || continue
     is_anc "$RB" "$p" || continue
-    # Landing on or behind where we were is an undo or an in-place rewrite, not an arrival.
-    is_anc "$new" "$p" && continue
-    [ "$kind" = rebase ] && { snapB="$RB"; snapC="$RC"; snapF="$RF"; }
-    if is_anc "$p" "$new"; then
-      # Fast-forward or merge: what was here before stays mine, what came in does not.
-      count_diff "$(range_diff "$RB" "$p")"
+    if is_anc "$RB" "$new"; then
+      # Landing on or behind where we were is an undo or an in-place rewrite, not an arrival.
+      is_anc "$new" "$p" && continue
+      [ "$kind" = rebase ] && { snapB="$RB"; snapC="$RC"; snapF="$RF"; }
+      # Own commits under both the old and new head stay mine: all of them on a
+      # fast-forward or merge, the already-pushed ones on a rebase-onto or reset-to-remote.
+      # What came in does not count; local commits a rebase replays count on top of new.
+      mb="$(git merge-base "$p" "$new")" || continue
+      count_diff "$(range_diff "$RB" "$mb")"
       RC=$((RC + D_LOC)); RF=$((RF + D_NEW))
-    else
-      # Diverged (rebase onto, hard reset): our commits were replayed or dropped,
-      # so whatever sits on top of the new base is the work.
+    elif [ "$kind" = rebase ] && ! on_line "$new" "$p"; then
+      # Rebasing onto a branch merged in earlier drops the merge and replays our commits on top of new.
+      snapB="$RB"; snapC="$RC"; snapF="$RF"
       RC=0; RF=0
+    else
+      continue
     fi
     RB="$new"
   done <<LIST
