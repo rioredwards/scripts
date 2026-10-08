@@ -10,10 +10,17 @@
 #   agent-budget clear                                # drop it
 #
 # State lives in the repo's .git dir (per worktree, never committed). Counted:
-# added lines vs base (or the newer split point from origin/dev or origin's default
-# branch, after a rebase), committed or not, untracked files included, renames as
+# added lines vs base, committed or not, untracked files included, renames as
 # their edits only. Deleted lines are free: removing code is rewarded, not
 # penalized. Lockfiles and snapshots are ignored.
+#
+# "Mine" = work created in this checkout after the budget was set. Commits that
+# arrive from elsewhere do not count: `status` reads the HEAD reflog and moves the
+# base past every pull, merge, fast-forward, reset-to-remote or rebase-onto-remote
+# since SET_AT, carrying forward the lines already written before it (CARRY). It
+# also takes the newer split point from origin/dev or origin's default branch
+# after a rebase (skipped while you are ON that branch, or pushed work would
+# stop counting).
 #
 # Exit codes: 0 within budget · 1 over · 3 no budget set · 2 usage/infra error
 set -u
@@ -27,6 +34,65 @@ WARNED="$GIT_DIR/agent-budget-warned"
 # Paths that inflate a diff without being code anyone wrote.
 EXCLUDES=':(exclude,glob)**/pnpm-lock.yaml :(exclude,glob)**/package-lock.json :(exclude,glob)**/yarn.lock :(exclude,glob)**/*.lock :(exclude,glob)**/*.snap :(exclude,glob)**/Cargo.lock :(exclude,glob)**/Package.resolved :(exclude,glob)**/migrations/meta/*_snapshot.json'
 
+# count_diff <diff text with --numstat --summary>: sets D_LOC (added lines) and D_NEW (new files).
+count_diff() {
+  D_LOC="$(printf '%s\n' "$1" | awk -F'\t' 'NF==3 && $1!="-"{s+=$1} END{print s+0}')"
+  D_NEW="$(printf '%s\n' "$1" | grep -c '^ create mode ')"
+}
+
+# range_diff <from> <to>: committed-only diff between two commits, same rules as status.
+# shellcheck disable=SC2086
+range_diff() { git diff -M30% --numstat --summary "$1" "$2" -- . $EXCLUDES; }
+
+# is_anc A B: A is B or an ancestor of B.
+is_anc() { git merge-base --is-ancestor "$1" "$2" 2>/dev/null; }
+
+# resolve_base: walk the HEAD reflog (oldest first) from SET_AT and move the base past
+# commits that arrived rather than being written here. In: BASE CARRY CARRY_FILES SET_AT.
+# Out: RB (base) RC (lines already written before it) RF (new files before it).
+resolve_base() {
+  RB="$BASE"; RC="${CARRY:-0}"; RF="${CARRY_FILES:-0}"
+  snapB=""; snapC=0; snapF=0; prev=""
+  list="$(git log -g --date=unix --format='%H %gd %gs' HEAD 2>/dev/null | awk '{a[NR]=$0} END{for(i=NR;i>0;i--)print a[i]}')"
+  [ -n "$list" ] || return 0
+  while read -r new gd subj; do
+    p="$prev"; prev="$new"
+    [ -n "$p" ] || continue
+    ts="${gd#HEAD@\{}"; ts="${ts%\}}"
+    case "$ts" in ''|*[!0-9]*) continue ;; esac
+    [ "$ts" -ge "${SET_AT:-0}" ] || continue
+    kind=""
+    case "$subj" in
+      "commit (merge)"*) kind=merge ;;
+      commit*) ;;
+      *"(start)"*) kind=rebase ;;
+      *"(abort)"*) [ -n "$snapB" ] && { RB="$snapB"; RC="$snapC"; RF="$snapF"; } ; continue ;;
+      *"("*")"*) ;;
+      reset:*) kind=reset ;;
+      pull*|merge*) kind=merge ;;
+    esac
+    [ -n "$kind" ] || continue
+    [ "$new" != "$RB" ] || continue
+    is_anc "$RB" "$new" || continue
+    is_anc "$RB" "$p" || continue
+    # Landing on or behind where we were is an undo or an in-place rewrite, not an arrival.
+    is_anc "$new" "$p" && continue
+    [ "$kind" = rebase ] && { snapB="$RB"; snapC="$RC"; snapF="$RF"; }
+    if is_anc "$p" "$new"; then
+      # Fast-forward or merge: what was here before stays mine, what came in does not.
+      count_diff "$(range_diff "$RB" "$p")"
+      RC=$((RC + D_LOC)); RF=$((RF + D_NEW))
+    else
+      # Diverged (rebase onto, hard reset): our commits were replayed or dropped,
+      # so whatever sits on top of the new base is the work.
+      RC=0; RF=0
+    fi
+    RB="$new"
+  done <<LIST
+$list
+LIST
+}
+
 cmd="${1:-status}"; [ $# -gt 0 ] && shift
 
 case "$cmd" in
@@ -35,21 +101,29 @@ case "$cmd" in
     case "$loc" in ''|*[!0-9]*) die "usage: agent-budget set <loc> [--files N] [--base REF]" ;; esac
     # Raising an existing budget keeps its base: but only on the same branch;
     # a fresh budget or a branch switch measures from HEAD (stale bases gate falsely).
-    files=""; base="HEAD"
+    files=""; base="HEAD"; carry=0; carryfiles=0
     branch="$(git symbolic-ref --short -q HEAD || echo detached)"
-    [ -r "$STATE" ] && [ "$(sed -n 's/^BRANCH=//p' "$STATE")" = "$branch" ] && base="$(sed -n 's/^BASE=//p' "$STATE")"
+    if [ -r "$STATE" ] && [ "$(sed -n 's/^BRANCH=//p' "$STATE")" = "$branch" ]; then
+      # Keep the base AND what arrived since: a new SET_AT would otherwise forget earlier pulls.
+      BASE="$(sed -n 's/^BASE=//p' "$STATE")"; SET_AT="$(sed -n 's/^SET_AT=//p' "$STATE")"
+      CARRY="$(sed -n 's/^CARRY=//p' "$STATE")"; CARRY_FILES="$(sed -n 's/^CARRY_FILES=//p' "$STATE")"
+      if git rev-parse --verify -q "$BASE^{commit}" >/dev/null; then
+        resolve_base
+        base="$RB"; carry="$RC"; carryfiles="$RF"
+      fi
+    fi
     # Kept base gone stale (rebase)? Refresh to HEAD instead of re-saving a false gate.
-    [ "$base" = "HEAD" ] || git merge-base --is-ancestor "$base" HEAD 2>/dev/null || base="HEAD"
+    if [ "$base" != "HEAD" ] && ! git merge-base --is-ancestor "$base" HEAD 2>/dev/null; then base="HEAD"; carry=0; carryfiles=0; fi
     while [ $# -gt 0 ]; do
       case "$1" in
         --files) files="${2:-}"; shift 2 ;;
-        --base)  base="${2:-}";  shift 2 ;;
+        --base)  base="${2:-}"; carry=0; carryfiles=0; shift 2 ;;
         *) die "unknown flag $1" ;;
       esac
     done
     [ -n "$files" ] && case "$files" in *[!0-9]*) die "--files wants a number" ;; esac
     sha="$(git rev-parse --verify "$base^{commit}" 2>/dev/null)" || die "bad base ref: $base"
-    printf 'BASE=%s\nLOC=%s\nFILES=%s\nBRANCH=%s\nSET_AT=%s\n' "$sha" "$loc" "$files" "$branch" "$(date +%s)" > "$STATE"
+    printf 'BASE=%s\nLOC=%s\nFILES=%s\nBRANCH=%s\nSET_AT=%s\nCARRY=%s\nCARRY_FILES=%s\n' "$sha" "$loc" "$files" "$branch" "$(date +%s)" "$carry" "$carryfiles" > "$STATE"
     rm -f "$WARNED"
     printf 'budget set: %s LOC%s, measured from %s\n' "$loc" "${files:+, $files new files}" "$(git rev-parse --short "$sha")"
     ;;
@@ -61,18 +135,25 @@ case "$cmd" in
     [ -r "$STATE" ] || { echo "no budget set"; exit 3; }
     . "$STATE"
     git rev-parse --verify -q "$BASE^{commit}" >/dev/null || die "budget base $BASE no longer exists. Run agent-budget set again"
+    # Commits that arrived by pull/merge/fast-forward/rebase-onto since SET_AT are not ours.
+    resolve_base
+    BASE="$RB"; CARRY="$RC"; CARRY_FILES="$RF"
     # A base that isn't an ancestor of HEAD (rebase, branch switch) inflates the diff
     # into a false OVER BUDGET. Fail loud instead of gating falsely.
     git merge-base --is-ancestor "$BASE" HEAD 2>/dev/null || die "budget base $(git rev-parse --short "$BASE") is stale (rebase/branch switch), re-run: agent-budget set <loc>"
     # Rebased onto a newer integration branch? The old base is still an ancestor, but
     # everything upstream added since would count as ours. Measure from the split point.
-    # Skipped when working on that branch itself: pushed work would stop counting.
-    upstream="$(git rev-parse --abbrev-ref -q '@{upstream}' 2>/dev/null || true)"
+    # Skipped when working on that branch itself (local branch name == the ref's
+    # branch name): pushed work would stop counting. A branch merely TRACKING
+    # origin/dev (made from it) is not that branch, and still refreshes.
+    here="$(git symbolic-ref --short -q HEAD || true)"
     for ref in origin/dev origin/HEAD; do
       git rev-parse --verify -q "$ref^{commit}" >/dev/null || continue
-      [ "$(git rev-parse --abbrev-ref "$ref")" = "$upstream" ] && continue
+      if [ "$ref" = origin/HEAD ]; then rb="$(git symbolic-ref --short -q refs/remotes/origin/HEAD || true)"; else rb="$ref"; fi
+      rb="${rb#origin/}"
+      [ -n "$here" ] && [ "$here" = "$rb" ] && continue
       mb="$(git merge-base HEAD "$ref" 2>/dev/null)" || continue
-      [ "$mb" != "$BASE" ] && git merge-base --is-ancestor "$BASE" "$mb" && BASE="$mb"
+      if [ "$mb" != "$BASE" ] && git merge-base --is-ancestor "$BASE" "$mb"; then BASE="$mb"; CARRY=0; CARRY_FILES=0; fi
     done
 
     # Untracked files join a scratch copy of the index as intent-to-add, so a plain
@@ -88,8 +169,8 @@ case "$cmd" in
     # One diff serves both counts: --numstat lines for LOC, --summary "create mode" lines for new files.
     # shellcheck disable=SC2086
     diff="$(GIT_INDEX_FILE="$idx" git diff -M30% --numstat --summary "$BASE" -- . $EXCLUDES)" || die "git diff failed"
-    loc="$(printf '%s\n' "$diff" | awk -F'\t' 'NF==3 && $1!="-"{s+=$1} END{print s+0}')"
-    newfiles="$(printf '%s\n' "$diff" | grep -c '^ create mode ')"
+    count_diff "$diff"
+    loc=$((D_LOC + CARRY)); newfiles=$((D_NEW + CARRY_FILES))
 
     over=0
     [ "$loc" -gt "$LOC" ] && over=1
