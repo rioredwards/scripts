@@ -5,8 +5,9 @@
 # Finds the repo's own start script, runs it through portless (named, stable,
 # tailnet-reachable port) inside a herdr pane, waits for the URL, remembers it
 # for the statusline, and prints it. No port hunting, no pane surveys, no
-# guessing. If a server for this checkout is already up, prints its URL and
-# does nothing else. Also self-heals the two things that used to strand it:
+# guessing. If a server for this checkout is already up and answering, prints its
+# URL and does nothing else (up but erroring: exit 1, never auto-restarted;
+# DEV_UP_REUSE_TIMEOUT=10 seconds to wait for it). Also self-heals the two things that used to strand it:
 # a dead Tailscale Serve mapping squatting on 443 (reclaimed, so the app keeps
 # its usual URL) and a stopped herdr server (started headless).
 #
@@ -15,14 +16,14 @@
 #   DEV_UP_TIMEOUT=120 dev-up
 #
 # Prints on success (stdout, last line):   URL pane=<herdr pane id>
-# Exit codes: 0 started or already running · 1 server failed (pane tail
-# printed) · 2 could not even try (no script, no herdr, not a repo).
+# Exit codes: 0 started or already running · 1 server failed or reused server
+# erroring (pane tail printed when we started it) · 2 could not even try (no script, no herdr, not a repo).
 #
 # Agents: this IS the sanctioned dev-server start (RIO_RUN_OK is implied).
 set -euo pipefail
 
 if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
-  sed -n '3,21p' "$0"; exit 0
+  sed -n '3,22p' "$0"; exit 0
 fi
 LEASE_TOOL="$(cd "$(dirname "$0")" && pwd)/dev-lease"
 lease=""; herr=""
@@ -64,16 +65,37 @@ command -v tailscale >/dev/null || PATH="$PATH:/usr/local/bin"
 command -v tailscale >/dev/null || die "tailscale not found on PATH ($PATH). Install Tailscale (https://tailscale.com/download), then rerun: dev-up"
 command -v portless >/dev/null || die "portless not found on PATH ($PATH). Installed already? This shell's PATH is missing its directory. Otherwise run: brew install portless"
 
+# probe_url URL SECONDS: poll until the app answers with something other than the
+# proxy's 502 or an app error. Sets PROBE_CODE; returns 1 if it never does. One
+# probe for both a fresh start and a reused server, so "up" means the same thing.
+probe_url() {
+  local deadline=$(( SECONDS + $2 ))
+  while :; do
+    PROBE_CODE="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 "$1/" || true)"
+    PROBE_CODE="${PROBE_CODE:-000}"
+    case "$PROBE_CODE" in 2*|3*|401|403) return 0 ;; esac
+    (( SECONDS < deadline )) || return 1
+    sleep 2
+  done
+}
+
 # ── 2. Already running for this checkout? ─────────────────────────────────────
 # portless lists routes with their supervisor pid; a pid whose cwd is this
-# checkout is our server. Print its tailscale URL and stop.
-existing="$(portless list 2>/dev/null || true)"
+# checkout is our server. Probe it (an existing server can be up and broken),
+# print its tailscale URL and stop. A failed `portless list` must not read as
+# "nothing running": that would start a duplicate next to the real server.
+existing="$(portless list)" || die "portless list failed (output above), so dev-up cannot tell whether a server is already running for this checkout. Fix portless, then rerun: dev-up"
 while IFS= read -r pid; do
   [[ -n "$pid" ]] || continue
   pcwd="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)"
   if [[ "$pcwd" == "$ROOT" ]]; then
     url="$(printf '%s\n' "$existing" | awk -v p="(pid $pid)" 'index($0,p){f=1;next} f&&/tailscale:/{print $2;exit}')"
     if [[ -n "$url" ]]; then
+      probe_url "$url" "${DEV_UP_REUSE_TIMEOUT:-10}" || {
+        say "dev-up: a server is already running for this checkout (pid $pid) but $url answers HTTP $PROBE_CODE, so it is not usable. Not restarting it automatically."
+        say "dev-up: stop it (dev-lease stop-pid $pid if dev-up started it, else kill $pid), then rerun: dev-up"
+        exit 1
+      }
       renewed="$(/usr/bin/python3 "$LEASE_TOOL" renew-pid "$pid")"
       dev-url set "$url" >/dev/null 2>&1 || true
       say "dev-up: already running for this checkout (pid $pid)"
@@ -268,13 +290,8 @@ fi
 # ── 6. Is it actually answering? ──────────────────────────────────────────────
 # portless prints the URL before the app behind it is listening, so poll until
 # something other than the proxy's 502 comes back.
-deadline=$(( SECONDS + ${DEV_UP_TIMEOUT:-90} ))
-code=000
-while (( SECONDS < deadline )); do
-  code="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 "$url/" || echo 000)"
-  case "$code" in 2*|3*|401|403) break ;; esac
-  sleep 2
-done
+probe_url "$url" "${DEV_UP_TIMEOUT:-90}" || true
+code="$PROBE_CODE"
 case "$code" in
   2*|3*|401|403) ;;
   *) say "dev-up: $url still answers HTTP $code after ${DEV_UP_TIMEOUT:-90}s. Pane $pane tail:"
