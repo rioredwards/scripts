@@ -31,12 +31,26 @@ Several commands here are symlinks into `~/.dotfiles/scripts/` so they stay on P
 - `brew-add.sh`
 - `brew-install-layered.sh`
 - `check-brew-sync.sh`
+- `check-home-paths.sh`
+- `dirs-to-launchd-env.sh`
+- `dotfiles-autosync`
+- `dotfiles-autosync.plist`
 - `drift-check.sh`
+- `git-sync`
+- `herdr-start.sh`
 - `install-git-hooks.sh`
 - `maintenance-doctor.sh`
 - `path_drift_audit.py`
 - `re-sync-codex-skills.sh`
+- `recent-projects-refresh.sh`
+- `refresh-recent-projects.py`
 - `setup-hammerspoon-cli.sh`
+- `tmux-layout.sh`
+- `tmux-new-pane.sh`
+- `tmux-new-session.sh`
+- `tmux-start.sh`
 - `validate-recent-projects.sh`
+
+These are created by `stow .` in `~/.dotfiles`, which can only partly unfold into this real directory. They are tracked as relative links so both Macs see the same set; after adding a script under `~/.dotfiles/scripts/`, run `stow .` there and commit the new link here.
 
 Archived or old one-off scripts live in `archive/`.

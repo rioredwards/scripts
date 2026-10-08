@@ -1,0 +1,1 @@
+../.dotfiles/scripts/refresh-recent-projects.py

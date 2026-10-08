@@ -1,0 +1,1 @@
+../.dotfiles/scripts/tmux-new-pane.sh

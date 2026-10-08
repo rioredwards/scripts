@@ -1,0 +1,1 @@
+../.dotfiles/scripts/dirs-to-launchd-env.sh
