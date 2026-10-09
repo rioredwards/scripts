@@ -64,6 +64,28 @@
       "text": "BLOCKED: this writes 200+ words to GitHub. A PR body, issue body, or review comment is something Rio has to read, and length there costs him exactly what a long chat reply does, the same 200-word ceiling applies. Scale it to the diff: a two-line docs change gets two sentences, not a document. Keep what changed, why, and anything he must decide, in plain English he can skim without opening the code. Fit the cap by CUTTING content (narration, rejected options, validation detail, minutiae live in the issue), never by compressing sentences into dense jargon fragments: a short body Rio can't read is worse than a long one. Do not route around this with --body-file. If the length is genuinely earned, re-run prefixed with `RIO_LONG_OK=1 ` and say in your reply why it was."
     },
     {
+      "id": "gh-body-file-cap",
+      "on": "tool",
+      "match": {
+        "tool": "^Bash$",
+        "input": "gh[[:space:]]+(pr|issue)[[:space:]].*(--body-file|[[:space:]]-F[[:space:]])"
+      },
+      "unless": "RIO_LONG_OK=1",
+      "do": "deny",
+      "text": "BLOCKED: --body-file hides the body from the 200-word gh-body-cap. Pass it inline instead: --body \"$(cat <<'EOF' ... EOF)\" so the cap can count it. If the length is genuinely earned, re-run prefixed with `RIO_LONG_OK=1 ` and say in your reply why."
+    },
+    {
+      "id": "pr-loc-table",
+      "on": "tool",
+      "match": {
+        "tool": "^Bash$",
+        "input": "gh[[:space:]]+pr[[:space:]]+create"
+      },
+      "unless": "pr-loc|\\| *Subsystem",
+      "do": "remind",
+      "text": "PR bodies open with the lines-changed table: put $(pr-loc) at the top of the inline --body, then a short plain-English paragraph. Use `gh pr edit --body` to add it now if this PR went out without it."
+    },
+    {
       "id": "system-changes-via-skill",
       "on": "tool",
       "match": {
