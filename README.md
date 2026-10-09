@@ -74,3 +74,21 @@ Several commands here are symlinks into `~/.dotfiles/scripts/` so they stay on P
 These are created by `stow .` in `~/.dotfiles`, which can only partly unfold into this real directory. They are tracked as relative links so both Macs see the same set; after adding a script under `~/.dotfiles/scripts/`, run `stow .` there and commit the new link here.
 
 Archived or old one-off scripts live in `archive/`.
+
+## MacBook wake
+
+The Mini's SSH config runs `macbook-wake HOST PORT` before connecting to `macbook`
+or its MagicDNS name. Unreachable hosts get the tested home-LAN wake packet and
+up to 30 seconds to respond; authentication and commands still run once in SSH.
+`ssh -G` and control requests do not wake it. Python 3, nc, route, arp and ifconfig
+are macOS dependencies, verified on both Macs.
+
+`macbook-wake --check HOST PORT` only checks reachability. Background callers also
+set `MACBOOK_NO_WAKE=1` for SSH to prevent a wake if it sleeps between checks.
+The five-minute session summarizer uses both and opens no persistent connection.
+
+Home router and MacBook MAC addresses live in `~/.config/macbook-wake.json`.
+The Mini's current address and broadcast are discovered, not fixed. A different
+router fails explicitly. If the MacBook changes its private Wi-Fi address, update
+the configured address and retest. SSH's `~/.ssh/rc` holds idle sleep on MacBooks
+only for the command's lifetime; it releases the hold on exit.
