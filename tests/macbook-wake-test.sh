@@ -59,7 +59,7 @@ class WakeTest(unittest.TestCase):
              patch.object(wake, 'send_wake') as send, patch.object(wake.time, 'sleep'), \
              patch.object(wake, 'settings', return_value={'macs': ['80:65:7c:c8:67:13']}):
             self.assertEqual(wake.main(['host', '22']), 0)
-            send.assert_called_once()
+            self.assertEqual(send.call_count, 2)
 
     def test_other_network_fails_without_broadcast(self):
         with patch.object(wake, 'reachable', return_value=False), \
@@ -75,7 +75,7 @@ class WakeTest(unittest.TestCase):
              patch.object(wake, 'home_network', return_value=('ip', 'broadcast')), \
              patch.object(wake, 'settings', return_value={}), \
              patch.object(wake, 'send_wake'), patch.object(wake.time, 'sleep'), \
-             patch.object(wake.time, 'monotonic', side_effect=[0, 1, 31]):
+             patch.object(wake.time, 'monotonic', side_effect=[0, 1, 31, 31]):
             err = io.StringIO()
             with contextlib.redirect_stderr(err):
                 self.assertEqual(wake.main(['host', '22']), 1)

@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 """SSH preflight: wake the MacBook on the verified home LAN, then wait briefly."""
 import json
 import os
@@ -100,6 +100,9 @@ def main(args):
             if reachable(host, port):
                 return 0
             time.sleep(1)
+            # Wi-Fi broadcasts can be lost; repeat only inside this bounded attempt.
+            if time.monotonic() < deadline:
+                send_wake(network, config)
         raise RuntimeError('MacBook still unreachable after 30 seconds')
     except (OSError, ValueError, KeyError, AttributeError, RuntimeError, subprocess.SubprocessError) as error:
         print(f'MacBook wake: {error}', file=sys.stderr)
