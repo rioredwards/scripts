@@ -92,3 +92,6 @@ The Mini's current address and broadcast are discovered, not fixed. A different
 router fails explicitly. If the MacBook changes its private Wi-Fi address, update
 the configured address and retest. SSH's `~/.ssh/rc` holds idle sleep on MacBooks
 only for the command's lifetime; it releases the hold on exit.
+
+Closed-lid battery wake remains experimental: a live one-minute SSH task lost
+connectivity despite its idle-sleep assertion. Reliable task completion is unverified.
