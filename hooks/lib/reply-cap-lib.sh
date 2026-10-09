@@ -24,10 +24,10 @@ reply_cap_value() {
   printf '%s' "$cap"
 }
 
-# Prose words in a reply, fenced code blocks excluded so a legitimate snippet
-# never trips the cap.
+# Prose words in a reply. Fenced code blocks and markdown table rows are
+# excluded: Rio wants structured output, and the cap prices prose only (L-0063).
 reply_prose_words() {
-  printf '%s\n' "$1" | awk '/^[[:space:]]*```/{f=!f; next} !f' | wc -w | tr -d ' '
+  printf '%s\n' "$1" | awk '/^[[:space:]]*```/{f=!f; next} f{next} /^[[:space:]]*\|/{next} 1' | wc -w | tr -d ' '
 }
 
 # True when this reply will be bounced: over cap, and not already the rewrite.
