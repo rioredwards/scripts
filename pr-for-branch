@@ -11,8 +11,8 @@
 # Cache: <git-dir>/statusline-pr-<branch, / -> _>, "none" when no PR.
 # TTL: $CLAUDE_STATUSLINE_PR_TTL seconds (default 120).
 # A real gh failure (gh missing, auth, network) exits non-zero with the reason on
-# stderr and never overwrites the cache. Async failures land in <cache>.err, which
-# also backs off retries for one TTL.
+# stderr and never overwrites the cache. Failures land in <cache>.err, which backs
+# off retries (async: silently; sync: replays the error, exit 1) for one TTL.
 set -u
 
 mode=url async=0 dir=.
@@ -20,7 +20,7 @@ for a in "$@"; do
   case "$a" in
     --json) mode=json ;;
     --async) async=1 ;;
-    -h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "pr-for-branch: unknown option $a" >&2; exit 2 ;;
     *) dir=$a ;;
   esac
@@ -70,6 +70,9 @@ if [ "$(age "$cache")" -gt "$ttl" ]; then
     if [ "$(age "$cache.err")" -gt "$ttl" ]; then
       ( refresh >/dev/null 2>&1 & )
     fi
+  elif [ "$(age "$cache.err")" -le "$ttl" ]; then
+    cat "$cache.err" >&2 # recent failure: replay it, don't hit gh again until it ages out
+    exit 1
   else
     refresh || exit 1
   fi

@@ -70,6 +70,15 @@ GH_MODE=fail
 if err=$(run 2>&1 >/dev/null); then fail "gh failure exited 0"; fi
 case "$err" in *"error connecting"*) ;; *) fail "stderr lost the reason: $err" ;; esac
 grep -q '"number":7' "$cache" || fail "failure overwrote the cache"
+# sync inside the backoff window: replays the error without calling gh
+n=$(calls)
+if err=$(run 2>&1 >/dev/null); then fail "sync backoff exited 0"; fi
+case "$err" in *"error connecting"*) ;; *) fail "sync backoff lost the reason: $err" ;; esac
+[ "$(calls)" = "$n" ] || fail "sync retried inside the backoff window"
+# once the error ages out, sync retries and a success clears it
+touch -t 200001010000 "$cache.err"; GH_MODE=pr
+run >/dev/null || fail "sync did not retry after backoff"
+[ ! -e "$cache.err" ] || fail "success left .err behind"
 
 # async: serves stale immediately, refreshes in the background; failure backs off
 touch -t 200001010000 "$cache"; rm -f "$cache.err"
