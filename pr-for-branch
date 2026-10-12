@@ -50,10 +50,11 @@ refresh() { # writes the cache; non-zero + stderr on a real failure
   err=$(mktemp) || return 1
   json=$(cd "$dir" && gh pr view --json number,url,reviewDecision,isDraft 2>"$err"); rc=$?
   if [ "$rc" -eq 0 ]; then
-    printf '%s' "$json" > "$cache"
+    printf '%s' "$json" > "$cache.$$" && mv "$cache.$$" "$cache" # atomic: readers never see a half-written cache
     rm -f "$cache.err"
-  elif grep -q 'no pull requests found' "$err"; then
-    printf 'none' > "$cache"
+  elif grep -Eq 'no pull requests found|no git remotes found|none of the git remotes' "$err"; then
+    # No PR is possible (or exists) here: a normal state, not a failure.
+    printf 'none' > "$cache.$$" && mv "$cache.$$" "$cache"
     rm -f "$cache.err"
     rc=0
   else

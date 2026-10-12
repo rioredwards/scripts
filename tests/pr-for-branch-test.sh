@@ -15,13 +15,14 @@ git -C "$repo" init -q -b feat/x
 git -C "$repo" -c user.name=t -c user.email=t@t commit -q --allow-empty -m seed
 cache="$repo/.git/statusline-pr-feat_x"
 
-# gh stub: $GH_MODE = pr | none | fail; every call appends to $tmp/calls.
+# gh stub: $GH_MODE = pr | none | noremote | fail; every call appends to $tmp/calls.
 cat > "$tmp/bin/gh" <<'STUB'
 #!/bin/sh
 echo call >> "$GH_CALLS"
 case "$GH_MODE" in
   pr) echo '{"isDraft":false,"number":7,"reviewDecision":"APPROVED","url":"https://github.com/o/r/pull/7"}' ;;
   none) echo 'no pull requests found for branch "feat/x"' >&2; exit 1 ;;
+  noremote) echo 'no git remotes found' >&2; exit 1 ;;
   fail) echo 'error connecting to api.github.com' >&2; exit 1 ;;
 esac
 STUB
@@ -35,6 +36,14 @@ GH_MODE=none; export GH_MODE
 out=$(run) || fail "no PR exited non-zero"
 [ -z "$out" ] || fail "no PR printed '$out'"
 [ "$(cat "$cache")" = none ] || fail "no PR not cached as none"
+
+# a repo with no GitHub remote has no PR: also empty, not an error
+touch -t 200001010000 "$cache"
+GH_MODE=noremote
+out=$(run) || fail "no remote exited non-zero"
+[ -z "$out" ] || fail "no remote printed '$out'"
+[ "$(cat "$cache")" = none ] || fail "no remote not cached as none"
+ls "$repo/.git" | grep -q 'statusline-pr-feat_x\.[0-9]' && fail "temp cache file left behind"
 
 # stale cache + PR: URL, and --json carries the number
 touch -t 200001010000 "$cache"
