@@ -1,0 +1,80 @@
+#!/bin/bash
+# pr-for-branch: the open PR for the current branch, from a per-branch TTL cache.
+# Shared by the Claude statusline and the system-band mod so both stay fresh.
+#
+#   pr-for-branch [--json] [--async] [DIR]
+#
+# Prints the PR URL (empty, exit 0: no PR, not a repo, or detached HEAD).
+# --json  print the cached `gh pr view --json number,url,reviewDecision,isDraft` object instead.
+# --async on a stale cache, print what is cached and refresh in the background
+#         (the statusline must not wait on the network). Without it, refresh first.
+# Cache: <git-dir>/statusline-pr-<branch, / -> _>, "none" when no PR.
+# TTL: $CLAUDE_STATUSLINE_PR_TTL seconds (default 120).
+# A real gh failure (gh missing, auth, network) exits non-zero with the reason on
+# stderr and never overwrites the cache. Async failures land in <cache>.err, which
+# also backs off retries for one TTL.
+set -u
+
+mode=url async=0 dir=.
+for a in "$@"; do
+  case "$a" in
+    --json) mode=json ;;
+    --async) async=1 ;;
+    -h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -*) echo "pr-for-branch: unknown option $a" >&2; exit 2 ;;
+    *) dir=$a ;;
+  esac
+done
+
+command -v gh >/dev/null 2>&1 || { echo "pr-for-branch: gh not found on PATH" >&2; exit 127; }
+command -v jq >/dev/null 2>&1 || { echo "pr-for-branch: jq not found on PATH" >&2; exit 127; }
+
+# Not a repo, or detached HEAD: no PR, not an error.
+out=$(git -C "$dir" rev-parse --absolute-git-dir --abbrev-ref HEAD 2>/dev/null) || exit 0
+git_dir=${out%%$'\n'*}
+branch=${out#*$'\n'}
+{ [ -n "$branch" ] && [ "$branch" != HEAD ]; } || exit 0
+
+cache="$git_dir/statusline-pr-$(printf '%s' "$branch" | tr '/' '_')"
+ttl=${CLAUDE_STATUSLINE_PR_TTL:-120}
+
+age() { # seconds since <file> changed, 999999 when absent
+  local m
+  [ -e "$1" ] || { echo 999999; return; }
+  m=$(stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null) || { echo 999999; return; }
+  echo $(( $(date +%s) - m ))
+}
+
+refresh() { # writes the cache; non-zero + stderr on a real failure
+  local json err rc
+  err=$(mktemp) || return 1
+  json=$(cd "$dir" && gh pr view --json number,url,reviewDecision,isDraft 2>"$err"); rc=$?
+  if [ "$rc" -eq 0 ]; then
+    printf '%s' "$json" > "$cache"
+    rm -f "$cache.err"
+  elif grep -q 'no pull requests found' "$err"; then
+    printf 'none' > "$cache"
+    rm -f "$cache.err"
+    rc=0
+  else
+    printf 'pr-for-branch: gh pr view exited %s: %s\n' "$rc" "$(cat "$err")" > "$cache.err"
+    cat "$cache.err" >&2
+  fi
+  rm -f "$err"
+  return "$rc"
+}
+
+if [ "$(age "$cache")" -gt "$ttl" ]; then
+  if [ "$async" = 1 ]; then
+    if [ "$(age "$cache.err")" -gt "$ttl" ]; then
+      ( refresh >/dev/null 2>&1 & )
+    fi
+  else
+    refresh || exit 1
+  fi
+fi
+
+[ -r "$cache" ] || exit 0
+text=$(cat "$cache")
+case "$text" in none*|'') exit 0 ;; esac
+if [ "$mode" = json ]; then printf '%s\n' "$text"; else jq -r '.url // empty' <<<"$text"; fi

@@ -16,6 +16,7 @@ Small personal command wrappers and automation helpers. App-sized tools live in 
 - `dev-scan` - what this Mac has to run, as JSON, for tools: `dev-scan apps`, `dev-scan worktrees <dir>`, `dev-scan scripts <dir>`. Start-script detection mirrors `dev-up`. Meant to be run over ssh too: the answers describe the machine it ran on.
 - `hooks/turn-end/` - end-of-turn hooks: per-agent adapters feed `dispatch`, which summarizes, speaks, texts, publishes, and indexes each reply.
 - `pm` - the one door to the project manager (`~/dev/project-manager`): `pm` talks to it, `pm daily` runs today's routine (`--headless` for no prompts), `pm last` prints the newest journal entry. `pm-daily` is a shim for `pm daily`. The desktop app runs the routine on its own at 06:30 weekdays.
+- `pr-for-branch` - PR URL for the current branch from a per-branch TTL cache (empty when none); `--json` for the full object, `--async` to serve the cache and refresh in the background. Shared by the Claude statusline and the system-band mod. `pr-for-branch [--json] [--async] [DIR]`.
 - `pr-loc` - markdown LOC breakdown of the current branch's diff by kind (logic/tests/docs/config/generated) and subsystem, for PR bodies. `pr-loc [base]`.
 - `text-phone-summary` - source-agnostic note pipeline helper for a file path, literal text, or stdin.
 - `process-text-for-speech` - prepares text for speech via `aitt`.
