@@ -20,7 +20,7 @@ for a in "$@"; do
   case "$a" in
     --json) mode=json ;;
     --async) async=1 ;;
-    -h|--help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "pr-for-branch: unknown option $a" >&2; exit 2 ;;
     *) dir=$a ;;
   esac
