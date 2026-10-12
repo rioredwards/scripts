@@ -361,6 +361,23 @@ class RulesTests(unittest.TestCase):
         out = self.run_hook("tool", {"tool_name": "Bash", "tool_input": {"command": real}})
         self.assertIn("utils:system", out.stdout)
 
+    def test_piped_pytest_only_blocks_full_runs(self):
+        """A piped full suite is denied; a piped single test file is a focused run."""
+        blocked = ["pytest -q | tail -5", "python3 -m pytest -q 2>&1 | tail -3"]
+        allowed = [
+            "python3 -m pytest -q hooks/rules/test_rules.py 2>&1 | tail -3",
+            "pytest -q tests/unit/test_a.py | tail",
+            "pytest -q -k ledger | tail",
+        ]
+        for cmd in blocked:
+            with self.subTest(blocked=cmd):
+                out = self.run_hook("tool", {"tool_name": "Bash", "tool_input": {"command": cmd}})
+                self.assertIn("piping a full pytest run", out.stdout)
+        for cmd in allowed:
+            with self.subTest(allowed=cmd):
+                out = self.run_hook("tool", {"tool_name": "Bash", "tool_input": {"command": cmd}})
+                self.assertNotIn("piping a full pytest run", out.stdout)
+
     def test_system_edits_route_to_system_skill(self):
         """Edit/Write into Rio's system files get the utils:system nudge; other paths do not."""
         hit = [
