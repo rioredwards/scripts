@@ -88,3 +88,10 @@ plus `list-variables`, so values never reach a transcript. `railway-cli-read-onl
 `run`, `shell`, `ssh`, `connect`, `api`, and the rest); `status`, `logs`, `metrics`, `list`,
 `deployment list`, `service list`, `domain list`, `docs` stay open. Deny list, not allow
 list, so `railway logs && railway up` cannot slip through. Ledger: L-0114.
+
+## Raw tabs
+
+`no-writing-raw-tabs` denies a Bash command or file write that has a Sheets write verb
+(API, gws, gog, gspread) plus a `<Name>-Raw` tab name. Rio pastes those tabs from the
+distributor exports. Misses: tab name built without a literal `-Raw`, a script file run
+later, MCP sheet tools. Also blocks a call that reads a Raw tab and writes another tab in one script.

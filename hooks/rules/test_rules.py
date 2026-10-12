@@ -378,6 +378,35 @@ class RulesTests(unittest.TestCase):
                 out = self.run_hook("tool", {"tool_name": "Bash", "tool_input": {"command": cmd}})
                 self.assertNotIn("piping a full pytest run", out.stdout)
 
+    def test_raw_tabs_are_never_written(self):
+        """Sheets writes aimed at a distributor Raw tab are denied; reads and other tabs pass."""
+        raw = "Springboard-" + "Raw"
+        py = "service.spreadsheets().values().%s(spreadsheetId=ID, range='" + raw + "!A1', body=b).execute()"
+        denied = [
+            ("Bash", {"command": "python3 -c \"" + py % "append" + "\""}),
+            ("Bash", {"command": "python3 -c \"" + py % "update" + "\""}),
+            ("Bash", {"command": "gws sheets spreadsheets values append --params '{\"range\":\"Columbia-Full-" + "Raw!A1\"}'"}),
+            ("Bash", {"command": "gog sheets append ID '" + raw + "!A1' a b"}),
+            ("Bash", {"command": "curl -X POST https://sheets.googleapis.com/v4/spreadsheets/ID/values/" + raw + "!A1:append"}),
+            ("Write", {"file_path": "/tmp/x.py", "content": "ws = sh.worksheet('Americal-" + "Raw')\nws.update('A1', rows)\n"}),
+            ("Write", {"file_path": "/tmp/x.py", "content": "r = {'appendCells': {}}  # Romano-" + "Raw sheetId"}),
+        ]
+        allowed = [
+            ("Bash", {"command": "python3 -c \"" + py % "get" + "\""}),
+            ("Bash", {"command": "gog sheets get ID '" + raw + "!A1:Z9'"}),
+            ("Bash", {"command": "python3 -c \"" + (py % "append").replace(raw, "Springboard-Clean") + "\""}),
+            ("Bash", {"command": "grep -n 'append' foo.py && echo " + raw}),
+        ]
+        for tool, inp in denied:
+            with self.subTest(denied=inp):
+                out = self.run_hook("tool", {"tool_name": tool, "tool_input": inp})
+                self.assertIn("deny", out.stdout)
+                self.assertIn("Raw tabs", out.stdout)
+        for tool, inp in allowed:
+            with self.subTest(allowed=inp):
+                out = self.run_hook("tool", {"tool_name": tool, "tool_input": inp})
+                self.assertNotIn("Raw tabs", out.stdout)
+
     def test_system_edits_route_to_system_skill(self):
         """Edit/Write into Rio's system files get the utils:system nudge; other paths do not."""
         hit = [

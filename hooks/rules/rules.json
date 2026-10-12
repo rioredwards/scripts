@@ -231,6 +231,16 @@
       "text": "BLOCKED: railway CLI is read-only for agents. Writes, deploys, and anything that exposes variables (variables, run, shell, ssh, connect, api) are Rio's. Allowed: railway status, logs, metrics, list, deployment list, service list, domain list, docs."
     },
     {
+      "id": "no-writing-raw-tabs",
+      "on": "tool",
+      "match": {
+        "tool": "^(Bash|exec_command|shell|Write|Edit|MultiEdit|NotebookEdit)$|apply_patch$",
+        "content": "(?s)(?=.*[A-Za-z]-Raw(?![A-Za-z0-9]))(?i:.*(appendCells|updateCells|pasteData|copyPaste|values(\\(\\))?[.[:space:]:/]+(update|append|clear|batchUpdate|batchClear)|:(append|clear)([^a-z]|$)|batch_?update|update_?cells?|update_acell|append_?rows?|insert_?rows?|\\+append|(^|[^a-z]|\\\\[nt])(ws|sheet|worksheet|tab)[a-z_]*\\.update\\(|(^|[^a-z]|\\\\[nt])gog\\b[^|;&]*[[:space:]](update|edit|set|batch-update|batch|batch-request|append|add|clear|copy-paste|fill|copy-range|insert|format|merge)[[:space:]]))"
+      },
+      "do": "deny",
+      "text": "BLOCKED: distributor Raw tabs (Springboard-Raw, Columbia-Full-Raw, ...) hold exports Rio pastes by hand. Never write them (API, gws, gog, gspread, scripts); give Rio paste steps instead. Reads are fine."
+    },
+    {
       "id": "tooling-must-still-run",
       "on": "tool",
       "match": {
