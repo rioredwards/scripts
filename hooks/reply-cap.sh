@@ -26,6 +26,10 @@ set -uo pipefail
 PAYLOAD="$(cat)"
 reply_will_bounce "$PAYLOAD" || exit 0
 
-printf 'Reply is %s words of prose; the cap is %s.\n' "$REPLY_WORDS" "$REPLY_CAP" >&2
+if [ "${REPLY_SHORT_ASK:-0}" = 1 ]; then
+  printf 'Reply is %s words of prose; Rio asked in %s words or fewer, so the cap is %s.\n' "$REPLY_WORDS" "$SHORT_ASK_WORDS" "$REPLY_CAP" >&2
+else
+  printf 'Reply is %s words of prose; the cap is %s.\n' "$REPLY_WORDS" "$REPLY_CAP" >&2
+fi
 printf 'Rio reads all of it, so length is his cost, not yours. Keep the outcome, what he would notice, and any decision that needs him. Cut everything else, options not taken, reasoning he did not ask for, restatements of what he just said. Cut whole items, in plain English; never squeeze under the cap by compressing sentences into dense jargon fragments, a short reply Rio cannot read is worse than a long one. Open the retry with a `---` line and `🔄 Trimmed reply:` so Rio can tell the two apart. Then stop again.\n' >&2
 exit 2

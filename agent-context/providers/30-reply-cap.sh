@@ -14,7 +14,7 @@ lib="$HOME/scripts/hooks/lib/reply-cap-lib.sh"
 . "$lib"
 
 if cap="$(reply_cap_value)"; then
-  echo "Reply cap: $cap prose words (fenced code excluded). A hook bounces anything over."
+  echo "Reply cap: $cap prose words (fenced code excluded), $SHORT_ASK_CAP when Rio's prompt is $SHORT_ASK_WORDS words or fewer. A hook bounces anything over."
 else
   echo "Reply cap: off. No hook enforcement right now, stay brief anyway."
 fi

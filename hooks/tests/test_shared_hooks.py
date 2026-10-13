@@ -94,6 +94,26 @@ class SharedHooks(unittest.TestCase):
                           AGENT_SPIN_CHECK='on', AGENT_DELEGATE='1')
         self.assertEqual((r.returncode, r.stdout, r.stderr), (0, '', ''))
 
+    def test_reply_cap_tightens_for_short_asks(self):
+        words = lambda n: ' '.join(['word'] * n)
+        claude = lambda prompt: [{'type': 'user', 'message': {'content': prompt}},
+                                 {'type': 'user', 'message': {'content': [{'type': 'tool_result', 'content': 'x'}]}}]
+        codex = lambda prompt: [{'type': 'response_item', 'payload': {'type': 'message', 'role': 'user',
+                                 'content': [{'type': 'input_text', 'text': '<environment_context/>'}]}},
+                                {'type': 'event_msg', 'payload': {'type': 'user_message', 'message': prompt}}]
+        cases = [(claude('what is up'), 100, 2), (claude(words(9)), 100, 0),
+                 (codex('how did yesterday go'), 100, 2), (codex(words(9)), 100, 0),
+                 (claude('<command-message>pm:talk</command-message>'), 100, 0),
+                 (claude('short ask'), 60, 0)]
+        for events, reply_words, code in cases:
+            with tempfile.TemporaryDirectory() as td:
+                t = Path(td) / 't.jsonl'
+                t.write_text(''.join(json.dumps(e) + '\n' for e in events))
+                r = self.run_hook('reply-cap.sh', {'transcript_path': str(t), 'stop_hook_active': False,
+                                                   'last_assistant_message': words(reply_words)},
+                                  AGENT_DELEGATE='')
+                self.assertEqual(r.returncode, code, (events, r.stderr))
+
     def test_claude_and_codex_register_same_hooks(self):
         """A guard hook added for one agent must reach the other (ledger: Codex runs the same guard hooks)."""
         def hooks(path):

@@ -12,7 +12,34 @@
 # and nothing to clean up when a turn dies mid-flight.
 #
 #   AGENT_REPLY_MAX_WORDS   word cap, or `off` to disable (default 200)
+#
+# Short asks get a tighter cap: a prompt of SHORT_ASK_WORDS or fewer caps the
+# reply at SHORT_ASK_CAP (A11, 2026-10-13), because near-200-word answers to
+# one-line questions kept overwhelming Rio (L-0033 audit, 10-09).
 set -u
+
+SHORT_ASK_WORDS=8
+SHORT_ASK_CAP=80
+
+# Rio's latest prompt from a Claude or Codex transcript, newest first. Prints
+# nothing when the newest prompt is wrapper text (skill/command invocations,
+# injected context), so those never count as short asks.
+reply_last_prompt() {
+  _t="$(printf '%s' "$1" | jq -r '.transcript_path // empty' 2>/dev/null)"
+  [ -f "$_t" ] || return 0
+  tail -r "$_t" 2>/dev/null | jq -rc '
+    if .type=="event_msg" and .payload.type=="user_message" then
+      "U\t" + ((.payload.message // "") | gsub("\\s+"; " "))
+    elif .type=="user" and (.isMeta // false | not) and (.isCompactSummary // false | not) then
+      (.message.content // empty)
+      | (if type=="string" then . else (map(select(.type=="text") | .text) | join(" ")) end)
+      | select(. != "")
+      | sub("^\\s*<!-- reply -->"; "")
+      | select(test("^\\s*\\[Request interrupted") | not)
+      | "U\t" + gsub("\\s+"; " ")
+    else empty end
+  ' 2>/dev/null | head -n 1 | cut -f2- | awk '/^[[:space:]]*</{next} 1'
+}
 
 # The cap, or empty when disabled / nonsense / jq missing.
 reply_cap_value() {
@@ -41,6 +68,13 @@ reply_will_bounce() {
   hook_is_delegate "$payload" && return 1
 
   cap="$(reply_cap_value)" || return 1
+  REPLY_SHORT_ASK=0
+  prompt="$(reply_last_prompt "$payload")"
+  if [ -n "$prompt" ] && [ "$SHORT_ASK_CAP" -lt "$cap" ] \
+     && [ "$(printf '%s' "$prompt" | wc -w | tr -d ' ')" -le "$SHORT_ASK_WORDS" ]; then
+    cap="$SHORT_ASK_CAP"
+    REPLY_SHORT_ASK=1
+  fi
 
   # No cap hook registered means nobody will ask for a rewrite, so callers must
   # not skip work waiting on one that never comes.
