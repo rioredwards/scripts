@@ -113,6 +113,13 @@ LINE="$(jq -nr \
                    // (if $o == null then $out else "" end))
                   + (if $code == 2 then $err else "" end)) | .[0:400]) as $r
                 | if $r == "" then null else $r end),
+      # Which rules.json rule(s) fired, parsed from run.shs tagged output.
+      rule:    (if $hook == "rules/run.sh" then
+                  ((($o.hookSpecificOutput.permissionDecisionReason
+                     // $o.hookSpecificOutput.additionalContext // "") + $err)
+                   | [match("(?:\\[rule: |NUDGE \\(rule: |Rule triggered \\()([A-Za-z0-9_.,-]+)").captures[0].string]
+                   | first // null)
+                else null end),
       cmd:     ($cmd | .[0:200])
     }
   | if .decision == null and (.nudged | not) and .reason == null and .exit == 0

@@ -104,10 +104,10 @@ if [ "$KIND" = "tool" ]; then
   # Claude PreToolUse. `allow` on a remind is deliberate: it suppresses the
   # permission prompt so the nudge never turns into a question for Rio.
   if [ "$DECISION" = "deny" ]; then
-    jq -n --arg r "$MSG" '{hookSpecificOutput:{hookEventName:"PreToolUse",
+    jq -n --arg r "[rule: $IDS] $MSG" '{hookSpecificOutput:{hookEventName:"PreToolUse",
       permissionDecision:"deny", permissionDecisionReason:$r}}'
   else
-    jq -n --arg c "NUDGE (non-blocking, Rio was not asked): $MSG" \
+    jq -n --arg c "NUDGE (rule: $IDS; non-blocking, Rio was not asked): $MSG" \
       '{hookSpecificOutput:{hookEventName:"PreToolUse",
         permissionDecision:"allow", additionalContext:$c}}'
   fi
