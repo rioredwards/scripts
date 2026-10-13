@@ -106,6 +106,16 @@ commit "$me" m2 5
 git -C "$me" rebase -q origin/dev
 check "rebase after a merge counts only the replayed commits" "$me" 0 "within budget: 15/100"
 
+# commits made before the budget was set stay excluded after a rebase replays them
+world preset; me="$w/me"; cow="$w/cow"
+git -C "$me" checkout -q -b feat
+commit "$me" pre 10
+(cd "$me" && "$budget" set 50 >/dev/null)
+commit "$me" mine 3
+commit "$cow" theirs 200; git -C "$cow" push -q origin dev
+git -C "$me" fetch -q; git -C "$me" rebase -q origin/dev
+check "rebase keeps pre-budget commits excluded" "$me" 0 "within budget: 3/50"
+
 # --- #9: a branch made from origin/dev (tracks it) refreshes after a rebase --
 world split; me="$w/me"; cow="$w/cow"
 git -C "$me" checkout -q -b feat origin/dev 2>/dev/null

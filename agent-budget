@@ -20,7 +20,8 @@
 # since SET_AT, carrying forward the lines already written before it (CARRY). It
 # also takes the newer split point from origin/dev or origin's default branch
 # after a rebase (skipped while you are ON that branch, or pushed work would
-# stop counting).
+# stop counting). Branch commits made before `set` (PRE) stay excluded when a
+# rebase replays them.
 #
 # Exit codes: 0 within budget · 1 over · 3 no budget set · 2 usage/infra error
 set -u
@@ -51,6 +52,20 @@ is_anc() { git merge-base --is-ancestor "$1" "$2" 2>/dev/null; }
 on_line() {
   last="$(git rev-list --first-parent "$2" "^$1" 2>/dev/null | tail -n 1)"
   [ -n "$last" ] && [ "$(git rev-parse -q --verify "$last^1")" = "$1" ]
+}
+
+# pre_lines <base>: committed lines between the newest upstream split point and base
+# (work on the branch before the budget). A rebase replays them; status subtracts PRE.
+pre_lines() {
+  sp=""; here="$(git symbolic-ref --short -q HEAD || true)"
+  for ref in origin/dev origin/HEAD; do
+    rb="$(git rev-parse --abbrev-ref -q "$ref" 2>/dev/null)" || continue
+    [ "${rb#origin/}" = "$here" ] && continue
+    mb="$(git merge-base "$1" "$ref" 2>/dev/null)" || continue
+    { [ -z "$sp" ] || is_anc "$sp" "$mb"; } && sp="$mb"
+  done
+  [ -n "$sp" ] || { echo 0; return; }
+  count_diff "$(range_diff "$sp" "$1")"; echo "$D_LOC"
 }
 
 # resolve_base: walk the HEAD reflog (oldest first) from SET_AT and move the base past
@@ -92,7 +107,7 @@ resolve_base() {
     elif [ "$kind" = rebase ] && ! on_line "$new" "$p"; then
       # Rebasing onto a branch merged in earlier drops the merge and replays our commits on top of new.
       snapB="$RB"; snapC="$RC"; snapF="$RF"
-      RC=0; RF=0
+      RC=$((0 - ${PRE:-0})); RF=0
     else
       continue
     fi
@@ -110,7 +125,7 @@ case "$cmd" in
     case "$loc" in ''|*[!0-9]*) die "usage: agent-budget set <loc> [--files N] [--base REF]" ;; esac
     # Raising an existing budget keeps its base: but only on the same branch;
     # a fresh budget or a branch switch measures from HEAD (stale bases gate falsely).
-    files=""; base="HEAD"; carry=0; carryfiles=0
+    files=""; base="HEAD"; carry=0; carryfiles=0; pre=""
     branch="$(git symbolic-ref --short -q HEAD || echo detached)"
     if [ -r "$STATE" ] && [ "$(sed -n 's/^BRANCH=//p' "$STATE")" = "$branch" ]; then
       # Keep the base AND what arrived since: a new SET_AT would otherwise forget earlier pulls.
@@ -118,21 +133,22 @@ case "$cmd" in
       CARRY="$(sed -n 's/^CARRY=//p' "$STATE")"; CARRY_FILES="$(sed -n 's/^CARRY_FILES=//p' "$STATE")"
       if git rev-parse --verify -q "$BASE^{commit}" >/dev/null; then
         resolve_base
-        base="$RB"; carry="$RC"; carryfiles="$RF"
+        base="$RB"; carry="$RC"; carryfiles="$RF"; pre="$(sed -n 's/^PRE=//p' "$STATE")"
       fi
     fi
     # Kept base gone stale (rebase)? Refresh to HEAD instead of re-saving a false gate.
-    if [ "$base" != "HEAD" ] && ! git merge-base --is-ancestor "$base" HEAD 2>/dev/null; then base="HEAD"; carry=0; carryfiles=0; fi
+    if [ "$base" != "HEAD" ] && ! git merge-base --is-ancestor "$base" HEAD 2>/dev/null; then base="HEAD"; carry=0; carryfiles=0; pre=""; fi
     while [ $# -gt 0 ]; do
       case "$1" in
         --files) files="${2:-}"; shift 2 ;;
-        --base)  base="${2:-}"; carry=0; carryfiles=0; shift 2 ;;
+        --base)  base="${2:-}"; carry=0; carryfiles=0; pre=""; shift 2 ;;
         *) die "unknown flag $1" ;;
       esac
     done
     [ -n "$files" ] && case "$files" in *[!0-9]*) die "--files wants a number" ;; esac
     sha="$(git rev-parse --verify "$base^{commit}" 2>/dev/null)" || die "bad base ref: $base"
-    printf 'BASE=%s\nLOC=%s\nFILES=%s\nBRANCH=%s\nSET_AT=%s\nCARRY=%s\nCARRY_FILES=%s\n' "$sha" "$loc" "$files" "$branch" "$(date +%s)" "$carry" "$carryfiles" > "$STATE"
+    [ -n "$pre" ] || pre="$(pre_lines "$sha")"
+    printf 'BASE=%s\nLOC=%s\nFILES=%s\nBRANCH=%s\nSET_AT=%s\nCARRY=%s\nCARRY_FILES=%s\nPRE=%s\n' "$sha" "$loc" "$files" "$branch" "$(date +%s)" "$carry" "$carryfiles" "$pre" > "$STATE"
     rm -f "$WARNED"
     printf 'budget set: %s LOC%s, measured from %s\n' "$loc" "${files:+, $files new files}" "$(git rev-parse --short "$sha")"
     ;;
