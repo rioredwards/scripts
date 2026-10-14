@@ -370,6 +370,18 @@ if [ -n "$webview_wanted" ]; then
     '{summary:$summary, agent:$agent, repo_name:$repo_name, created_at:$created_at} + $merge')"
 fi
 
+# Text the summary to Rio's phone when the text toggle is on. Background, so a
+# flaky Shortcuts run can never take the audio or the web view down with it.
+AGENT_TEXT="${AGENT_TEXT:-on}"
+text_wanted=""
+case "$AGENT_TEXT" in on|1|true|yes) text_wanted=1 ;; esac
+send_text() {
+  { printf '%s' "$1" \
+      | "$scripts_root/sc" text-phone >/dev/null 2>>"$log_dir/summarize.err" \
+      || printf '%s\ttext-phone failed\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>"$log_dir/summarize.err"
+    mark text-phone; } &
+}
+
 # Synthesize, then show the page: one detached chain, so the hook still returns
 # immediately but the two surfaces of a turn arrive together.
 #
@@ -381,6 +393,11 @@ fi
 # When no audio is coming: toggle off, host-gated to the mini, a degraded turn,
 # or a synth that failed: the page opens immediately, transcript-only. There is
 # nothing to wait for, and a page is still the fastest way to see a ⚠️.
+#
+# When a clip is coming, the text waits for it. The phone Shortcut that plays
+# clips fires on this text, so it must not land before the clip is in iCloud.
+# The `Clip:` line names the exact file to play. A clip that never reaches
+# iCloud still sends the text, flagged, so the turn is never lost.
 if [ -n "$audio_wanted" ] || [ -n "$webview_wanted" ]; then
   {
     audio_path=""
@@ -402,6 +419,26 @@ if [ -n "$audio_wanted" ] || [ -n "$webview_wanted" ]; then
           | "$scripts_root/hooks/turn-end/audio-note-to-file" -w)" || audio_path=""
       fi
     fi
+    if [ -n "$text_wanted" ] && [ -n "$audio_wanted" ]; then
+      if [ -n "$audio_path" ] && [ -f "$audio_path" ]; then
+        (
+          clip="$(basename "$audio_path")"
+          if "$scripts_root/icloud-wait-uploaded" "$audio_path" "${AGENT_AUDIO_UPLOAD_TIMEOUT:-120}" 2>>"$log_dir/summarize.err"; then
+            mark icloud-uploaded
+            send_text "$summary
+
+Clip: $clip"
+          else
+            send_text "$summary
+
+⚠️ Clip not in iCloud yet: $clip"
+          fi
+          wait
+        ) &
+      else
+        send_text "$summary"
+      fi
+    fi
     if [ -n "$webview_wanted" ]; then
       if [ -n "$audio_path" ] && [ -f "$audio_path" ]; then
         printf '%s' "$wv_payload" \
@@ -414,20 +451,7 @@ if [ -n "$audio_wanted" ] || [ -n "$webview_wanted" ]; then
 fi
 mark fork
 
-# Text the summary to Rio's phone when the text toggle is on.
-#
-# Last, and detached. It used to run first and in the foreground: a leftover
-# from when the phone was the only surface, kept by nobody's decision. That cost
-# every turn a second of `shortcuts run` before the audio synth and the page
-# were even started, and worse: under `set -e` a flaky Shortcuts run aborted the
-# script right there, so a failed text silently took the audio and the web view
-# with it. A background job's failure cannot do that.
-AGENT_TEXT="${AGENT_TEXT:-on}"
-case "$AGENT_TEXT" in
-  on|1|true|yes)
-    { printf '%s' "$summary" \
-        | "$scripts_root/sc" text-phone >/dev/null 2>>"$log_dir/summarize.err" \
-        || printf '%s\ttext-phone failed\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>"$log_dir/summarize.err"
-      mark text-phone; } &
-    ;;
-esac
+# No clip coming: text right away.
+if [ -n "$text_wanted" ] && [ -z "$audio_wanted" ]; then
+  send_text "$summary"
+fi

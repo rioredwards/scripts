@@ -1,0 +1,38 @@
+#!/usr/bin/env swift
+// icloud-wait-uploaded FILE [TIMEOUT_SECONDS]
+// Blocks until iCloud Drive reports FILE as uploaded. Exit 0 = uploaded,
+// 1 = timed out (default 120s), 2 = bad usage or not an iCloud file.
+// Used by hooks/turn-end/dispatch so the phone text that triggers playback
+// is only sent once the clip can actually be downloaded on the phone.
+import Foundation
+
+let args = CommandLine.arguments
+guard args.count >= 2 else {
+  FileHandle.standardError.write("usage: icloud-wait-uploaded FILE [TIMEOUT_SECONDS]\n".data(using: .utf8)!)
+  exit(2)
+}
+let path = args[1]
+let timeout = args.count >= 3 ? (Double(args[2]) ?? 120) : 120
+let deadline = Date().addingTimeInterval(timeout)
+let keys: Set<URLResourceKey> = [.isUbiquitousItemKey, .ubiquitousItemIsUploadedKey]
+
+while true {
+  var url = URL(fileURLWithPath: path)
+  url.removeAllCachedResourceValues()
+  do {
+    let v = try url.resourceValues(forKeys: keys)
+    guard v.isUbiquitousItem == true else {
+      FileHandle.standardError.write("icloud-wait-uploaded: not an iCloud file: \(path)\n".data(using: .utf8)!)
+      exit(2)
+    }
+    if v.ubiquitousItemIsUploaded == true { exit(0) }
+  } catch {
+    FileHandle.standardError.write("icloud-wait-uploaded: \(error.localizedDescription)\n".data(using: .utf8)!)
+    exit(2)
+  }
+  if Date() >= deadline {
+    FileHandle.standardError.write("icloud-wait-uploaded: timed out after \(Int(timeout))s: \(path)\n".data(using: .utf8)!)
+    exit(1)
+  }
+  Thread.sleep(forTimeInterval: 1)
+}

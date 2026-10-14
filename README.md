@@ -40,6 +40,7 @@ Small personal command wrappers and automation helpers. App-sized tools live in 
 - `install-pr-review` - drop the Claude auto PR-review workflow into a repo. `install-pr-review [REPO_PATH]`.
 - `recap-repo-audio` - spoken re-entry recap for a repo, cached (recon bundle, `aitt`, `grok-tts`).
 - `claude-token-audit.sh` - where Claude Code token and quota burn went, per session, cost-weighted.
+- `icloud-wait-uploaded` - block until iCloud Drive reports a file uploaded; the turn-end phone text waits on it so the clip it names is ready on the phone.
 - `narration-context`, `narration-body`, `narration-title`, `narration-render`, `narration-spoken` - stages of the turn-narration pipeline used by `hooks/turn-end/`.
 - `git-commit-selector.sh` - pick a previous commit message with fzf, ready for `git commit -m`.
 - `git-quicklog.sh` - last two commits with short stats.
