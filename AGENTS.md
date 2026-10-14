@@ -12,6 +12,8 @@
 
 `sh tests/run-all.sh` runs every test (shell, Python, rules validation) and exits non-zero on any failure. Run it after any hook or script change. Add new tests as `tests/<name>-test.sh` so the runner picks them up.
 
+A new executable in `~/scripts` or `~/tools` needs a `tool-inventory` line (check command or `skip: reason`), or the daily `tool-check` reports it.
+
 ## Routing
 
 | Task | Read first |

@@ -20,7 +20,7 @@ agent-toggle | agent-toggle --json
 aitt | aitt --list
 annotate | annotate --help
 cal-add | cal-add --help
-check-home-paths.sh | check-home-paths.sh --all --no-fix
+check-home-paths.sh | cd "$HOME/scripts" && check-home-paths.sh --all --no-fix >/dev/null
 claude-latest | claude-latest 2>&1 | grep -q 'usage: claude-latest'
 cleanshot | cleanshot --help
 dev-lease | dev-lease --help
