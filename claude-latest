@@ -1,0 +1,97 @@
+#!/usr/bin/python3
+"""claude-latest: the newest Claude model in a family, straight from Anthropic.
+
+Tools ask for a family (haiku, sonnet, opus, fable), never a pinned model ID,
+so they move to a new model the day it ships. The answer comes from the Models
+API, cached for a few hours so callers stay fast.
+
+  claude-latest sonnet              # print the newest sonnet's ID
+  claude-latest --json sonnet       # {"id": ..., "max_tokens": ...}
+  claude-latest --json claude-opus-5-5   # a full ID works too (must exist)
+
+Fails loudly (exit 1) when the lookup fails or the name matches nothing.
+"""
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+CACHE = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "claude-latest" / "models.json"
+CACHE_SECONDS = int(os.environ.get("CLAUDE_LATEST_CACHE_SECONDS", 6 * 3600))
+API = "https://api.anthropic.com/v1/models"
+
+
+def die(msg: str) -> None:
+    print(f"claude-latest: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def fetch() -> list[dict]:
+    key = subprocess.run(
+        [str(Path.home() / "scripts" / "keyfor"), "ANTHROPIC_API_KEY"],
+        capture_output=True, text=True,
+    )
+    if key.returncode != 0 or not key.stdout.strip():
+        die(f"keyfor could not read ANTHROPIC_API_KEY: {key.stderr.strip()}")
+    models: list[dict] = []
+    after = ""
+    while True:
+        req = urllib.request.Request(
+            f"{API}?limit=1000{'&after_id=' + after if after else ''}",
+            headers={"x-api-key": key.stdout.strip(), "anthropic-version": "2023-06-01"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                page = json.load(resp)
+        except urllib.error.HTTPError as exc:
+            die(f"Models API returned {exc.code}: {exc.read().decode(errors='replace')[:300]}")
+        except (urllib.error.URLError, TimeoutError) as exc:
+            die(f"Models API unreachable: {exc}")
+        models += [{"id": m["id"], "created_at": m["created_at"], "max_tokens": m["max_tokens"]}
+                   for m in page["data"]]
+        if not page.get("has_more"):
+            break
+        after = page["last_id"]
+    if not models:
+        die("Models API returned no models")
+    CACHE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = CACHE.with_suffix(f".{os.getpid()}")
+    tmp.write_text(json.dumps(models))
+    tmp.replace(CACHE)
+    return models
+
+
+def models(force: bool = False) -> list[dict]:
+    if not force and CACHE.exists() and time.time() - CACHE.stat().st_mtime < CACHE_SECONDS:
+        return json.loads(CACHE.read_text())
+    return fetch()
+
+
+def find(name: str, catalog: list[dict]) -> dict | None:
+    if name.startswith("claude-"):
+        return next((m for m in catalog if m["id"] == name), None)
+    family = [m for m in catalog if m["id"].startswith(f"claude-{name}-")]
+    return max(family, key=lambda m: m["created_at"]) if family else None
+
+
+def main(argv: list[str]) -> None:
+    as_json = "--json" in argv
+    args = [a for a in argv if a != "--json"]
+    if len(args) != 1 or args[0].startswith("-"):
+        die("usage: claude-latest [--json] <family|model-id>   (family: haiku, sonnet, opus, fable)")
+    name = args[0]
+    # A miss on the cache may just mean a model shipped since it was written.
+    hit = find(name, models()) or find(name, models(force=True))
+    if not hit:
+        die(f"no Claude model matches '{name}'")
+    print(json.dumps({"id": hit["id"], "max_tokens": hit["max_tokens"]}) if as_json else hit["id"])
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

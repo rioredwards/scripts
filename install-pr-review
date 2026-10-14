@@ -2,7 +2,7 @@
 # install-pr-review: drop Claude auto PR-review workflow into any repo.
 #
 # Usage: install-pr-review [--model MODEL_ID] [REPO_PATH]
-#   --model    Pin a Claude model (e.g. claude-opus-4-8, claude-sonnet-5).
+#   --model    Claude model: a family (opus, sonnet) always means its newest.
 #              Omit to use claude-code-action's default (Sonnet tier).
 #   REPO_PATH  Target repo (default: cwd).
 #

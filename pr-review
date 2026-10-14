@@ -2,7 +2,7 @@
 # pr-review: review a GitHub PR locally with Claude Code.
 #
 # Usage: pr-review [--model MODEL_ID] [--wait SECONDS] [PR_NUMBER]
-#   --model    Claude model (default: claude-opus-4-8).
+#   --model    Claude model (default: opus, which the CLI maps to the newest Opus).
 #   --wait     Sleep before starting, so a just-completed `git push` has landed
 #              on GitHub before the diff is fetched. Used by the pre-push hook.
 #   PR_NUMBER  PR to review (default: the open PR for the current branch).
@@ -20,7 +20,7 @@
 
 set -euo pipefail
 
-MODEL="claude-opus-4-8"
+MODEL="opus"
 WAIT=0
 PR=""
 
