@@ -4,7 +4,7 @@
 # Usage: pr-review [--model MODEL_ID] [--wait SECONDS] [PR_NUMBER]
 #   --model    Claude model (default: opus, which the CLI maps to the newest Opus).
 #   --wait     Sleep before starting, so a just-completed `git push` has landed
-#              on GitHub before the diff is fetched. Used by the pre-push hook.
+#              on GitHub before the diff is fetched.
 #   PR_NUMBER  PR to review (default: the open PR for the current branch).
 #
 # Authenticates through the Claude Code CLI's own login (subscription), NOT an
