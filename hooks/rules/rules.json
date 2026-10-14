@@ -100,7 +100,7 @@
       "on": "tool",
       "match": {
         "tool": "^Bash$",
-        "input": "(?s)^(?=.*((^|[^[:alnum:]_.-])agent-skills/|hooks/rules/|\\.agents/AGENTS\\.md)).*(<<|>>|sed[[:space:]]+-i|(echo|printf)[^|>;&]*>(?![[:space:]]*/dev/null([^[:alnum:]_./-]|$)))"
+        "input": "(?s)^(?=.*((^|[^[:alnum:]_.-])agent-skills/|hooks/rules([/;&[:space:]]|$)|\\.agents/AGENTS\\.md)).*(<<|>>|sed[[:space:]]+-i|mv[[:space:]]|jq[^|;&]*>|(echo|printf)[^|>;&]*>(?![[:space:]]*/dev/null([^[:alnum:]_./-]|$)))"
       },
       "do": "remind",
       "text": "This shell command writes into Rio's agentic system (skills, ledger, hooks, agent rules). All system changes go through the `utils:system` skill, invoke it FIRST if you haven't this session. If it is already loaded, carry on."
