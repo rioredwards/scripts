@@ -1,0 +1,391 @@
+#!/usr/bin/python3
+"""tool-check: daily check of every tool and scheduled job. Stdlib only, Apple's /usr/bin/python3
+(never a Homebrew interpreter, so an upgrade can't break the thing that reports upgrades breaking things).
+
+  tool-check            run every check, print a summary, write the full log. Exit 1 if anything broke.
+  tool-check --inbox    also write ~/dev/project-manager/inbox/YYYY-MM-DD-tool-check.md for Rio's Day.
+                        Exits 0 once the report is written (the report IS the alert). A crash exits
+                        non-zero, and the launchd check flags that job on the next run.
+
+Checks: (1) every line of tool-inventory, (2) ~/tools/*/test.sh and tests/run-all.sh, (3) executables
+missing from the inventory, (4) com.rio* launchd jobs with a nonzero last exit, (5) enabled Claude
+Desktop scheduled tasks that missed their latest cron slot or whose latest run recorded an error.
+Each check has a timeout (60s default); a hang counts as broken. Full log: ~/Library/Logs/tool-check/DATE.log.
+
+Test overrides (env): TOOL_CHECK_SCRIPTS, _TOOLS, _LOGDIR, _INBOX_DIR, _ASKS, _TASKS_GLOB,
+_LAUNCHCTL_LIST (file holding `launchctl list` output), _PLISTS (LaunchAgents dir), _NOW (ISO time).
+"""
+import argparse
+import collections
+import datetime
+import glob
+import json
+import os
+import plistlib
+import re
+import shlex
+import signal
+import socket
+import subprocess
+import sys
+import time
+
+HOME = os.path.expanduser("~")
+
+
+def _path(var, default):
+    return os.path.expanduser(os.environ.get(var) or default)
+
+
+SCRIPTS = _path("TOOL_CHECK_SCRIPTS", "~/scripts")
+TOOLS = _path("TOOL_CHECK_TOOLS", "~/tools")
+LOGDIR = _path("TOOL_CHECK_LOGDIR", "~/Library/Logs/tool-check")
+INBOX_DIR = _path("TOOL_CHECK_INBOX_DIR", "~/dev/project-manager/inbox")
+ASKS = _path("TOOL_CHECK_ASKS", "~/dev/project-manager/asks.md")
+TASKS_GLOB = _path("TOOL_CHECK_TASKS_GLOB", "~/Library/Application Support/Claude/claude-code-sessions/*/*/scheduled-tasks.json")
+PLISTS = _path("TOOL_CHECK_PLISTS", "~/Library/LaunchAgents")
+DEFAULT_TIMEOUT = 60
+GRACE = 15 * 60  # a cron slot this recent may still be running or just starting
+ERROR_WORDS = re.compile(r"error|fail|not found|no such|denied|invalid|usage|exception", re.I)
+
+ENV = dict(os.environ)
+ENV["PATH"] = ":".join(dict.fromkeys(
+    [os.path.join(HOME, "scripts"), os.path.join(HOME, ".local/bin"), "/opt/homebrew/bin", "/usr/local/bin"]
+    + ENV.get("PATH", "").split(":") + ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]))
+
+
+def now_epoch():
+    v = os.environ.get("TOOL_CHECK_NOW")
+    return iso_epoch(v) if v else time.time()
+
+
+def iso_epoch(v):
+    d = datetime.datetime.fromisoformat(v.replace("Z", "+00:00"))
+    if d.tzinfo is None:
+        raise ValueError("timestamp without a zone: %r" % v)
+    return d.timestamp()
+
+
+Result = collections.namedtuple("Result", "kind name ok msg cmd tail secs skip", defaults=("", "", "", 0.0, False))
+
+
+def run_cmd(cmd, timeout):
+    """Run a shell command. Returns (exit code or None on timeout, combined output, seconds)."""
+    t0 = time.time()
+    p = subprocess.Popen(["/bin/sh", "-c", cmd], cwd=HOME, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                         stderr=subprocess.STDOUT, env=ENV, start_new_session=True)
+    try:
+        out, _ = p.communicate(timeout=timeout)
+        rc = p.returncode
+    except subprocess.TimeoutExpired:
+        os.killpg(p.pid, signal.SIGKILL)
+        try:
+            out, _ = p.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            out = b""
+        rc = None
+    return rc, out.decode("utf-8", "replace"), time.time() - t0
+
+
+def tail(text, n=15):
+    return "\n".join(text.rstrip().splitlines()[-n:])
+
+
+def check_command(kind, name, cmd, timeout=DEFAULT_TIMEOUT):
+    rc, out, secs = run_cmd(cmd, timeout)
+    if rc == 0:
+        return Result(kind, name, True, cmd=cmd, secs=secs)
+    msg = "timed out after %ss" % timeout if rc is None else "exit %d" % rc
+    return Result(kind, name, False, msg, cmd, tail(out), secs)
+
+
+def syntax_command(path):
+    """Parse-only check, chosen by shebang. Never runs the tool."""
+    real = os.path.realpath(path)
+    with open(real, "rb") as f:
+        shebang = f.readline().decode("utf-8", "replace").strip()
+    q = shlex.quote(real)
+    if "python" in shebang or "uv run" in shebang:
+        py = shebang[2:].split()[0] if shebang.startswith("#!/usr/bin/python") else "python3"
+        return "%s -c 'import ast,sys; ast.parse(open(sys.argv[1]).read())' %s" % (py, q)
+    if "swift" in shebang:
+        return "swiftc -frontend -parse %s" % q
+    for shell in ("zsh", "bash", "sh"):
+        if re.search(r"(/|\s)%s(\s|$)" % shell, shebang):
+            return "%s -n %s" % (shell, q)
+    raise ValueError("no syntax check for shebang %r" % shebang)
+
+
+def inventory_checks():
+    """Run every tool-inventory line. Returns (results, names inventoried)."""
+    results, seen = [], set()
+    with open(os.path.join(SCRIPTS, "tool-inventory"), encoding="utf-8") as f:
+        lines = f.read().splitlines()
+    for n, raw in enumerate(lines, 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        name, sep, rest = line.partition(" | ")
+        rest = rest.strip()
+        skip = rest[5:].strip() if rest.startswith("skip:") else None
+        if not sep or not re.fullmatch(r"[A-Za-z0-9._+-]+", name) or not rest or name in seen or skip == "":
+            why = "duplicate name" if name in seen else "skip needs a reason" if skip == "" else "want 'name | check command' or 'name | skip: reason'"
+            results.append(Result("tool list", "tool-inventory:%d" % n, False, "bad line (%s): %s" % (why, line[:80])))
+            continue
+        seen.add(name)
+        if skip:
+            results.append(Result("tool", name, True, "skip: " + skip, skip=True))
+            continue
+        m = re.match(r"\[(\d+)s\]\s+(.*)", rest)
+        timeout, cmd = (int(m.group(1)), m.group(2)) if m else (DEFAULT_TIMEOUT, rest)
+        if cmd == "syntax":
+            try:
+                cmd = syntax_command(os.path.join(SCRIPTS, name))
+            except (OSError, ValueError) as e:
+                results.append(Result("tool", name, False, "cannot build syntax check: %s" % e))
+                continue
+        results.append(check_command("tool", name, cmd, timeout))
+    return results, seen
+
+
+def test_suite_checks():
+    results = []
+    for t in sorted(glob.glob(os.path.join(TOOLS, "*", "test.sh"))):
+        results.append(check_command("test suite", "%s tests" % os.path.basename(os.path.dirname(t)), "bash " + shlex.quote(t), 120))
+    run_all = os.path.join(SCRIPTS, "tests", "run-all.sh")
+    return results + [check_command("test suite", "scripts tests (run-all.sh)", "sh " + shlex.quote(run_all), 300)]
+
+
+def coverage_checks(inventoried):
+    """Executables at the top of SCRIPTS and directly inside each TOOLS/<tool>/ that the inventory misses."""
+    names, dangling = set(), []
+    for p in sorted(glob.glob(os.path.join(SCRIPTS, "*")) + glob.glob(os.path.join(TOOLS, "*", "*"))):  # glob skips dotfiles
+        f = os.path.basename(p)
+        if os.path.islink(p) and not os.path.exists(p):
+            dangling.append(f)
+        elif f != "test.sh" and os.path.isfile(p) and os.access(p, os.X_OK):
+            names.add(f)
+    results = [Result("tool list", n, False, "not inventoried: add a line to tool-inventory") for n in sorted(names - inventoried)]
+    results += [Result("tool list", n, False, "dangling symlink") for n in dangling]
+    if not results:
+        results.append(Result("tool list", "tool-inventory", True, "all %d executables inventoried" % len(names)))
+    return results
+
+
+def launchd_checks():
+    src = os.environ.get("TOOL_CHECK_LAUNCHCTL_LIST")
+    if src:
+        rc, out = 0, open(src, encoding="utf-8").read()
+    else:
+        rc, out, _ = run_cmd("launchctl list", 20)
+    if rc != 0:
+        return [Result("launchd job", "launchctl", False, "launchctl list failed (exit %s)" % rc, "launchctl list", tail(out))]
+    results = []
+    for line in out.splitlines():
+        parts = line.split("\t")
+        if len(parts) != 3 or not parts[2].startswith("com.rio"):
+            continue
+        pid, status, label = parts
+        name = re.sub(r"^com\.rio(redwards)?\.", "", label)
+        if status == "0":
+            results.append(Result("launchd job", name, True))
+            continue
+        cmd, logs = "", ""
+        try:
+            with open(os.path.join(PLISTS, label + ".plist"), "rb") as f:
+                plist = plistlib.load(f)
+            cmd = " ".join(plist.get("ProgramArguments", []))
+            log = plist.get("StandardErrorPath") or plist.get("StandardOutPath")
+            if log and os.path.isfile(log):
+                with open(log, encoding="utf-8", errors="replace") as f:
+                    logs = "%s:\n%s" % (log, tail(f.read()))
+        except (OSError, plistlib.InvalidFileException) as e:
+            logs = "plist or log unreadable: %s" % e
+        results.append(Result("launchd job", name, False, "last run exited %s" % status, cmd, logs))
+    if not results:
+        results.append(Result("launchd job", "launchd", False, "no com.rio* jobs in launchctl list (not in a login session?)"))
+    return results
+
+
+def cron_field(spec, lo, hi):
+    out = set()
+    for part in spec.split(","):
+        rng, _, step = part.partition("/")
+        step = int(step) if step else 1
+        if rng == "*":
+            a, b = lo, hi
+        elif "-" in rng:
+            a, b = (int(x) for x in rng.split("-"))
+        else:
+            a = int(rng)
+            b = hi if "/" in part else a
+        if step < 1 or a < lo or b > hi or a > b:
+            raise ValueError("bad cron field %r" % spec)
+        out.update(range(a, b + 1, step))
+    return out
+
+
+def cron_last_slot(expr, limit):
+    """Latest local-time slot of a 5-field cron expression at or before epoch `limit`, or None within a year."""
+    f = expr.split()
+    if len(f) != 5:
+        raise ValueError("cron needs 5 fields: %r" % expr)
+    mins, hours = sorted(cron_field(f[0], 0, 59), reverse=True), sorted(cron_field(f[1], 0, 23), reverse=True)
+    doms, months = cron_field(f[2], 1, 31), cron_field(f[3], 1, 12)
+    dows = {d % 7 for d in cron_field(f[4], 0, 7)}
+    star_dom, star_dow = f[2].startswith("*"), f[4].startswith("*")
+    day = datetime.date.fromtimestamp(limit)
+    for _ in range(366):
+        dom_ok, dow_ok = day.day in doms, (day.weekday() + 1) % 7 in dows
+        day_ok = (dom_ok and dow_ok) if (star_dom or star_dow) else (dom_ok or dow_ok)
+        if day.month in months and day_ok:
+            for h in hours:
+                for m in mins:
+                    ts = time.mktime((day.year, day.month, day.day, h, m, 0, 0, 0, -1))
+                    if ts <= limit:
+                        return ts
+        day -= datetime.timedelta(days=1)
+    return None
+
+
+def task_checks():
+    now = now_epoch()
+    files = sorted(glob.glob(TASKS_GLOB))
+    if not files:
+        return [Result("Desktop task", "scheduled-tasks.json", False, "no file found at " + TASKS_GLOB)]
+    results = []
+    for path in files:
+        try:
+            with open(path, encoding="utf-8") as f:
+                tasks = json.load(f)["scheduledTasks"]
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            results.append(Result("Desktop task", path, False, "unreadable: %s: %s" % (type(e).__name__, e)))
+            continue
+        latest = {}  # task id -> newest run record
+        for rec_path in glob.glob(os.path.join(os.path.dirname(path), "local_*.json")):
+            try:
+                with open(rec_path, encoding="utf-8") as f:
+                    rec = json.load(f)
+                if rec.get("scheduledTaskId") and rec.get("createdAt", 0) >= latest.get(rec["scheduledTaskId"], {}).get("createdAt", 0):
+                    latest[rec["scheduledTaskId"]] = rec
+            except (OSError, ValueError, AttributeError):
+                pass  # an unrelated, unreadable session record; the tasks file itself was read fine
+        for t in tasks:
+            name = t.get("id", "?")
+            if t.get("enabled") is not True:
+                results.append(Result("Desktop task", name, True, "skip: disabled", skip=True))
+                continue
+            try:
+                slot = cron_last_slot(t["cronExpression"], now - GRACE)
+                last = iso_epoch(t["lastScheduledFor"]) if t.get("lastScheduledFor") else None
+            except (KeyError, ValueError) as e:
+                results.append(Result("Desktop task", name, False, "cannot read schedule: %s" % e))
+                continue
+            created = t.get("createdAt", 0) / 1000.0
+            err = latest.get(name, {}).get("error")
+            if err:
+                results.append(Result("Desktop task", name, False, "latest run failed: %s" % str(err).replace("\n", " ")[:120], t["cronExpression"]))
+            elif slot and (last or created) < slot - 30 and created < slot:
+                when = time.strftime("%a %b %d %H:%M", time.localtime(slot))
+                results.append(Result("Desktop task", name, False, "missed its %s run (cron %s)" % (when, t["cronExpression"]), t["cronExpression"]))
+            else:
+                results.append(Result("Desktop task", name, True))
+    return results
+
+
+def short(r):
+    """Status message plus the output line most likely to name the error."""
+    lines = [l.strip() for l in r.tail.splitlines() if l.strip()]
+    hit = None if "Traceback" in r.tail else next((l for l in lines if ERROR_WORDS.search(l)), None)
+    line = hit or (lines[-1] if lines else "")
+    return re.sub(r"\s+", " ", r.msg + (": " + line if line else ""))[:140]
+
+
+def write_log(path, results, header):
+    out = [header, ""]
+    for r in results:
+        tag = "skip " if r.skip else "ok   " if r.ok else "BROKE"
+        out.append("[%s] %s %s%s%s" % (tag, r.kind, r.name, " - " + r.msg if r.msg else "", " (%.1fs)" % r.secs if r.secs >= 0.5 else ""))
+        if not r.ok:
+            if r.cmd:
+                out.append("    command: " + r.cmd)
+            if r.tail:
+                out.append("    output (last lines):")
+                out += ["      " + l for l in r.tail.splitlines()]
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(out) + "\n")
+
+
+def open_ask_exists():
+    try:
+        with open(ASKS, encoding="utf-8") as f:
+            return any(re.match(r"- A\d+ \[open\] \S+ tool-check:", l) for l in f)
+    except OSError:
+        print("tool-check: cannot read %s; assuming no open ask" % ASKS, file=sys.stderr)
+        return False
+
+
+def write_inbox(day, n_ok, broke, log_path):
+    lines = ["- status: Tool check: %d ok, %d broke" % (n_ok, len(broke))]
+    lines += ["- status: Broken %s %s: %s" % (r.kind, r.name, short(r)) for r in broke]
+    if broke and not open_ask_exists():
+        names = list(dict.fromkeys(r.name for r in broke))
+        shown = ", ".join(names[:5]) + (" and %d more" % (len(names) - 5) if len(names) > 5 else "")
+        shown_log = log_path.replace(HOME, "~", 1)
+        lines.append("- ask: %d tools or jobs broke (%s). Have an agent fix them? | yes: start utils:perma-fix on each broken item in %s | link: %s"
+                     % (len(broke), shown, shown_log, shown_log))
+    os.makedirs(INBOX_DIR, exist_ok=True)
+    dest = os.path.join(INBOX_DIR, "%s-tool-check.md" % day)
+    tmp = os.path.join(INBOX_DIR, ".tool-check.tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    os.replace(tmp, dest)
+    return dest
+
+
+def guarded(family, fn):
+    """Run one check family. A crash becomes a broken result so the log and inbox still get written."""
+    try:
+        return fn()
+    except Exception as e:  # noqa: BLE001 - the whole point is to survive any family's bug
+        return [Result("tool check", family, False, "check crashed: %s: %s" % (type(e).__name__, e))]
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="tool-check", description="Check every tool and scheduled job; log the results.")
+    ap.add_argument("--inbox", action="store_true", help="write the report into the project-manager inbox (exit 0 once written)")
+    args = ap.parse_args()
+
+    inventoried = []
+
+    def inventory():
+        results, names = inventory_checks()
+        inventoried.append(names)
+        return results
+
+    results = guarded("inventory", inventory) + guarded("test suites", test_suite_checks)
+    if inventoried:  # without the inventory every executable would look uninventoried
+        results += guarded("tool coverage", lambda: coverage_checks(inventoried[0]))
+    results += guarded("launchd", launchd_checks) + guarded("Desktop tasks", task_checks)
+
+    day = time.strftime("%Y-%m-%d", time.localtime(now_epoch()))
+    log_path = os.path.join(LOGDIR, day + ".log")
+    broke = [r for r in results if not r.ok]
+    n_ok = sum(1 for r in results if r.ok and not r.skip)
+    n_skip = sum(1 for r in results if r.skip)
+    summary = "Tool check: %d ok, %d broke, %d skipped" % (n_ok, len(broke), n_skip)
+    write_log(log_path, results, "%s (%s) %s" % (summary, socket.gethostname(), time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now_epoch()))))
+
+    print(summary)
+    for r in broke:
+        print("  BROKE %s %s: %s" % (r.kind, r.name, short(r)))
+    print("Log: " + log_path.replace(HOME, "~", 1))
+    if args.inbox:
+        print("Inbox: " + write_inbox(day, n_ok, broke, log_path).replace(HOME, "~", 1))
+        return 0
+    return 1 if broke else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

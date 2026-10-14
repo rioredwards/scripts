@@ -22,6 +22,7 @@ run() {
 
 for t in tests/*-test.sh; do run "./$t"; done
 run python3 tests/dev-lease-test.py
+run python3 tests/tool-check-test.py
 run python3 hooks/tests/test_shared_hooks.py
 run python3 hooks/rules/test_rules.py
 run sh hooks/rules/validate.sh

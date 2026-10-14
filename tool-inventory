@@ -1,0 +1,105 @@
+# tool-inventory: one line per tool, read by tool-check (daily on the Mac Mini).
+#
+#   name | check command     exit 0 = healthy (run by sh, PATH includes ~/scripts and Homebrew)
+#   name | syntax            parse-only check (zsh -n, bash -n, sh -n, python ast), chosen by shebang
+#   name | [300s] command    optional timeout, default 60s; a hang counts as broken
+#   name | skip: reason      deliberately not exercised
+#
+# A new executable at the top of ~/scripts or in ~/tools/<tool>/ needs a line here, or tool-check
+# reports it as "not inventoried". Pick the smallest side-effect-free proof the tool starts:
+# --help, --version, a read-only list. Read the tool's source first: some treat unknown args as
+# input (send-to-claude would send "--help" as a message). If unsure, use syntax or skip.
+# ~/tools/*/test.sh and tests/run-all.sh run automatically; hooks/ is covered by run-all.sh.
+
+# --- ~/scripts: real start-up checks
+agent-audio | agent-audio status
+agent-audio-prune | agent-audio-prune --help
+agent-hooks-env.sh | sh -c '. "$HOME/scripts/agent-hooks-env.sh"'
+agent-router | agent-router providers
+agent-toggle | agent-toggle --json
+aitt | aitt --list
+annotate | annotate --help
+cal-add | cal-add --help
+check-home-paths.sh | check-home-paths.sh --all --no-fix
+claude-latest | claude-latest 2>&1 | grep -q 'usage: claude-latest'
+cleanshot | cleanshot --help
+dev-lease | dev-lease --help
+dev-ls | dev-ls --help
+dev-scan | dev-scan --help
+dev-up | dev-up --help
+grok-stt | grok-stt --help
+grok-tts | grok-tts -h
+install-pr-review | install-pr-review --help
+keyfor | keyfor --list >/dev/null
+macbook-wake | MACBOOK_NO_WAKE=1 macbook-wake
+narration-body | narration-body --help
+narration-render | narration-render --help
+path_drift_audit.py | path_drift_audit.py --help
+pr-for-branch | pr-for-branch --help
+pr-loc | pr-loc --help
+pr-review | pr-review --help
+recap-repo-audio | recap-repo-audio -h
+sc | sc --help
+text-phone-summary | text-phone-summary --help
+tool-check | tool-check --help
+validate-recent-projects.sh | validate-recent-projects.sh
+
+# --- ~/scripts: parse-only (running them acts: commits, installs, sends, talks to the GUI, or calls an LLM)
+agent-budget | syntax
+agy-write-guard | syntax
+automation-cue.sh | syntax
+ax-dialog | syntax
+brew-add.sh | syntax
+brew-install-layered.sh | syntax
+brew-up | syntax
+check-brew-sync.sh | syntax
+claude-token-audit.sh | syntax
+click-tool | syntax
+dev-url | syntax
+dirs-to-launchd-env.sh | syntax
+dotfiles-autosync | syntax
+drift-check.sh | syntax
+git-commit-selector.sh | syntax
+git-quicklog.sh | syntax
+git-sync | syntax
+herdr-start.sh | syntax
+icloud-wait-uploaded | syntax
+install-git-hooks.sh | syntax
+maintenance-doctor.sh | syntax
+narration-context | syntax
+narration-spoken | syntax
+narration-title | syntax
+ocr-demo.sh | syntax
+pm | syntax
+pm-daily | syntax
+process-text-for-speech | syntax
+re-sync-codex-skills.sh | syntax
+recent-projects-refresh.sh | syntax
+refresh-recent-projects.py | syntax
+restart-console-for-scroll_toll.sh | syntax
+run-todaybar.sh | syntax
+send-to-chatgpt | syntax
+send-to-claude | syntax
+set-file-associations.sh | syntax
+setup-hammerspoon-cli.sh | syntax
+summarize-for-note | syntax
+timer.sh | syntax
+tmux-agent-layout.sh | syntax
+tmux-layout.sh | syntax
+tmux-new-pane.sh | syntax
+tmux-new-session.sh | syntax
+tmux-start.sh | syntax
+todaybar-watchdog.sh | syntax
+
+# --- ~/tools (their test.sh runs automatically)
+car-search | skip: covered by ~/tools/car-search/test.sh
+content-pipeline | skip: covered by ~/tools/content-pipeline/test.sh
+web-research | skip: covered by ~/tools/web-research/test.sh
+
+# --- CLIs named in the global instructions (not in ~/scripts)
+agent-sessions | "$HOME/dev/agent-sessions/bin/agent-sessions" --help
+session-handoff | "$HOME/.dotfiles/.agents/bin/session-handoff" --help
+apple | "$HOME/dev/shortcuts-workshop/bin/apple" version
+herdr | herdr --version
+codex | [20s] codex --version
+claude | [20s] claude --version

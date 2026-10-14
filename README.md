@@ -44,6 +44,7 @@ Small personal command wrappers and automation helpers. App-sized tools live in 
 - `narration-context`, `narration-body`, `narration-title`, `narration-render`, `narration-spoken` - stages of the turn-narration pipeline used by `hooks/turn-end/`.
 - `git-commit-selector.sh` - pick a previous commit message with fzf, ready for `git commit -m`.
 - `git-quicklog.sh` - last two commits with short stats.
+- `tool-check` - daily check (03:20, Mini) that every tool in `tool-inventory` still starts, every test suite passes, and every `com.rio*` launchd job and Desktop scheduled task last ran fine. `--inbox` reports to Rio's Day; log in `~/Library/Logs/tool-check/`. A new executable in `~/scripts` or `~/tools/*/` needs a `tool-inventory` line (`name | check command`, `name | syntax`, or `name | skip: reason`) or the check flags it.
 - `tests/run-all.sh` - run every test; non-zero exit if any fails.
 
 ## Dotfiles Script Links
