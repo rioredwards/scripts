@@ -413,6 +413,7 @@ class RulesTests(unittest.TestCase):
             ("Edit", {"file_path": "/Users/x/dev/agent-skills/LEDGER.md", "old_string": "a", "new_string": "b"}),
             ("Write", {"file_path": "/Users/x/.dotfiles/.agents/AGENTS.md", "content": "hi"}),
             ("Edit", {"file_path": "/Users/x/scripts/hooks/rules/rules.json", "old_string": "a", "new_string": "b"}),
+            ("Edit", {"file_path": "/Users/x/.dotfiles/MACHINE_SETUP.md", "old_string": "a", "new_string": "b"}),
         ]
         scratch = "/private/tmp/claude-501/-Users-x-dev-agent-skills/sess/scratchpad/notes.md"
         miss = [
@@ -427,6 +428,27 @@ class RulesTests(unittest.TestCase):
         for tool, inp in miss:
             with self.subTest(miss=inp):
                 out = self.run_hook("tool", {"tool_name": tool, "tool_input": inp})
+                self.assertNotIn("utils:system", out.stdout)
+
+    def test_dotfiles_shell_writes_route_to_system_skill(self):
+        """Shell writes into ~/.dotfiles (incl. symlinks) get the nudge; reads do not."""
+        hit = [
+            "ln -s ../.agents/skills ~/.dotfiles/.claude/skills",
+            "D=~/.dotfiles; mv a $D/.agents/skills/",
+            "cat >> ~/.dotfiles/.gitignore <<EOF\nx\nEOF",
+        ]
+        miss = [
+            "ls -la ~/.dotfiles/.agents/skills",
+            "git -C ~/.dotfiles status --short",
+            "ln -s a ~/dev/app/b",
+        ]
+        for cmd in hit:
+            with self.subTest(hit=cmd):
+                out = self.run_hook("tool", {"tool_name": "Bash", "tool_input": {"command": cmd}})
+                self.assertIn("utils:system", out.stdout)
+        for cmd in miss:
+            with self.subTest(miss=cmd):
+                out = self.run_hook("tool", {"tool_name": "Bash", "tool_input": {"command": cmd}})
                 self.assertNotIn("utils:system", out.stdout)
 
 
