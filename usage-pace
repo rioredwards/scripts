@@ -1,0 +1,49 @@
+#!/bin/bash
+# usage-pace: is this week's Claude usage on track to leave tokens unspent?
+# Feeds the `tokens=auto` session knob (agent-context/knobs.sh, agent-skills#51).
+#
+#   usage-pace record <used %> <resets_at epoch>   save a weekly reading
+#   usage-pace                                     print "<level>\t<why>"
+#
+# Only the system-band mod and the CLI statusline see rate limits; both call
+# `record` on refresh. Hooks get no usage data, so they read the cache.
+# Pace = used % / share of the week elapsed (at least one day, so an early
+# reading is not over-read). frugal: pace 100%+ or 90%+ used. generous: pace
+# under 75%, tokens would go unspent. normal otherwise.
+# No reading, one older than 6h, or one from before the reset: exit 1, why on stderr.
+set -euo pipefail
+
+cache="$HOME/.cache/agent-usage/claude-week.json"
+week=604800 stale_after=21600
+now=$(date +%s)
+num='^[0-9]+([.][0-9]+)?$'
+
+if [ "${1:-}" = record ]; then
+  if [ $# -ne 3 ] || ! [[ $2 =~ $num ]] || ! [[ $3 =~ ^[0-9]+$ ]]; then
+    echo "usage-pace: usage: usage-pace record <used %> <resets_at epoch>" >&2; exit 2
+  fi
+  mkdir -p "${cache%/*}"
+  printf '{"pct":%s,"resets_at":%s,"at":%s}\n' "$2" "$3" "$now" > "$cache.$$"
+  mv "$cache.$$" "$cache"
+  exit 0
+fi
+[ $# -eq 0 ] || { echo "usage-pace: unknown argument: $1" >&2; exit 2; }
+
+[ -f "$cache" ] || { echo "usage-pace: no weekly usage reading yet (system-band or statusline writes $cache)" >&2; exit 1; }
+jq -r --argjson now "$now" --argjson week "$week" --argjson stale "$stale_after" '
+  (($now - .at) / 3600 | floor) as $age
+  | if $now - .at > $stale then "error\tweekly usage reading is \($age)h old"
+    elif .resets_at <= $now then "error\tweekly usage reading is from before the week has reset"
+    else
+      ([($week - (.resets_at - $now)) / $week, 1 / 7] | max) as $elapsed
+      | (.pct / $elapsed) as $pace
+      | (if $pace >= 100 or .pct >= 90 then "frugal" elif $pace < 75 then "generous" else "normal" end) as $level
+      | "\($level)\tweek \(.pct | floor)% used, \((.resets_at - $now) / 8640 | round / 10) days to reset, on pace for \($pace | round)%"
+    end
+' "$cache" | {
+  IFS= read -r line
+  case "$line" in
+    error$'\t'*) echo "usage-pace: ${line#error$'\t'}" >&2; exit 1 ;;
+    *) printf '%s\n' "$line" ;;
+  esac
+}
