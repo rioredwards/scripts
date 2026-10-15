@@ -78,11 +78,10 @@ def processes():
 
 
 def process(record):
-    """The leased pm2 process, None if gone. A reused pm_id fails closed."""
+    """The leased pm2 process, None if gone. pm2 renumbers from 0 after a restart, so a
+    pm_id held by another name or start time means the leased process is gone; never touch it."""
     for proc in processes():
-        if proc["pm_id"] == record["pm_id"]:
-            if proc["name"] != record["name"] or proc["pm2_env"]["created_at"] != record["created"]:
-                raise RuntimeError("pm2 process %s is not the leased one; refusing cleanup" % record["pm_id"])
+        if (proc["pm_id"], proc["name"], proc["pm2_env"]["created_at"]) == (record["pm_id"], record["name"], record["created"]):
             return proc
     return None
 

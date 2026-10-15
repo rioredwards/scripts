@@ -50,10 +50,14 @@ class LeaseTests(unittest.TestCase):
                 with self.assertRaises(RuntimeError):
                     lease.create("dev-app-abc123")
 
-    def test_reused_pm_id_fails_closed(self):
-        with patch.object(lease, "processes", return_value=[proc(created=2000)]):
-            with self.assertRaises(RuntimeError):
-                lease.process(self.record)
+    def test_reused_pm_id_drops_lease_and_spares_the_process(self):
+        self.save()
+        with patch.object(lease.time, "time", return_value=99), \
+                patch.object(lease, "processes", return_value=[proc(created=2000)]), patch.object(lease, "pm2") as pm2:
+            self.assertEqual(lease.renew_pid(34567), "untracked")
+            lease.sweep()
+            pm2.assert_not_called()
+        self.assertFalse(lease.path_for(self.record["id"]).exists())
 
     def test_renew_extends_twelve_hours(self):
         self.save()
@@ -96,8 +100,7 @@ class LeaseTests(unittest.TestCase):
         self.save()
         with patch.object(lease, "processes", return_value=[proc(name="someone-else")]), \
                 patch.object(lease, "pm2") as pm2:
-            with self.assertRaises(RuntimeError):
-                lease.stop(self.record["id"])
+            lease.stop(self.record["id"])
             pm2.assert_not_called()
 
     def test_renewal_wins_before_stop(self):
@@ -161,7 +164,7 @@ class Pm2Tests(unittest.TestCase):
         token = run(sys.executable, str(lease.HERE), "create", name)
         pid = json.loads(run("pm2", "jlist"))[0]["pid"]
         route = None
-        for _ in range(100):
+        for _ in range(300):  # a cold pm2 + portless start can pass 10s
             routes = json.loads((Path.home() / ".portless/routes.json").read_text())
             route = next((r for r in routes if r["pid"] == pid), None)
             if route:
