@@ -32,6 +32,8 @@ out="$(bash "$root/agent-context/providers/30-knobs.sh")"
 want "auto resolved" "$out" "- tokens: auto → generous (week 20% used, 3.5 days to reset, on pace for 40%). Rio has spare tokens"
 out="$(AGENT_TRANSCRIPT_PATH="$tmp/.codex/sessions/x.jsonl" bash "$root/agent-context/providers/30-knobs.sh")"
 want "codex auto" "$out" "- tokens: auto. Spend tokens"
+out="$(printf '{"session_id":"c1","transcript_path":"%s"}' "$tmp/.codex/sessions/x.jsonl" | bash "$k" --hook)"
+want "codex hook auto" "$out" "- tokens: auto. Spend tokens"
 
 # provider stamps the session, so its first prompt does not repeat the block
 AGENT_SESSION_ID=s1 bash "$root/agent-context/providers/30-knobs.sh" >/dev/null

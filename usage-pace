@@ -29,7 +29,7 @@ if [ "${1:-}" = record ]; then
 fi
 [ $# -eq 0 ] || { echo "usage-pace: unknown argument: $1" >&2; exit 2; }
 
-[ -f "$cache" ] || { echo "usage-pace: no weekly usage reading yet (system-band or statusline writes $cache)" >&2; exit 1; }
+[ -f "$cache" ] || { echo "usage-pace: no weekly usage reading yet, system-band or statusline writes $cache" >&2; exit 1; }
 jq -r --argjson now "$now" --argjson week "$week" --argjson stale "$stale_after" '
   (($now - .at) / 3600 | floor) as $age
   | if $now - .at > $stale then "error\tweekly usage reading is \($age)h old"
