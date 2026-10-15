@@ -60,61 +60,87 @@ class SharedHooks(unittest.TestCase):
             for text in ['Only compare tools', 'publish a new integration', 'git push']:
                 self.assertIn(text, r.stderr)
 
-    def test_reviewer_timeout_trips_breaker_for_the_session(self):
-        with tempfile.TemporaryDirectory() as td:
-            td = Path(td)
-            bindir = td / 'bin'
-            bindir.mkdir()
-            calls = td / 'calls'
-            router = bindir / 'agent-router'
-            router.write_text(f'#!/bin/sh\necho call >> "{calls}"\nsleep 5\n')
-            router.chmod(0o755)
-            transcript = td / 't.jsonl'
-            events = [{'type': 'user', 'message': {'content': 'do the thing'}},
-                      {'type': 'assistant', 'message': {'content': [
-                          {'type': 'tool_use', 'name': 'Bash', 'input': {'command': 'ls'}}]}}]
-            transcript.write_text(''.join(json.dumps(e) + '\n' for e in events))
-            env = dict(PATH=f'{bindir}:{os.environ["PATH"]}', TMPDIR=str(td), AGENT_SPIN_CHECK='on',
-                       AGENT_SPIN_CHECK_EVERY='1', AGENT_SPIN_CHECK_TIMEOUT='1',
-                       AGENT_SPIN_CHECK_LOG=str(td / 'fires.log'), AGENT_DELEGATE='')
-            payload = {'session_id': 'breaker-test', 'transcript_path': str(transcript)}
-            first = self.run_hook('spin-check.sh', payload, **env)
-            self.assertEqual(first.returncode, 2, first.stderr)
-            self.assertIn('timed out', first.stderr)
-            for _ in range(2):
-                again = self.run_hook('spin-check.sh', payload, **env)
-                self.assertEqual((again.returncode, again.stdout, again.stderr), (0, '', ''))
-            self.assertEqual(calls.read_text().count('call'), 1)
-            # a different session still gets its own reviewer call
-            self.run_hook('spin-check.sh', {**payload, 'session_id': 'breaker-other'}, **env)
-            self.assertEqual(calls.read_text().count('call'), 2)
-
-    def spin_env(self, td, verdict='ON TRACK', p=None, code=200):
-        """Stub reviewers that record each call and its prompt. Periodic: agent-router answers
-        `verdict`. first-write/stop: the Decisions API (curl) answers each question with p[name]
-        (default 0) and HTTP `code`; a None probability is a refusal."""
+    def spin_env(self, td, p=None, code=200, confirm=None, confirm_code=200):
+        """Stub both passes, recording each call and its input. The Decisions API (curl) answers
+        each question with p[name] (default 0) and HTTP `code`; a None probability is a refusal.
+        The second look (curl to /v1/responses) answers `confirm` (default deny) and `confirm_code`."""
         bindir = td / 'bin'
         bindir.mkdir(exist_ok=True)
-        (td / 'verdict').write_text(verdict)
         (td / 'p.json').write_text(json.dumps(p or {}))
         (td / 'code').write_text(str(code))
-        router = bindir / 'agent-router'
-        router.write_text(f'#!/bin/sh\necho call >> "{td}/calls"\nprintf "%s" "$*" > "{td}/prompt"\n'
-                          f'cat "{td}/verdict"\n')
+        (td / 'confirm.json').write_text(json.dumps(confirm or {'quote': '', 'evidence': '', 'verdict': 'deny'}))
+        (td / 'confirm_code').write_text(str(confirm_code))
         curl = bindir / 'curl'
-        curl.write_text(f'#!/bin/sh\necho call >> "{td}/calls"\ncat > "{td}/prompt"\n'
+        curl.write_text(f'#!/bin/sh\ncase "$*" in *v1/responses*)\n'
+                        f'  echo confirm >> "{td}/confirms"\n  cat > "{td}/confirm_body"\n'
+                        f'  jq -c \'{{output: [{{type: "message", content: [{{type: "output_text", text: tojson}}]}}]}}\' "{td}/confirm.json"\n'
+                        f'  printf "\\n%s" "$(cat "{td}/confirm_code")"; exit 0 ;;\nesac\n'
+                        f'echo call >> "{td}/calls"\ncat > "{td}/prompt"\n'
                         f'jq -c --slurpfile p "{td}/p.json" \'{{answers: [.questions[] | .name as $n | $p[0][$n] as $v\n'
                         f'  | if ($p[0] | has($n)) and $v == null then {{type: "refusal", name: $n}}\n'
                         f'    else {{type: "predicate", name: $n, probability: ($v // 0)}} end]}}\' "{td}/prompt"\n'
                         f'printf "\\n%s" "$(cat "{td}/code")"\n')
         keyfor = bindir / 'keyfor'
         keyfor.write_text('#!/bin/sh\necho sk-test\n')
-        for f in (router, curl, keyfor):
+        for f in (curl, keyfor):
             f.chmod(0o755)
         return dict(PATH=f'{bindir}:{os.environ["PATH"]}', TMPDIR=str(td), AGENT_SPIN_CHECK='on',
                     AGENT_SPIN_CHECK_EVERY='50', AGENT_SPIN_CHECK_FIRST_WRITE='on',
                     AGENT_SPIN_CHECK_STOP='on', AGENT_SPIN_CHECK_LOG=str(td / 'fires.log'),
-                    AGENT_DELEGATE='')
+                    AGENT_SPIN_CHECK_MODEL='gpt-6-sol', AGENT_DELEGATE='')
+
+    def confirms(self, td):
+        p = td / 'confirms'
+        return p.read_text().count('confirm') if p.exists() else 0
+
+    def test_periodic_screens_then_confirms_with_a_quote(self):
+        """L-0193: a periodic flag reaches the agent only when a second look quotes the evidence."""
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            t = self.spin_transcript(td, [
+                {'type': 'user', 'message': {'content': 'Only compare the two tools. Do not edit.'}},
+                {'type': 'assistant', 'message': {'content': [{'type': 'text', 'text': 'Rewriting the whole config loader now.'},
+                    {'type': 'tool_use', 'name': 'Bash', 'input': {'command': 'ls'}}]}}])
+            payload = {'session_id': 'per', 'transcript_path': t, 'hook_event_name': 'PostToolUse',
+                       'tool_name': 'Bash', 'tool_input': {'command': 'ls'}}
+            hit = {'category': 'OVERRUN', 'quote': 'Rewriting the whole config loader now.',
+                   'evidence': 'Rio asked only to compare.', 'verdict': 'confirm'}
+            env = {**self.spin_env(td, p={'overrun': 0.9}, confirm=hit), 'AGENT_SPIN_CHECK_EVERY': '1'}
+            r = self.run_hook('spin-check.sh', payload, **env)
+            self.assertEqual(r.returncode, 2, r.stderr)
+            self.assertIn('SPIN-CHECK after 1 tool calls', r.stderr)
+            self.assertIn('- OVERRUN: "Rewriting the whole config loader now."\n  Why: Rio asked only to compare.', r.stderr)
+            self.assertEqual((self.calls(td), self.confirms(td)), (1, 1))
+            body = json.loads((td / 'confirm_body').read_text())
+            self.assertEqual(body['model'], 'gpt-6-sol')
+            self.assertIn('Only compare the two tools', body['input'])
+            self.assertIn('category', body['text']['format']['schema']['required'])
+            log = (td / 'fires.log').read_text()
+            self.assertIn('mode=periodic', log)
+            self.assertIn('model=gpt-6-luna/decisions+gpt-6-sol', log)
+            self.assertIn('confirm=overrun:confirm', log)
+            self.assertRegex(log, r'\tconfirm_ms=\d+\t')
+            # denied, or a quote that is not in the input: silent
+            self.spin_env(td, p={'overrun': 0.9})
+            r = self.run_hook('spin-check.sh', payload, **env)
+            self.assertEqual((r.returncode, r.stderr), (0, ''))
+            self.assertIn('verdict=ON TRACK (denied: overrun)', (td / 'fires.log').read_text())
+            self.spin_env(td, p={'overrun': 0.9}, confirm={**hit, 'quote': 'something never said'})
+            r = self.run_hook('spin-check.sh', payload, **env)
+            self.assertEqual((r.returncode, r.stderr), (0, ''))
+            self.assertIn('confirm=overrun:unquoted', (td / 'fires.log').read_text())
+            # the screen passes: no second look
+            self.spin_env(td, p={'overrun': 0.2}, confirm=hit)
+            r = self.run_hook('spin-check.sh', payload, **env)
+            self.assertEqual((r.returncode, self.calls(td), self.confirms(td)), (0, 4, 3))
+            self.assertIn('confirm=-', (td / 'fires.log').read_text().splitlines()[-1])
+            # the second look is down: loud once, then quiet
+            self.spin_env(td, p={'overrun': 0.9}, confirm=hit, confirm_code=500)
+            r = self.run_hook('spin-check.sh', payload, **env)
+            self.assertEqual(r.returncode, 2, r.stderr)
+            self.assertIn('SPIN-CHECK IS BROKEN, second-look call failed: overrun: HTTP 500', r.stderr)
+            r = self.run_hook('spin-check.sh', payload, **env)
+            self.assertEqual((r.returncode, r.stderr), (0, ''))
 
     def spin_transcript(self, td, events):
         t = td / 't.jsonl'
@@ -129,7 +155,8 @@ class SharedHooks(unittest.TestCase):
         """L-0006: the first file write after each message from Rio is judged, even on a short turn."""
         with tempfile.TemporaryDirectory() as td:
             td = Path(td)
-            env = self.spin_env(td, p={'unasked_write': 0.95})
+            env = self.spin_env(td, p={'unasked_write': 0.95}, confirm={
+                'quote': 'why is the test slow?', 'evidence': 'Rio asked a question.', 'verdict': 'confirm'})
             t = self.spin_transcript(td, [{'type': 'user', 'message': {'content': 'why is the test slow?'}}])
             base = {'session_id': 'fw', 'transcript_path': t, 'hook_event_name': 'PostToolUse'}
             read = {**base, 'tool_name': 'Bash', 'tool_input': {'command': 'grep -r slow . 2>/dev/null > /dev/null'}}
@@ -139,6 +166,8 @@ class SharedHooks(unittest.TestCase):
             r = self.run_hook('spin-check.sh', edit, **env)
             self.assertEqual(r.returncode, 2, r.stderr)
             self.assertIn('first write this turn', r.stderr)
+            self.assertIn('- Unasked: "why is the test slow?"\n  Why: Rio asked a question.', r.stderr)
+            self.assertIn('THE WRITE BEING JUDGED', json.loads((td / 'confirm_body').read_text())['instructions'])
             self.assertIn('why is the test slow?', (td / 'prompt').read_text())
             self.assertIn('/x/app.py', (td / 'prompt').read_text())
             log = (td / 'fires.log').read_text()
@@ -181,7 +210,8 @@ class SharedHooks(unittest.TestCase):
         """L-0012: the final reply is checked against this turn's tool calls; the retry is never re-checked."""
         with tempfile.TemporaryDirectory() as td:
             td = Path(td)
-            env = self.spin_env(td, p={'unverified_claim': 0.9, 'unasked_change': 0.1})
+            env = self.spin_env(td, p={'unverified_claim': 0.9, 'unasked_change': 0.1}, confirm={
+                'quote': 'Tests pass.', 'evidence': 'No test ran this turn.', 'verdict': 'confirm'})
             t = self.spin_transcript(td, [
                 {'type': 'user', 'message': {'content': 'old ask'}},
                 {'type': 'assistant', 'message': {'content': [{'type': 'tool_use', 'name': 'Bash', 'input': {'command': 'pytest old'}}]}},
@@ -197,10 +227,11 @@ class SharedHooks(unittest.TestCase):
             self.assertEqual((p.returncode, p.stderr), (2, ''))
             r = self.run_hook('spin-check.sh', stop, **env)
             self.assertEqual(r.returncode, 2, r.stderr)
-            self.assertIn('claim stated as checked', r.stderr)
-            self.assertNotIn('change Rio did not ask for', r.stderr)
+            self.assertIn('- Claim with no check in view: "Tests pass."\n  Why: No test ran this turn.', r.stderr)
+            self.assertNotIn('Change Rio did not ask for', r.stderr)
             self.assertIn('Revised reply', r.stderr)
-            self.assertEqual(self.calls(td), 1)
+            self.assertEqual((self.calls(td), self.confirms(td)), (1, 1))
+            self.assertIn('confirm=unverified_claim:confirm', (td / 'fires.log').read_text())
             prompt = (td / 'prompt').read_text()
             self.assertIn('/x/parser.py', prompt)
             self.assertIn('edited ok', prompt)
@@ -218,7 +249,12 @@ class SharedHooks(unittest.TestCase):
             stop = {'session_id': 'ok', 'transcript_path': t, 'hook_event_name': 'Stop',
                     'stop_hook_active': False, 'last_assistant_message': 'Hello.'}
             r = self.run_hook('spin-check.sh', stop, **self.spin_env(td, p={'unverified_claim': 0.7}))
-            self.assertEqual((r.returncode, r.stderr), (0, ''))
+            self.assertEqual((r.returncode, r.stderr, self.confirms(td)), (0, '', 0))
+            # flagged by the screen, denied by the second look: passes
+            r = self.run_hook('spin-check.sh', {**stop, 'last_assistant_message': 'Hello there.'},
+                              **self.spin_env(td, p={'unverified_claim': 0.9}))
+            self.assertEqual((r.returncode, r.stderr, self.confirms(td)), (0, '', 1))
+            self.assertIn('verdict=ON TRACK (denied: unverified_claim)', (td / 'fires.log').read_text())
             # The model declines some inputs: that reply goes unjudged, with no alarm.
             r = self.run_hook('spin-check.sh', {**stop, 'last_assistant_message': 'Hey.'},
                               **self.spin_env(td, p={'unverified_claim': 0.1, 'unasked_change': None}))
