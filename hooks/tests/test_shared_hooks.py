@@ -98,9 +98,10 @@ class SharedHooks(unittest.TestCase):
         words = lambda n: ' '.join(['word'] * n)
         claude = lambda prompt: [{'type': 'user', 'message': {'content': prompt}},
                                  {'type': 'user', 'message': {'content': [{'type': 'tool_result', 'content': 'x'}]}}]
-        codex = lambda prompt: [{'type': 'response_item', 'payload': {'type': 'message', 'role': 'user',
-                                 'content': [{'type': 'input_text', 'text': '<environment_context/>'}]}},
-                                {'type': 'event_msg', 'payload': {'type': 'user_message', 'message': prompt}}]
+        codex_user = lambda text: {'type': 'response_item', 'payload': {'type': 'message', 'role': 'user',
+                                   'content': [{'type': 'input_text', 'text': text}]}}
+        codex = lambda prompt: [codex_user('# AGENTS.md instructions for /x\n\nrules'), codex_user(prompt),
+                                codex_user('<environment_context/>')]
         cases = [(claude('what is up'), 100, 2), (claude(words(9)), 100, 0),
                  (codex('how did yesterday go'), 100, 2), (codex(words(9)), 100, 0),
                  (claude('<command-message>pm:talk</command-message>'), 100, 0),

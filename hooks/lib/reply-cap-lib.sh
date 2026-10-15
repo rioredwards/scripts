@@ -30,8 +30,10 @@ reply_last_prompt() {
   _t="$(printf '%s' "$1" | jq -r '.transcript_path // empty' 2>/dev/null)"
   [ -f "$_t" ] || return 0
   tail -r "$_t" 2>/dev/null | jq -rc --arg cmds "${2:-}" '
-    if .type=="event_msg" and .payload.type=="user_message" then
-      "U\t" + ((.payload.message // "") | gsub("\\s+"; " "))
+    if .type=="response_item" and .payload.type=="message" and .payload.role=="user" then
+      (.payload.content // [] | map(select(.type=="input_text") | .text) | join(" "))
+      | select(test("^\\s*(<|# AGENTS\\.md instructions)") | not)
+      | "U\t" + gsub("\\s+"; " ")
     elif .type=="user" and (.isMeta // false | not) and (.isCompactSummary // false | not) then
       (.message.content // empty)
       | (if type=="string" then . else (map(select(.type=="text") | .text) | join(" ")) end)
