@@ -18,21 +18,17 @@
 # judge_verdict prints one line: skip | pass | bounce <names> | error <why>
 set -u
 
-JUDGE_MODEL=gpt-6-luna
-JUDGE_URL="${JUDGE_URL:-https://api.openai.com/v1/decisions}"
-JUDGE_THRESHOLD_needless_ask=0.8
-JUDGE_THRESHOLD_unclear=0.8
-JUDGE_THRESHOLD_noise=0.8
+JUDGE_THRESHOLDS='{"needless_ask":0.8,"unclear":0.8,"noise":0.8}'
 JUDGE_LOG="${JUDGE_LOG:-$HOME/.cache/attention-judge/verdicts.jsonl}"
 
 . "$HOME/scripts/hooks/lib/reply-cap-lib.sh"
-
+. "$HOME/scripts/hooks/lib/decisions-lib.sh"
 
 _judge_questions() {
   jq -n '[
-    {type:"predicate", name:"needless_ask", instructions:"True if the AGENT REPLY asks Rio to decide or answer something the agent could settle itself (an obvious, standard, or easily reversed engineering call it could look up or just make) or could safely defer. False if it asks nothing, or the decision is genuinely his: hard to undo, risky (merging, losing work, spending money, production data), or a product or taste call with no standard answer."},
-    {type:"predicate", name:"unclear", instructions:"True if a busy reader skimming the AGENT REPLY once would struggle to tell what happened and what, if anything, they must do: jargon where plain words would do, file, branch, or function names instead of what they mean, a decision buried mid-text, or vague about what matters (how big, what changes for him). False if it is plain and the point comes first."},
-    {type:"predicate", name:"noise", instructions:"True if a meaningful part of the AGENT REPLY spends his attention on things he does not need: restating his own request back, narrating steps taken, listing options considered and rejected, or tacking on offers, ideas, or next tasks he did not ask for. False if nearly every sentence carries the outcome, what he would notice, or a decision he must make."}
+    {name:"needless_ask", instructions:"True if the AGENT REPLY asks Rio to decide or answer something the agent could settle itself (an obvious, standard, or easily reversed engineering call it could look up or just make) or could safely defer. False if it asks nothing, or the decision is genuinely his: hard to undo, risky (merging, losing work, spending money, production data), or a product or taste call with no standard answer."},
+    {name:"unclear", instructions:"True if a busy reader skimming the AGENT REPLY once would struggle to tell what happened and what, if anything, they must do: jargon where plain words would do, file, branch, or function names instead of what they mean, a decision buried mid-text, or vague about what matters (how big, what changes for him). False if it is plain and the point comes first."},
+    {name:"noise", instructions:"True if a meaningful part of the AGENT REPLY spends his attention on things he does not need: restating his own request back, narrating steps taken, listing options considered and rejected, or tacking on offers, ideas, or next tasks he did not ask for. False if nearly every sentence carries the outcome, what he would notice, or a decision he must make."}
   ]'
 }
 
@@ -41,11 +37,11 @@ _judge_input() {
 }
 
 # Every verdict, errors included, lands in the log Rio's ratings are drawn from.
-_judge_log() { # verdict ms answers-json
+_judge_log() { # verdict ms probabilities-json
   mkdir -p "$(dirname "$JUDGE_LOG")"
   jq -nc --arg s "$session" --arg p "$prompt" --arg r "$reply" --arg v "$1" \
     --argjson ms "$2" --argjson a "$3" \
-    '{ts:(now|todate), session:$s, verdict:$v, ms:$ms, p:($a|map({(.name):.probability})|add), prompt:$p, reply:$r}' \
+    '{ts:(now|todate), session:$s, verdict:$v, ms:$ms, p:$a, prompt:$p, reply:$r}' \
     >> "$JUDGE_LOG" 2>/dev/null
   echo "$1"
 }
@@ -53,29 +49,13 @@ _judge_log() { # verdict ms answers-json
 # One API call. Prints `pass`, `bounce <names>`, or `error <why>`; logs it.
 _judge_call() {
   prompt="$1"; reply="$2"; session="$3"
-  key="$(keyfor OPENAI_API_KEY 2>/dev/null)" || { _judge_log "error keyfor OPENAI_API_KEY failed" 0 '[]'; return; }
-  body="$(jq -n --arg m "$JUDGE_MODEL" --arg i "$(_judge_input "$prompt" "$reply")" \
-    --argjson q "$(_judge_questions)" '{model:$m, input:$i, questions:$q}')"
-  start="$(perl -MTime::HiRes=time -e 'printf "%d", time*1000')"
-  resp="$(printf '%s' "$body" | curl -sS --max-time 4 -w '\n%{http_code}' "$JUDGE_URL" \
-    -H "Authorization: Bearer $key" -H 'Content-Type: application/json' -d @- 2>&1)" || {
-    _judge_log "error $(printf '%s' "$resp" | head -n 1 | cut -c1-120)" 0 '[]'; return; }
-  ms=$(( $(perl -MTime::HiRes=time -e 'printf "%d", time*1000') - start ))
-  code="$(printf '%s' "$resp" | tail -n 1)"
-  json="$(printf '%s' "$resp" | sed '$d')"
-  if [ "$code" != 200 ]; then
-    _judge_log "error HTTP $code $(printf '%s' "$json" | jq -r '.error.message // empty' 2>/dev/null | cut -c1-120)" "$ms" '[]'
-    return
-  fi
-  verdict="$(printf '%s' "$json" | jq -r \
-    --argjson t "{\"needless_ask\":$JUDGE_THRESHOLD_needless_ask,\"unclear\":$JUDGE_THRESHOLD_unclear,\"noise\":$JUDGE_THRESHOLD_noise}" '
-    (.answers // []) as $a
-    | if ($a | length) != 3 then "error expected 3 answers, got \($a | length)"
-      elif ($a | any(.type != "predicate")) then "error refusal on \($a | map(select(.type != "predicate") | .name) | join(","))"
-      else ($a | map(select(.probability >= $t[.name])) | map(.name)) as $hit
-        | if ($hit | length) == 0 then "pass" else "bounce " + ($hit | join(",")) end
-      end' 2>/dev/null)" || verdict="error unreadable response"
-  _judge_log "$verdict" "$ms" "$(printf '%s' "$json" | jq -c '.answers // []' 2>/dev/null || echo '[]')"
+  res="$(decisions_ask "$(_judge_input "$prompt" "$reply")" "$(_judge_questions)" 4)"
+  verdict="$(decisions_over "$res" "$JUDGE_THRESHOLDS")"
+  case "$verdict" in
+    over*) verdict="bounce ${verdict#over }" ;;
+    refused*) verdict="error refusal on ${verdict#refused }" ;;
+  esac
+  _judge_log "$verdict" "$(printf '%s' "$res" | jq '.ms // 0')" "$(printf '%s' "$res" | jq -c '.p // null')"
 }
 
 judge_verdict() {

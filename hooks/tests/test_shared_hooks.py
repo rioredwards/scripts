@@ -89,15 +89,28 @@ class SharedHooks(unittest.TestCase):
             self.run_hook('spin-check.sh', {**payload, 'session_id': 'breaker-other'}, **env)
             self.assertEqual(calls.read_text().count('call'), 2)
 
-    def spin_env(self, td, verdict):
-        """A stub reviewer that records each call (and its prompt) and answers `verdict`."""
+    def spin_env(self, td, verdict='ON TRACK', p=None, code=200):
+        """Stub reviewers that record each call and its prompt. Periodic: agent-router answers
+        `verdict`. first-write/stop: the Decisions API (curl) answers each question with p[name]
+        (default 0) and HTTP `code`; a None probability is a refusal."""
         bindir = td / 'bin'
         bindir.mkdir(exist_ok=True)
-        router = bindir / 'agent-router'
         (td / 'verdict').write_text(verdict)
+        (td / 'p.json').write_text(json.dumps(p or {}))
+        (td / 'code').write_text(str(code))
+        router = bindir / 'agent-router'
         router.write_text(f'#!/bin/sh\necho call >> "{td}/calls"\nprintf "%s" "$*" > "{td}/prompt"\n'
                           f'cat "{td}/verdict"\n')
-        router.chmod(0o755)
+        curl = bindir / 'curl'
+        curl.write_text(f'#!/bin/sh\necho call >> "{td}/calls"\ncat > "{td}/prompt"\n'
+                        f'jq -c --slurpfile p "{td}/p.json" \'{{answers: [.questions[] | .name as $n | $p[0][$n] as $v\n'
+                        f'  | if ($p[0] | has($n)) and $v == null then {{type: "refusal", name: $n}}\n'
+                        f'    else {{type: "predicate", name: $n, probability: ($v // 0)}} end]}}\' "{td}/prompt"\n'
+                        f'printf "\\n%s" "$(cat "{td}/code")"\n')
+        keyfor = bindir / 'keyfor'
+        keyfor.write_text('#!/bin/sh\necho sk-test\n')
+        for f in (router, curl, keyfor):
+            f.chmod(0o755)
         return dict(PATH=f'{bindir}:{os.environ["PATH"]}', TMPDIR=str(td), AGENT_SPIN_CHECK='on',
                     AGENT_SPIN_CHECK_EVERY='50', AGENT_SPIN_CHECK_FIRST_WRITE='on',
                     AGENT_SPIN_CHECK_STOP='on', AGENT_SPIN_CHECK_LOG=str(td / 'fires.log'),
@@ -116,7 +129,7 @@ class SharedHooks(unittest.TestCase):
         """L-0006: the first file write after each message from Rio is judged, even on a short turn."""
         with tempfile.TemporaryDirectory() as td:
             td = Path(td)
-            env = self.spin_env(td, 'COURSE-CORRECT: Rio asked a question; this edits app.py.')
+            env = self.spin_env(td, p={'unasked_write': 0.95})
             t = self.spin_transcript(td, [{'type': 'user', 'message': {'content': 'why is the test slow?'}}])
             base = {'session_id': 'fw', 'transcript_path': t, 'hook_event_name': 'PostToolUse'}
             read = {**base, 'tool_name': 'Bash', 'tool_input': {'command': 'grep -r slow . 2>/dev/null > /dev/null'}}
@@ -128,7 +141,10 @@ class SharedHooks(unittest.TestCase):
             self.assertIn('first write this turn', r.stderr)
             self.assertIn('why is the test slow?', (td / 'prompt').read_text())
             self.assertIn('/x/app.py', (td / 'prompt').read_text())
-            self.assertIn('mode=first-write', (td / 'fires.log').read_text())
+            log = (td / 'fires.log').read_text()
+            self.assertIn('mode=first-write', log)
+            self.assertIn('p={"unasked_write":0.95}', log)
+            self.assertRegex(log, r'\tms=\d+\t')
             # second write in the same turn: silent
             r = self.run_hook('spin-check.sh', {**base, 'tool_name': 'Bash', 'tool_input': {'command': 'echo hi > out.txt'}}, **env)
             self.assertEqual((r.returncode, self.calls(td)), (0, 1), r.stderr)
@@ -148,7 +164,7 @@ class SharedHooks(unittest.TestCase):
     def test_spin_conversation_keeps_rios_lines_and_skips_hook_feedback(self):
         with tempfile.TemporaryDirectory() as td:
             td = Path(td)
-            env = self.spin_env(td, 'ON TRACK')
+            env = self.spin_env(td)
             t = self.spin_transcript(td, [
                 {'type': 'user', 'message': {'content': '<!-- reply 1 -->\n> quoted line\n\nwhy not?'}},
                 {'type': 'user', 'message': {'content': 'Item A - plz fix\nItem B - just asking'}},
@@ -165,7 +181,7 @@ class SharedHooks(unittest.TestCase):
         """L-0012: the final reply is checked against this turn's tool calls; the retry is never re-checked."""
         with tempfile.TemporaryDirectory() as td:
             td = Path(td)
-            env = self.spin_env(td, 'COURSE-CORRECT: "tests pass" but no test ran this turn.')
+            env = self.spin_env(td, p={'unverified_claim': 0.9, 'unasked_change': 0.1})
             t = self.spin_transcript(td, [
                 {'type': 'user', 'message': {'content': 'old ask'}},
                 {'type': 'assistant', 'message': {'content': [{'type': 'tool_use', 'name': 'Bash', 'input': {'command': 'pytest old'}}]}},
@@ -181,7 +197,8 @@ class SharedHooks(unittest.TestCase):
             self.assertEqual((p.returncode, p.stderr), (2, ''))
             r = self.run_hook('spin-check.sh', stop, **env)
             self.assertEqual(r.returncode, 2, r.stderr)
-            self.assertIn('no test ran', r.stderr)
+            self.assertIn('claim stated as checked', r.stderr)
+            self.assertNotIn('change Rio did not ask for', r.stderr)
             self.assertIn('Revised reply', r.stderr)
             self.assertEqual(self.calls(td), 1)
             prompt = (td / 'prompt').read_text()
@@ -200,12 +217,18 @@ class SharedHooks(unittest.TestCase):
             t = self.spin_transcript(td, [{'type': 'user', 'message': {'content': 'hi'}}])
             stop = {'session_id': 'ok', 'transcript_path': t, 'hook_event_name': 'Stop',
                     'stop_hook_active': False, 'last_assistant_message': 'Hello.'}
-            r = self.run_hook('spin-check.sh', stop, **self.spin_env(td, 'On track'))
+            r = self.run_hook('spin-check.sh', stop, **self.spin_env(td, p={'unverified_claim': 0.7}))
             self.assertEqual((r.returncode, r.stderr), (0, ''))
-            env = self.spin_env(td, '')  # empty verdict = broken reviewer
+            # The model declines some inputs: that reply goes unjudged, with no alarm.
+            r = self.run_hook('spin-check.sh', {**stop, 'last_assistant_message': 'Hey.'},
+                              **self.spin_env(td, p={'unverified_claim': 0.1, 'unasked_change': None}))
+            self.assertEqual((r.returncode, r.stdout, r.stderr), (0, '', ''))
+            self.assertIn('verdict=ON TRACK (refused: unasked_change)', (td / 'fires.log').read_text())
+            env = self.spin_env(td, code=500)  # API down = broken reviewer
             r = self.run_hook('spin-check.sh', {**stop, 'last_assistant_message': 'Hi again.'}, **env)
             self.assertEqual(r.returncode, 0, r.stderr)
             self.assertIn('SPIN-CHECK IS BROKEN', json.loads(r.stdout)['systemMessage'])
+            self.assertIn('HTTP 500', (td / 'fires.log').read_text())
 
     def test_delegate_drift_check_does_not_recurse(self):
         r = self.run_hook('spin-check.sh', {'session_id': 'delegate-check'},
