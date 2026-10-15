@@ -24,7 +24,14 @@ hook() { printf '{"session_id":"%s"}' "$1" | bash "$k" --hook; }
 out="$(bash "$root/agent-context/providers/30-knobs.sh")"
 want "cap line" "$out" "Reply cap: 200 prose words"
 want "knob line" "$out" "- attention: foreground. Rio is here"
-want "auto knob" "$out" "- tokens: auto."
+want "no pace" "$out" "- tokens: auto (no usage pace: no weekly usage reading yet"
+
+# tokens=auto resolves from the weekly pace; Codex sessions keep plain auto
+"$root/usage-pace" record 20 $(($(date +%s) + 302400))
+out="$(bash "$root/agent-context/providers/30-knobs.sh")"
+want "auto resolved" "$out" "- tokens: auto → generous (week 20% used, 3.5 days to reset, on pace for 40%). Rio has spare tokens"
+out="$(AGENT_TRANSCRIPT_PATH="$tmp/.codex/sessions/x.jsonl" bash "$root/agent-context/providers/30-knobs.sh")"
+want "codex auto" "$out" "- tokens: auto. Spend tokens"
 
 # provider stamps the session, so its first prompt does not repeat the block
 AGENT_SESSION_ID=s1 bash "$root/agent-context/providers/30-knobs.sh" >/dev/null
@@ -38,6 +45,12 @@ want "hook event" "$out" '"hookEventName":"UserPromptSubmit"'
 want "changed knob" "$out" "attention: away. Rio is away"
 want "session cap" "$out" "Reply cap: 100"
 [ -z "$(hook s1)" ] || fail "same change injected twice"
+
+# the pace moving within a level is not a change; a new level is
+"$root/usage-pace" record 25 $(($(date +%s) + 302400))
+[ -z "$(hook s1)" ] || fail "pace numbers alone re-injected"
+"$root/usage-pace" record 60 $(($(date +%s) + 302400))
+want "new level" "$(hook s1)" "tokens: auto → frugal"
 
 # another session keeps the machine values
 want "other session" "$(hook s2)" "attention: foreground"
