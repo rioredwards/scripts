@@ -17,6 +17,8 @@
     { "name": "audio-host", "key": "AGENT_AUDIO_FILE_HOST", "kind": "value", "doc": "only this `hostname -s` generates" },
     { "name": "webview-ttl", "key": "AGENT_WEBVIEW_TTL_MIN", "kind": "value", "doc": "auto-off after N min (0 = never)" },
     { "name": "webview-host", "key": "AGENT_WEBVIEW_HOST", "kind": "value", "doc": "ssh alias to display on (empty = here)" },
+    { "name": "spin-first-write", "key": "AGENT_SPIN_CHECK_FIRST_WRITE", "kind": "toggle", "doc": "spin-check: judge the first file write after each message" },
+    { "name": "spin-stop", "key": "AGENT_SPIN_CHECK_STOP", "kind": "toggle", "doc": "spin-check: check final replies (adds ~11s per turn)" },
     { "name": "spin-every", "key": "AGENT_SPIN_CHECK_EVERY", "kind": "value", "doc": "fire every Nth tool call" },
     { "name": "spin-model", "key": "AGENT_SPIN_CHECK_MODEL", "kind": "value", "doc": "reviewer model" },
     { "name": "spin-provider", "key": "AGENT_SPIN_CHECK_PROVIDER", "kind": "value", "doc": "agent-router provider" },

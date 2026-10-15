@@ -1,5 +1,6 @@
 #!/bin/sh
-# reply-cap-lib.sh: shared brains for the reply-length cap.
+# reply-cap-lib.sh: shared brains for the reply-length cap, and the Stop
+# plumbing every reply reviewer shares (reply_for_review, reply_once).
 #
 # Two hooks need the same answer to one question: "is this reply about to be
 # bounced for length?" reply-cap.sh asks so it can block. The turn-end
@@ -53,6 +54,44 @@ reply_last_prompt() {
 # suggestion Rio never reads as a message.
 reply_is_suggestion() {
   printf '%s' "$1" | grep -Eq '^[[:space:]]*\{"suggestion":'
+}
+
+# Shared plumbing for Stop-time reviewers (attention-judge, spin-check). Each
+# keeps its own question, verdict and log; these two answer "should a reviewer
+# look at this reply at all?" and "has another caller already asked?".
+
+# Prints the final reply a reviewer should judge, or fails to mean skip: a
+# delegate (Rio never reads it), the retry after any bounce (stop_hook_active,
+# so a reviewer never loops), an empty reply, or a Codex prompt suggestion.
+reply_for_review() {
+  . "$HOME/scripts/hooks/lib/delegate.sh"
+  hook_is_delegate "$1" && return 1
+  [ "$(printf '%s' "$1" | jq -r '.stop_hook_active // false')" = true ] && return 1
+  _rr="$(printf '%s' "$1" | jq -r '.last_assistant_message // empty')"
+  [ -n "$_rr" ] || return 1
+  reply_is_suggestion "$_rr" && return 1
+  printf '%s' "$_rr"
+}
+
+# reply_once NAME SESSION REPLY WAIT_SECS CMD...: run CMD once per reply and
+# print its output to every caller. A model verdict is not repeatable, so the
+# first caller stores it and the rest (the turn-end probe, the real Stop run)
+# wait up to WAIT_SECS and read it: one model call, one answer. Fails when
+# the answer never arrived. State lives in $TMPDIR/NAME, cleared after a day.
+reply_once() {
+  _ro_dir="${TMPDIR:-/tmp}/$1"; _ro_wait="$4"
+  mkdir -p "$_ro_dir"
+  find "$_ro_dir" -mindepth 1 -mtime +1 -delete 2>/dev/null
+  _ro_out="$_ro_dir/$(printf '%s\n%s' "$2" "$3" | shasum -a 256 | cut -c1-32)"
+  shift 4
+  if mkdir "$_ro_out.lock" 2>/dev/null; then
+    "$@" > "$_ro_out.tmp"
+    mv "$_ro_out.tmp" "$_ro_out"
+  else
+    _ro_n=0
+    while [ ! -f "$_ro_out" ] && [ "$_ro_n" -lt $((_ro_wait * 10)) ]; do sleep 0.1; _ro_n=$((_ro_n + 1)); done
+  fi
+  [ -f "$_ro_out" ] && cat "$_ro_out"
 }
 
 # The cap, or empty when disabled / nonsense / jq missing.
@@ -141,10 +180,39 @@ reply_rules_will_bounce() {
   [ "$?" -eq 2 ]
 }
 
+# True when spin-check's final-reply review (L-0012) will bounce this reply.
+# Runs the hook as a probe: the hook stores one verdict per reply, so the probe
+# and the real Stop run share a single reviewer call and always agree.
+reply_spin_will_bounce() {
+  payload="$1"
+  hook="${AGENT_SPIN_CHECK_HOOK:-$HOME/scripts/hooks/spin-check.sh}"
+  [ -r "$hook" ] || return 1
+  command -v jq >/dev/null 2>&1 || return 1
+
+  # Registered on Stop for THIS agent, or nobody will ask for a rewrite. Codex
+  # also skips a hook Rio has not trusted in /hooks (trust is per position), and
+  # an untrusted one must not cost him the turn-end note.
+  transcript="$(printf '%s' "$payload" | jq -r '.transcript_path // empty')"
+  if [ -n "$transcript" ] && [ "$(head -n 1 "$transcript" 2>/dev/null | jq -r '.type // empty' 2>/dev/null)" = session_meta ]; then
+    idx="$(jq -r '.hooks.Stop // [] | map(any(.hooks[]?; .command | test("spin-check\\.sh"))) | index(true) // empty' \
+      "$HOME/.codex/hooks.json" 2>/dev/null)"
+    [ -n "$idx" ] || return 1
+    grep -qF "\"$HOME/.codex/hooks.json:stop:$idx:0\"]" "$HOME/.codex/config.toml" 2>/dev/null || return 1
+  else
+    jq -e '[.hooks.Stop[]?.hooks[]?.command] | any(test("spin-check\\.sh"))' \
+      "$HOME/.claude/settings.json" >/dev/null 2>&1 || return 1
+  fi
+
+  printf '%s' "$payload" | AGENT_SPIN_CHECK_PROBE=1 bash "$hook" >/dev/null 2>&1
+  [ "$?" -eq 2 ]
+}
+
 # True when this reply is about to be rewritten for ANY reason: over the length
-# cap, or tripping a response rule. This is the predicate a hook with real side
-# effects wants; `reply_will_bounce` alone now covers only half the reasons.
+# cap, tripping a response rule, or flagged by spin-check's final-reply review.
+# This is the predicate a hook with real side effects wants; `reply_will_bounce`
+# alone covers only one of the reasons.
 reply_will_be_rewritten() {
   reply_will_bounce "$1" && return 0
-  reply_rules_will_bounce "$1"
+  reply_rules_will_bounce "$1" && return 0
+  reply_spin_will_bounce "$1"
 }

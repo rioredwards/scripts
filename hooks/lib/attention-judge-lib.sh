@@ -82,24 +82,10 @@ judge_verdict() {
   payload="$1"
   [ -f "$HOME/scripts/agent-hooks-env.sh" ] && . "$HOME/scripts/agent-hooks-env.sh"
   [ "${AGENT_ATTENTION_JUDGE:-watch}" = off ] && { echo skip; return; }
-  . "$HOME/scripts/hooks/lib/delegate.sh"
-  hook_is_delegate "$payload" && { echo skip; return; }
-  [ "$(printf '%s' "$payload" | jq -r '.stop_hook_active // false')" = true ] && { echo skip; return; }
-  reply="$(printf '%s' "$payload" | jq -r '.last_assistant_message // empty')"
-  [ -n "$reply" ] || { echo skip; return; }
-  reply_is_suggestion "$reply" && { echo skip; return; }
-
+  reply="$(reply_for_review "$payload")" || { echo skip; return; }
   session="$(printf '%s' "$payload" | jq -r '.session_id // empty')"
-  dir="${TMPDIR:-/tmp}/attention-judge"; mkdir -p "$dir"
-  id="$(printf '%s\n%s' "$session" "$reply" | shasum -a 256 | cut -c1-32)"
-  out="$dir/$id"
-  if mkdir "$out.lock" 2>/dev/null; then
-    _judge_call "$(reply_last_prompt "$payload" commands)" "$reply" "$session" > "$out.tmp"
-    mv "$out.tmp" "$out"
-  else
-    n=0
-    while [ ! -f "$out" ] && [ "$n" -lt 60 ]; do sleep 0.1; n=$((n + 1)); done
-  fi
-  [ -f "$out" ] && cat "$out" || echo "error timed out waiting for another caller's verdict"
+  reply_once attention-judge "$session" "$reply" 6 \
+    _judge_call "$(reply_last_prompt "$payload" commands)" "$reply" "$session" \
+    || echo "error timed out waiting for another caller's verdict"
 }
 

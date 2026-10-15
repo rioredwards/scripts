@@ -10,4 +10,9 @@ select(.type == "response_item") | .payload
     | {type: "assistant", message: {content: [{type: "tool_use",
         name: (if (.name | endswith("spawn_agent")) then "Agent" else .name end),
         input: ($args + {prompt: ($args.prompt // $args.message // "")})}]}}
+  elif .type == "function_call_output" or .type == "custom_tool_call_output" then
+    {type: "user", message: {content: [{type: "tool_result",
+      content: (.output | if type == "array" then map(.text // "") | join(" ")
+                elif type == "object" then (.content // .output // tostring)
+                else tostring end)}]}}
   else empty end
