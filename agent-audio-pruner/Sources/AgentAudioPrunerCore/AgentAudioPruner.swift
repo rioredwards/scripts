@@ -113,6 +113,7 @@ public enum PrunerError: LocalizedError {
     case unreadableDirectory(URL, Error)
     case missingMetadata(URL, String)
     case invalidSidecar(URL, String)
+    case trashFailed(failures: [String], attempted: Int)
 
     public var errorDescription: String? {
         switch self {
@@ -126,6 +127,9 @@ public enum PrunerError: LocalizedError {
             return "missing \(field) metadata for \(url.path)"
         case let .invalidSidecar(url, message):
             return "invalid sidecar \(url.path): \(message)"
+        case let .trashFailed(failures, attempted):
+            return "could not trash \(failures.count) of \(attempted) files:\n  "
+                + failures.joined(separator: "\n  ")
         }
     }
 }
@@ -241,7 +245,6 @@ public final class AgentAudioPruner {
         }
 
         if verbose || dryRun {
-            for warning in warnings { print("warning: \(warning)") }
             for url in sidecarsToRemove.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
                 print("  \(dryRun ? "would trash" : "trashing") sidecar \(url.lastPathComponent)")
             }
@@ -251,11 +254,19 @@ public final class AgentAudioPruner {
         }
 
         if !dryRun {
-            for sidecar in sidecarsToRemove.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
-                try trashItem(sidecar)
+            // Try every file, then fail once: one bad file must not stall the cap forever.
+            let targets = sidecarsToRemove.sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
+                + plan.removed.map(\.url)
+            var failures: [String] = []
+            for url in targets {
+                do {
+                    try trashItem(url)
+                } catch {
+                    failures.append(error.localizedDescription)
+                }
             }
-            for file in plan.removed {
-                try trashItem(file.url)
+            if !failures.isEmpty {
+                throw PrunerError.trashFailed(failures: failures, attempted: targets.count)
             }
         }
 

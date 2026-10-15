@@ -75,6 +75,34 @@ import Testing
     #expect(trashed == ["removed.mp3"])
 }
 
+@Test func oneTrashFailureStillTrashesTheRestThenFails() throws {
+    let fixture = try Fixture()
+    defer { fixture.remove() }
+    try fixture.writeAudio("new.mp3", bytes: 10, modifiedAt: 3)
+    try fixture.writeAudio("middle.mp3", bytes: 10, modifiedAt: 2)
+    try fixture.writeAudio("old.mp3", bytes: 10, modifiedAt: 1)
+    try fixture.writeSidecar("middle.json", audio: "middle.mp3")
+    var trashed: [String] = []
+    let configuration = try PrunerConfiguration(
+        directory: fixture.directory,
+        maxBytes: 100,
+        keepCount: 1,
+        audioExtensions: ["mp3"]
+    )
+    let pruner = AgentAudioPruner(configuration: configuration) { url in
+        if url.lastPathComponent == "middle.json" { throw CocoaError(.fileWriteNoPermission) }
+        trashed.append(url.lastPathComponent)
+    }
+
+    #expect {
+        try pruner.run()
+    } throws: { error in
+        guard case let PrunerError.trashFailed(failures, attempted) = error else { return false }
+        return failures.count == 1 && attempted == 3
+    }
+    #expect(trashed == ["middle.mp3", "old.mp3"])
+}
+
 @Test func invalidConfigurationFailsLoud() {
     #expect(throws: PrunerError.self) {
         try PrunerConfiguration(

@@ -62,6 +62,10 @@ do {
         dryRun: options.dryRun,
         verbose: options.verbose
     )
+    for warning in result.warnings {
+        FileHandle.standardError.write(Data("warning: \(warning)\n".utf8))
+        if !options.dryRun { try log.append("WARNING \(warning)") }
+    }
     print(result.summary)
     if !options.dryRun { try log.append(result.summary) }
 } catch {
