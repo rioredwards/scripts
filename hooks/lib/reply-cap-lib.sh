@@ -81,6 +81,9 @@ reply_will_bounce() {
   . "$HOME/scripts/hooks/lib/delegate.sh"
   hook_is_delegate "$payload" && return 1
 
+  # This session's cap, when Rio set one for it (agent-toggle --session).
+  AGENT_SESSION_ID="$(printf '%s' "$payload" | jq -r '.session_id // empty' 2>/dev/null)"
+  export AGENT_SESSION_ID
   cap="$(reply_cap_value)" || return 1
   REPLY_SHORT_ASK=0
   prompt="$(reply_last_prompt "$payload")"

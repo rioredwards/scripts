@@ -15,6 +15,13 @@
 set -euo pipefail
 shopt -s nullglob
 
+# The hook payload names the session, so providers read its knob layer
+# (agent-hooks-env.sh) instead of only the machine's.
+payload=""
+[ -t 0 ] || payload="$(cat)"
+AGENT_SESSION_ID="$(printf '%s' "$payload" | jq -r '.session_id // empty' 2>/dev/null || true)"
+export AGENT_SESSION_ID
+
 providers="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/providers"
 
 facts=""
