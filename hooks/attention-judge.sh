@@ -8,14 +8,17 @@
 # re-calibration.
 #
 # When OpenAI fails (error, timeout, refusal), the reply goes through and Rio
-# sees a warning line on every failed turn. Approved on agent-skills#48: loud,
-# but an outage never stalls every session on both Macs.
+# sees a warning line on every failed turn (Claude: the agent relays it next
+# turn). Approved on agent-skills#48: loud, but an outage never stalls every
+# session on both Macs.
 #
 #   AGENT_ATTENTION_JUDGE   watch | bounce | off (default watch)
 #
-# Registered async in the Stop array (Claude settings, Codex hooks.json), so
-# watching adds no wait. ⚠️ Bounce mode needs a blocking registration (timeout
-# 6, not async) and reply_will_be_rewritten wired to the stored verdict.
+# Registered async and last in the Stop array (Claude settings, Codex
+# hooks.json), so watching adds no wait. Codex trusts hooks by position: a new
+# one goes last, then gets trusted in Codex's /hooks. ⚠️ Bounce mode needs a
+# blocking registration (timeout 6, not async) and reply_will_be_rewritten
+# wired to the stored verdict.
 set -uo pipefail
 
 . "$HOME/scripts/hooks/lib/attention-judge-lib.sh"
@@ -27,7 +30,9 @@ case "$verdict" in
   skip|pass) exit 0 ;;
   bounce*) [ "${AGENT_ATTENTION_JUDGE:-watch}" = bounce ] || exit 0 ;;
   error*)
-    jq -nc --arg m "⚠️ attention-judge failed, reply not judged: ${verdict#error }" '{systemMessage:$m}'
+    # Async: Claude hands systemMessage to the agent, not Rio, so it asks for a relay.
+    jq -nc --arg m "⚠️ attention-judge failed, reply not judged: ${verdict#error }. Agent: tell Rio this in one line." \
+      '{systemMessage:$m}'
     exit 0 ;;
 esac
 
