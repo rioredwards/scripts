@@ -10,8 +10,8 @@ DASH = chr(0x2014)
 
 
 class RulesTests(unittest.TestCase):
-    def run_hook(self, kind, payload, agent="claude", delegate=False):
-        env = dict(os.environ, AGENT_RULES_FILE=str(ROOT / "rules.json"))
+    def run_hook(self, kind, payload, agent="claude", delegate=False, attention="foreground"):
+        env = dict(os.environ, AGENT_RULES_FILE=str(ROOT / "rules.json"), AGENT_ATTENTION=attention)
         env.pop("AGENT_DELEGATE", None)
         if delegate:
             env["AGENT_DELEGATE"] = "1"
@@ -63,6 +63,18 @@ class RulesTests(unittest.TestCase):
             with self.subTest(text=text):
                 result = self.run_hook("response", {"last_assistant_message": text})
                 self.assertEqual(result.returncode, code, result.stderr)
+
+    def test_away_bounces_every_question(self):
+        """attention=away: nobody answers, so even a step-5 ask bounces."""
+        for text, code in (("❓ Merge to prod?\nWhy you: it ships to customers.", 2),
+                           ("Okay to merge?", 2),
+                           ("Tests pass. Logged the merge ask to the inbox.", 0)):
+            with self.subTest(text=text):
+                result = self.run_hook("response", {"last_assistant_message": text}, attention="away")
+                self.assertEqual(result.returncode, code, result.stderr)
+                if code:
+                    self.assertIn("away-no-questions", result.stderr)
+                    self.assertNotIn("ask-needs-step-5", result.stderr)
 
     def test_pr_issue_titles(self):
         allowed = [

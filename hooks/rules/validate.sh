@@ -10,6 +10,7 @@
 set -eu
 
 RULES="${1:-$HOME/scripts/hooks/rules/rules.json}"
+KNOBS="${AGENT_KNOBS_FILE:-$(dirname "$0")/../../agent-knobs.json}"
 command -v jq >/dev/null 2>&1 || { echo "FAIL jq is required" >&2; exit 2; }
 [ -r "$RULES" ] || { echo "FAIL not readable: $RULES" >&2; exit 2; }
 jq -e . "$RULES" >/dev/null 2>&1 || { echo "FAIL not valid JSON: $RULES" >&2; exit 2; }
@@ -18,7 +19,7 @@ fail=0
 note() { printf '%s\n' "$1" >&2; fail=1; }
 
 # Schema. Every constraint the runner silently depends on, stated once.
-errs="$(jq -r '
+errs="$(jq -r --slurpfile knobs "$KNOBS" '
   def err($id; $m): "FAIL " + $id + ": " + $m;
   (.rules // null) as $rules
   | if $rules == null then ["FAIL top level: missing `rules` array"]
@@ -39,6 +40,14 @@ errs="$(jq -r '
             (if (.match | type) != "object" then err($id; "missing `match` object") else empty end),
             (if .on == "tool" and ((.match.tool // "") == "") and ((.match.input // "") == "") and ((.match.content // "") == "")
                then err($id; "on=tool needs match.tool, match.input, or match.content") else empty end),
+            (if has("when") then
+               (.when.knob as $n | first($knobs[0].knobs[] | select(.name == $n and .session)) // null) as $k
+               | if $k == null then err($id; "when.knob must name a session knob in agent-knobs.json")
+                 elif ((.when.in | type) != "array") or (.when.in | length) == 0
+                   or any(.when.in[]; . as $o | $k.options | has($o) | not)
+                 then err($id; "when.in must list options of \(.when.knob): \($k.options | keys_unsorted | join(", "))")
+                 else empty end
+             else empty end),
             (if .on == "response" and ((.match.text // "") == "")
                then err($id; "on=response needs match.text") else empty end) ]
         | .[] ]

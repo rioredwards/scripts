@@ -20,6 +20,7 @@ Every field. There is nothing else.
 | `match.text` | regex | `on: response` only. Matches the final reply. |
 | `scope` | `all` | Optional, response-only. Also enforce on retries and delegates. |
 | `unless` | regex | Optional escape hatch. Matches the same subject → rule skipped. |
+| `when` | `{knob, in}` | Optional. Rule applies only while session knob `knob` (`agent-knobs.json`) is one of `in`. |
 | `do` | `remind` \| `deny` | `deny` is `on: tool` only. |
 | `text` | string | What the agent is told. State the rule **and** what to do instead. |
 

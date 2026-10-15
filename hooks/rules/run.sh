@@ -20,6 +20,7 @@ set -u
 KIND="${1:-}"
 AGENT="${2:-claude}"
 RULES="${AGENT_RULES_FILE:-$HOME/scripts/hooks/rules/rules.json}"
+KNOBS="${AGENT_KNOBS_FILE:-$(dirname "$0")/../../agent-knobs.json}"
 
 [ "$KIND" = "tool" ] || [ "$KIND" = "response" ] || exit 0
 [ -r "$RULES" ] || exit 0
@@ -65,9 +66,14 @@ else
   reply_is_suggestion "$TEXT" && exit 0
 fi
 
+# `when` gates read this session's knobs (agent-toggle --session), so load them.
+AGENT_SESSION_ID="$(printf '%s' "$PAYLOAD" | jq -r '.session_id // empty' 2>/dev/null)"
+export AGENT_SESSION_ID
+[ -r "$HOME/scripts/agent-hooks-env.sh" ] && . "$HOME/scripts/agent-hooks-env.sh"
+
 VERDICT="$(
   printf '%s' '{}' | jq -r \
-    --slurpfile cfg "$RULES" \
+    --slurpfile cfg "$RULES" --slurpfile knobs "$KNOBS" \
     --argjson limited "$LIMITED" --arg kind "$KIND" --arg tool "$TOOL" --arg input "$INPUT" --arg content "$CONTENT" --arg text "$TEXT" '
   def m($re; $subject):
     if (($re // "") == "") then true else ($subject | test($re)) end;
@@ -81,8 +87,13 @@ VERDICT="$(
      else m($r.match.text; $text) end)
     and (($r.unless // "") == "" or (subject($r) | test($r.unless) | not));
 
+  # a knob value as hooks see it: this session, else machine, else its default
+  def knob($n): first($knobs[0].knobs[] | select(.name == $n)) as $k
+    | (env[$k.key] // "") | if . == "" then ($k.default // "") else . end;
+
   [ (($cfg[0].rules) // [])[]
     | select(.on == $kind)
+    | select(.when == null or (knob(.when.knob) as $v | .when.in | index($v)) != null)
     | select(($limited | not) or .scope == "all")
     | select(hit(.)) ]                      as $fired
   | ($fired | map(select(.do == "deny")))   as $denies
