@@ -22,14 +22,15 @@
     { "name": "spin-provider", "key": "AGENT_SPIN_CHECK_PROVIDER", "kind": "value", "doc": "agent-router provider" },
     { "name": "spin-timeout", "key": "AGENT_SPIN_CHECK_TIMEOUT", "kind": "value", "doc": "seconds to wait on the reviewer" },
     { "name": "cue-stale", "key": "AGENT_AUTOMATION_CUE_STALE", "kind": "value", "doc": "minutes before a stranded cue clears" },
+    { "name": "attention-judge", "aliases": ["judge"], "key": "AGENT_ATTENTION_JUDGE", "kind": "value", "doc": "outside model rates each reply: watch | bounce | off" },
 
-    { "name": "reply-cap", "aliases": ["words"], "key": "AGENT_REPLY_MAX_WORDS", "kind": "value", "session": true, "label": "💬 cap",
+    { "name": "reply-cap", "aliases": ["words"], "key": "AGENT_REPLY_MAX_WORDS", "kind": "value", "session": true, "default": "200", "label": "💬 cap",
       "doc": "prose-word ceiling on a reply",
       "options": { "off": "", "100": "", "200": "", "300": "" } },
     { "name": "attention", "key": "AGENT_ATTENTION", "kind": "value", "session": true, "default": "foreground", "label": "👀 attention",
       "doc": "how much Rio is watching this session",
       "options": {
-        "foreground": "Rio is here and watching. Guided: check in at loop gates; ask only at decision-ladder step 5.",
+        "foreground": "Rio is here and watching. Loop default mode: guided until plan approval, autonomous after; ask only at decision-ladder step 5.",
         "background": "Rio is on another task. Once the ask is settled, run autonomously to done; hold step-5 questions and send them together at the end; no progress chatter.",
         "away": "Rio is away (lunch, sleep). Nobody will answer. Never stop to ask: take the safest reversible path, log step-5 asks to the PM inbox (headless rule), keep working to done or budget. Nothing irreversible: no merge, delete, spend, or prod data."
       } },

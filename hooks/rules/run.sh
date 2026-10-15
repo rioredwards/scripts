@@ -70,10 +70,14 @@ fi
 AGENT_SESSION_ID="$(printf '%s' "$PAYLOAD" | jq -r '.session_id // empty' 2>/dev/null)"
 export AGENT_SESSION_ID
 [ -r "$HOME/scripts/agent-hooks-env.sh" ] && . "$HOME/scripts/agent-hooks-env.sh"
+# A missing or broken registry drops only the `when`-gated rules, never the
+# ungated ones (never-merge-pr must keep firing). validate.sh fails it loudly.
+KNOB_LIST="$(jq -cs '.[0].knobs | arrays' "$KNOBS" 2>/dev/null)"
+[ -n "$KNOB_LIST" ] || KNOB_LIST='[]'
 
 VERDICT="$(
   printf '%s' '{}' | jq -r \
-    --slurpfile cfg "$RULES" --slurpfile knobs "$KNOBS" \
+    --slurpfile cfg "$RULES" --argjson knobs "$KNOB_LIST" \
     --argjson limited "$LIMITED" --arg kind "$KIND" --arg tool "$TOOL" --arg input "$INPUT" --arg content "$CONTENT" --arg text "$TEXT" '
   def m($re; $subject):
     if (($re // "") == "") then true else ($subject | test($re)) end;
@@ -88,7 +92,7 @@ VERDICT="$(
     and (($r.unless // "") == "" or (subject($r) | test($r.unless) | not));
 
   # a knob value as hooks see it: this session, else machine, else its default
-  def knob($n): first($knobs[0].knobs[] | select(.name == $n)) as $k
+  def knob($n): first($knobs[] | select(.name == $n)) as $k
     | (env[$k.key] // "") | if . == "" then ($k.default // "") else . end;
 
   [ (($cfg[0].rules) // [])[]

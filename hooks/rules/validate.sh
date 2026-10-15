@@ -14,6 +14,7 @@ KNOBS="${AGENT_KNOBS_FILE:-$(dirname "$0")/../../agent-knobs.json}"
 command -v jq >/dev/null 2>&1 || { echo "FAIL jq is required" >&2; exit 2; }
 [ -r "$RULES" ] || { echo "FAIL not readable: $RULES" >&2; exit 2; }
 jq -e . "$RULES" >/dev/null 2>&1 || { echo "FAIL not valid JSON: $RULES" >&2; exit 2; }
+jq -e '.knobs | arrays' "$KNOBS" >/dev/null 2>&1 || { echo "FAIL knob registry missing or not valid: $KNOBS" >&2; exit 2; }
 
 fail=0
 note() { printf '%s\n' "$1" >&2; fail=1; }

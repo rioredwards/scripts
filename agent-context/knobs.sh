@@ -15,6 +15,9 @@ set -euo pipefail
 
 mode="${1:-}"
 case "$mode" in ''|--hook) ;; *) echo "knobs.sh: unknown flag: $mode" >&2; exit 1 ;; esac
+# A UserPromptSubmit hook exiting 2 blocks Rio's prompt, and jq exits 2 on a
+# missing file. Fail as a plain, non-blocking error instead.
+if [ "$mode" = --hook ]; then trap 'exit 1' ERR; fi
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 stamps="$HOME/.cache/agent-knobs"
@@ -42,7 +45,7 @@ knobs="$(jq -r '
 ' "$root/agent-knobs.json")"
 
 out="$echo_cap
-Session knobs (Rio set these for this session; they settle these choices, never re-ask):
+Session knobs (Rio's picks for this session; any value but auto settles that choice, never re-ask):
 $knobs"
 
 # Remember what this session was last told. No session id (a manual run) means

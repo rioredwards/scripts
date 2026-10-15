@@ -12,9 +12,9 @@
 #      reverted by a dotfiles auto-sync race. Absent on a fresh machine.
 #   4. ~/.dotfiles/zsh/profiles/agent-hooks.sh: tracked, synced defaults.
 #
-# Implemented by loading session, then local, BEFORE the profile, with neither ever
-# overwriting a value that is already set. Env beats local because env is set
-# before we run; local beats the profile because local is parsed first.
+# Implemented by loading session, then local, then the profile, with none ever
+# overwriting a value that is already set. Env beats them all because env is
+# set before we run; each file beats the ones parsed after it.
 #
 # Override paths: AGENT_HOOKS_PROFILE, AGENT_HOOKS_LOCAL
 

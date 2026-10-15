@@ -10,9 +10,11 @@ DASH = chr(0x2014)
 
 
 class RulesTests(unittest.TestCase):
-    def run_hook(self, kind, payload, agent="claude", delegate=False, attention="foreground"):
+    def run_hook(self, kind, payload, agent="claude", delegate=False, attention="foreground", knobs=None):
         env = dict(os.environ, AGENT_RULES_FILE=str(ROOT / "rules.json"), AGENT_ATTENTION=attention)
         env.pop("AGENT_DELEGATE", None)
+        if knobs:
+            env["AGENT_KNOBS_FILE"] = knobs
         if delegate:
             env["AGENT_DELEGATE"] = "1"
         return subprocess.run(
@@ -75,6 +77,21 @@ class RulesTests(unittest.TestCase):
                 if code:
                     self.assertIn("away-no-questions", result.stderr)
                     self.assertNotIn("ask-needs-step-5", result.stderr)
+
+    def test_away_matches_the_same_asks(self):
+        """Two copies of one regex (rules.json has no reuse): they must not drift."""
+        rules = {r["id"]: r for r in json.loads((ROOT / "rules.json").read_text())["rules"]}
+        self.assertEqual(rules["away-no-questions"]["match"], rules["ask-needs-step-5"]["match"])
+
+    def test_broken_knob_registry_keeps_ungated_rules(self):
+        """A bad agent-knobs.json drops only `when`-gated rules, never the safety rails."""
+        merge = {"tool_name": "Bash", "tool_input": {"command": "gh pr " + "merge 5"}}
+        for knobs in ("/nonexistent/agent-knobs.json", os.devnull):
+            with self.subTest(knobs=knobs):
+                result = self.run_hook("tool", merge, knobs=knobs)
+                self.assertEqual(json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
+                result = self.run_hook("response", {"last_assistant_message": "Okay to merge?"}, knobs=knobs)
+                self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_pr_issue_titles(self):
         allowed = [
