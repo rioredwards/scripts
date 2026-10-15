@@ -86,6 +86,17 @@
       "text": "PR bodies open with the lines-changed table: put $(pr-loc) at the top of the inline --body, then a short plain-English paragraph. Use `gh pr edit --body` to add it now if this PR went out without it."
     },
     {
+      "id": "pr-attn-label",
+      "on": "tool",
+      "match": {
+        "tool": "^Bash$",
+        "input": "gh[[:space:]]+pr[[:space:]]+create"
+      },
+      "unless": "attn:(glance|hour|day)",
+      "do": "remind",
+      "text": "Every PR gets --label attn:glance|hour|day (how much review it needs) and its body names each step 3-4 call. Missed it? `gh pr edit --add-label attn:...` now."
+    },
+    {
       "id": "system-changes-via-skill",
       "on": "tool",
       "match": {
