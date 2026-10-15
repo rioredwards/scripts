@@ -4,12 +4,15 @@
 # Precedence, highest first:
 #   1. env vars already set when this file is sourced  (per-run override:
 #      `AGENT_SPEAK=on claude ...`)
-#   2. ~/.config/agent-hooks/local.sh  : machine-local, untracked. Written by
+#   2. ~/.config/agent-hooks/sessions/$AGENT_SESSION_ID.sh: one session's
+#      knobs (`agent-toggle --session`). Only when AGENT_SESSION_ID is set;
+#      hooks set it from their payload's session_id.
+#   3. ~/.config/agent-hooks/local.sh  : machine-local, untracked. Written by
 #      `agent-toggle`; wins over the synced profile so a remote flip can't be
 #      reverted by a dotfiles auto-sync race. Absent on a fresh machine.
-#   3. ~/.dotfiles/zsh/profiles/agent-hooks.sh: tracked, synced defaults.
+#   4. ~/.dotfiles/zsh/profiles/agent-hooks.sh: tracked, synced defaults.
 #
-# Implemented by loading local BEFORE the profile, with neither ever
+# Implemented by loading session, then local, BEFORE the profile, with neither ever
 # overwriting a value that is already set. Env beats local because env is set
 # before we run; local beats the profile because local is parsed first.
 #
@@ -17,15 +20,21 @@
 
 AGENT_HOOKS_PROFILE="${AGENT_HOOKS_PROFILE:-${HOME}/.dotfiles/zsh/profiles/agent-hooks.sh}"
 AGENT_HOOKS_LOCAL="${AGENT_HOOKS_LOCAL:-${HOME}/.config/agent-hooks/local.sh}"
+AGENT_HOOKS_SESSION=""
+case "${AGENT_SESSION_ID:-}" in
+  ''|*[!A-Za-z0-9_-]*) ;;
+  *) AGENT_HOOKS_SESSION="${HOME}/.config/agent-hooks/sessions/${AGENT_SESSION_ID}.sh" ;;
+esac
 AGENT_HOOKS_SRC=default
 
 _ah_env_override=0
+_ah_session_set=0
 _ah_local_set=0
 _ah_profile_set=0
 _ah_local_keys=' '
 
 # _ah_load FILE LAYER: parse `KEY=VAL` / `export KEY=VAL` lines, skipping any
-# key that already holds a value. LAYER is `local` or `profile`.
+# key that already holds a value. LAYER is `session`, `local` or `profile`.
 _ah_load() {
   [ -f "$1" ] || return 0
   while IFS= read -r _ah_line || [ -n "$_ah_line" ]; do
@@ -41,14 +50,17 @@ _ah_load() {
     if eval "[ -z \"\${${_ah_key}+x}\" ]"; then
       # shellcheck disable=SC2086
       eval "export ${_ah_key}=\"${_ah_val}\""
-      if [ "$2" = local ]; then
+      if [ "$2" = session ]; then
+        _ah_session_set=1
+        _ah_local_keys="${_ah_local_keys}${_ah_key} "
+      elif [ "$2" = local ]; then
         _ah_local_set=1
         _ah_local_keys="${_ah_local_keys}${_ah_key} "
       else
         _ah_profile_set=1
       fi
     else
-      # Already set. That's a real env override only if local didn't set it.
+      # Already set. That's a real env override only if session/local didn't set it.
       case "$_ah_local_keys" in
         *" ${_ah_key} "*) ;;
         *) _ah_env_override=1 ;;
@@ -57,12 +69,15 @@ _ah_load() {
   done < "$1"
 }
 
+if [ -n "$AGENT_HOOKS_SESSION" ]; then _ah_load "$AGENT_HOOKS_SESSION" session; fi
 _ah_load "$AGENT_HOOKS_LOCAL" local
 _ah_load "$AGENT_HOOKS_PROFILE" profile
 
 # shellcheck disable=SC2034  # AGENT_HOOKS_SRC is read by agy-write-guard after sourcing
 if [ "$_ah_env_override" -eq 1 ]; then
   AGENT_HOOKS_SRC='env'
+elif [ "$_ah_session_set" -eq 1 ]; then
+  AGENT_HOOKS_SRC=session
 elif [ "$_ah_local_set" -eq 1 ]; then
   AGENT_HOOKS_SRC=local
 elif [ "$_ah_profile_set" -eq 1 ]; then
@@ -70,4 +85,4 @@ elif [ "$_ah_profile_set" -eq 1 ]; then
 fi
 
 unset _ah_line _ah_key _ah_val
-unset _ah_env_override _ah_local_set _ah_profile_set _ah_local_keys
+unset _ah_env_override _ah_session_set _ah_local_set _ah_profile_set _ah_local_keys

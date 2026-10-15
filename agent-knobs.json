@@ -1,0 +1,61 @@
+{
+  "_doc": "Every agent-hook knob. One source for agent-toggle, the knob context hooks, system-band and the statusline. `session: true` knobs can be set per session; `options` maps each allowed value to what it tells the agent (empty when the value speaks for itself). Edit here, nowhere else.",
+  "knobs": [
+    { "name": "text", "aliases": ["sms"], "key": "AGENT_TEXT", "kind": "toggle", "doc": "reply summary -> text to phone" },
+    { "name": "audio", "key": "AGENT_AUDIO_FILE", "kind": "toggle", "doc": "reply -> grok TTS mp3 -> iCloud ($ grok)" },
+    { "name": "webview", "aliases": ["page"], "key": "AGENT_WEBVIEW", "kind": "toggle", "doc": "reply summary -> web view window on this mac" },
+    { "name": "spin-check", "aliases": ["spin"], "key": "AGENT_SPIN_CHECK", "kind": "toggle", "doc": "every-N-tool outside-model sanity ($ codex)" },
+    { "name": "speak", "key": "AGENT_SPEAK", "kind": "toggle", "doc": "speak reply aloud on this mac (say)" },
+    { "name": "write-guard", "aliases": ["guard"], "key": "AGY_WRITE_GUARD", "kind": "toggle", "doc": "block risky writes (SAFETY RAIL)" },
+    { "name": "auto-cue", "aliases": ["cue"], "key": "AGENT_AUTOMATION_CUE", "kind": "toggle", "doc": "fullscreen \"hands off\" cue while an agent drives the GUI" },
+    { "name": "loc-budget", "aliases": ["budget"], "key": "AGENT_LOC_BUDGET", "kind": "toggle", "doc": "enforce `agent-budget` LOC gates" },
+
+    { "name": "narrate-depth", "aliases": ["depth"], "key": "AGENT_NARRATE_DEPTH", "kind": "value", "doc": "brief | balanced | deep" },
+    { "name": "speak-engine", "key": "AGENT_SPEAK_ENGINE", "kind": "value", "doc": "say | grok" },
+    { "name": "audio-engine", "key": "AGENT_AUDIO_FILE_ENGINE", "kind": "value", "doc": "grok | say" },
+    { "name": "audio-ttl", "key": "AGENT_AUDIO_FILE_TTL_MIN", "kind": "value", "doc": "auto-off after N min (0 = never)" },
+    { "name": "audio-host", "key": "AGENT_AUDIO_FILE_HOST", "kind": "value", "doc": "only this `hostname -s` generates" },
+    { "name": "webview-ttl", "key": "AGENT_WEBVIEW_TTL_MIN", "kind": "value", "doc": "auto-off after N min (0 = never)" },
+    { "name": "webview-host", "key": "AGENT_WEBVIEW_HOST", "kind": "value", "doc": "ssh alias to display on (empty = here)" },
+    { "name": "spin-every", "key": "AGENT_SPIN_CHECK_EVERY", "kind": "value", "doc": "fire every Nth tool call" },
+    { "name": "spin-model", "key": "AGENT_SPIN_CHECK_MODEL", "kind": "value", "doc": "reviewer model" },
+    { "name": "spin-provider", "key": "AGENT_SPIN_CHECK_PROVIDER", "kind": "value", "doc": "agent-router provider" },
+    { "name": "spin-timeout", "key": "AGENT_SPIN_CHECK_TIMEOUT", "kind": "value", "doc": "seconds to wait on the reviewer" },
+    { "name": "cue-stale", "key": "AGENT_AUTOMATION_CUE_STALE", "kind": "value", "doc": "minutes before a stranded cue clears" },
+
+    { "name": "reply-cap", "aliases": ["words"], "key": "AGENT_REPLY_MAX_WORDS", "kind": "value", "session": true, "label": "💬 cap",
+      "doc": "prose-word ceiling on a reply",
+      "options": { "off": "", "100": "", "200": "", "300": "" } },
+    { "name": "attention", "key": "AGENT_ATTENTION", "kind": "value", "session": true, "default": "foreground", "label": "👀 attention",
+      "doc": "how much Rio is watching this session",
+      "options": {
+        "foreground": "Rio is here and watching. Guided: check in at loop gates; ask only at decision-ladder step 5.",
+        "background": "Rio is on another task. Once the ask is settled, run autonomously to done; hold step-5 questions and send them together at the end; no progress chatter.",
+        "away": "Rio is away (lunch, sleep). Nobody will answer. Never stop to ask: take the safest reversible path, log step-5 asks to the PM inbox (headless rule), keep working to done or budget. Nothing irreversible: no merge, delete, spend, or prod data."
+      } },
+    { "name": "quality", "key": "AGENT_QUALITY", "kind": "value", "session": true, "default": "auto", "label": "🎯 quality",
+      "doc": "quick spike to robust prod-ready",
+      "options": {
+        "auto": "Pick the quality bar from the task (loop: err light).",
+        "spike": "Quick spike, find the shape fast. Loop: explore:quick → plan:sketch → implement:prototype → validate:demo → complete. Shortcuts fine, marked SPIKE:.",
+        "standard": "Finished, maintainable work. Standard loop routes; tests where behavior changes.",
+        "prod": "Robust and production-ready. Full routes, edge-case tests, review never skipped, error paths hardened before done."
+      } },
+    { "name": "appetite", "key": "AGENT_APPETITE", "kind": "value", "session": true, "default": "auto", "label": "🍽️ appetite",
+      "doc": "how much scope to take on",
+      "options": {
+        "auto": "Size scope from the ask and the repo's Stage & appetite block.",
+        "tight": "Exactly the ask. Smallest diff that works, small agent-budget. File leftovers and adjacent fixes; don't do them.",
+        "normal": "The ask plus quick in-scope fixes it touches. Bigger finds get filed.",
+        "roomy": "The ask and its neighborhood: fix siblings, adjacent bugs and obvious follow-ups in this session. Generous agent-budget."
+      } },
+    { "name": "tokens", "key": "AGENT_TOKENS", "kind": "value", "session": true, "default": "auto", "label": "🪙 tokens",
+      "doc": "frugal to generous token spend",
+      "options": {
+        "auto": "Spend tokens as the task warrants.",
+        "frugal": "Conserve tokens. Cheapest subagent models that fit, no parallel versions, at most one scout, skip optional passes.",
+        "normal": "Default spend. Parallel scouts for independent areas; one version unless the ladder calls for more.",
+        "generous": "Rio has spare tokens, go the extra mile: 2-3 parallel versions at ladder step 4, stronger subagent models, extra review and verification passes, deeper research. Never at the cost of Rio's attention."
+      } }
+  ]
+}
