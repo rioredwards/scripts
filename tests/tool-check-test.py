@@ -201,6 +201,20 @@ class RunnerTests(unittest.TestCase):
         for fine in ("on-time", "off", "brand-new"):
             self.assertNotIn("BROKE Desktop task %s" % fine, out)
 
+    def test_one_time_task(self):
+        base = {"enabled": True, "createdAt": 1767225600000}
+        self.tasks([
+            dict(base, id="future", fireAt=int(utc("2026-10-21T16:00:00") * 1000)),
+            dict(base, id="fired", fireAt=int(utc("2026-10-13T09:00:00") * 1000), lastScheduledFor="2026-10-13T09:00:00.000Z"),
+            dict(base, id="missed-once", fireAt=int(utc("2026-10-13T09:00:00") * 1000)),
+        ])
+        p, _ = self.run_tool()
+        out = p.stdout
+        self.assertNotIn("cannot read schedule", out)
+        self.assertIn("BROKE Desktop task missed-once: missed its", out)
+        for fine in ("future", "fired"):
+            self.assertNotIn("BROKE Desktop task %s" % fine, out)
+
     def test_recent_slot_gets_grace(self):
         self.tasks([{"id": "t", "enabled": True, "cronExpression": "55 11 * * *", "createdAt": 1767225600000,
                      "lastScheduledFor": "2026-10-13T11:55:00.000Z"}])

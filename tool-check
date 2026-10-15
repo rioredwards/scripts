@@ -276,7 +276,13 @@ def task_checks():
                 results.append(Result("Desktop task", name, True, "skip: disabled", skip=True))
                 continue
             try:
-                slot = cron_last_slot(t["cronExpression"], now - GRACE)
+                if "fireAt" in t:  # one-time task: its only slot is fireAt (epoch ms)
+                    fire = t["fireAt"] / 1000.0
+                    sched = "one-time " + time.strftime("%b %d %H:%M", time.localtime(fire))
+                    slot = fire if fire <= now - GRACE else None
+                else:
+                    sched = "cron " + t["cronExpression"]
+                    slot = cron_last_slot(t["cronExpression"], now - GRACE)
                 last = iso_epoch(t["lastScheduledFor"]) if t.get("lastScheduledFor") else None
             except (KeyError, ValueError) as e:
                 results.append(Result("Desktop task", name, False, "cannot read schedule: %s" % e))
@@ -284,10 +290,10 @@ def task_checks():
             created = t.get("createdAt", 0) / 1000.0
             err = latest.get(name, {}).get("error")
             if err:
-                results.append(Result("Desktop task", name, False, "latest run failed: %s" % str(err).replace("\n", " ")[:120], t["cronExpression"]))
+                results.append(Result("Desktop task", name, False, "latest run failed: %s" % str(err).replace("\n", " ")[:120], sched))
             elif slot and (last or created) < slot - 30 and created < slot:
                 when = time.strftime("%a %b %d %H:%M", time.localtime(slot))
-                results.append(Result("Desktop task", name, False, "missed its %s run (cron %s)" % (when, t["cronExpression"]), t["cronExpression"]))
+                results.append(Result("Desktop task", name, False, "missed its %s run (%s)" % (when, sched), sched))
             else:
                 results.append(Result("Desktop task", name, True))
     return results
