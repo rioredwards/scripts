@@ -103,6 +103,23 @@ import Testing
     #expect(trashed == ["middle.mp3", "old.mp3"])
 }
 
+@Test func moveToUserTrashKeepsBothOnNameClash() throws {
+    let fixture = try Fixture()
+    defer { fixture.remove() }
+    let home = fixture.directory.appendingPathComponent("home")
+    let trash = home.appendingPathComponent(".Trash")
+    try FileManager.default.createDirectory(at: trash, withIntermediateDirectories: true)
+    try Data("old".utf8).write(to: trash.appendingPathComponent("clip.mp3"))
+    try fixture.writeAudio("clip.mp3", bytes: 3, modifiedAt: 1)
+
+    try AgentAudioPruner.moveToUserTrash(
+        fixture.directory.appendingPathComponent("clip.mp3"),
+        trashDirectory: trash
+    )
+
+    #expect(try FileManager.default.contentsOfDirectory(atPath: trash.path).sorted() == ["clip 2.mp3", "clip.mp3"])
+}
+
 @Test func invalidConfigurationFailsLoud() {
     #expect(throws: PrunerError.self) {
         try PrunerConfiguration(

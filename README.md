@@ -22,7 +22,7 @@ Small personal command wrappers and automation helpers. App-sized tools live in 
 - `process-text-for-speech` - prepares text for speech via `aitt`.
 - `summarize-for-note` - summarizes text for the note pipeline via `aitt`.
 - `grok-stt`, `grok-tts` - Grok speech helpers.
-- `agent-audio-prune` - signed Swift binary that caps disposable iCloud audio; source and tests live in `agent-audio-pruner/`. The hourly launchd job needs Full Disk Access granted to `~/scripts/agent-audio-prune` itself (not the `build` script): without it every trash is denied under launchd while manual runs work.
+- `agent-audio-prune` - signed Swift binary that caps disposable iCloud audio; source and tests live in `agent-audio-pruner/`. It moves files into `~/.Trash` itself because, since macOS 26.6.2, `trash` on iCloud Drive files fails under launchd (error 513). Full Disk Access is granted to `~/scripts/agent-audio-prune` itself, not the `build` script.
 - `run-todaybar.sh`, `todaybar-watchdog.sh` - local daily-driver status helpers.
 - `keyfor` - the one way to read an API key: `keyfor NAME` or `keyfor --run NAME -- cmd`. Keys live in an age-encrypted store in `~/.dotfiles`.
 - `agent-budget` - LOC appetite for the work in a repo: `set <loc>`, `status` (exit 1 when over), `clear`. Enforced by `hooks/loc-budget.sh`.

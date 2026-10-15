@@ -149,9 +149,31 @@ public final class AgentAudioPruner {
         self.configuration = configuration
         self.fileManager = fileManager
         self.trashItem = trashItem ?? { url in
-            var resultingURL: NSURL?
-            try fileManager.trashItem(at: url, resultingItemURL: &resultingURL)
+            try Self.moveToUserTrash(
+                url,
+                trashDirectory: fileManager.homeDirectoryForCurrentUser.appendingPathComponent(".Trash"),
+                fileManager: fileManager
+            )
         }
+    }
+
+    /// Moves the file into ~/.Trash ourselves. Since macOS 26.6.2, FileManager.trashItem
+    /// (and /usr/bin/trash) on an iCloud Drive file fails with 513 when run from launchd.
+    static func moveToUserTrash(
+        _ url: URL,
+        trashDirectory trash: URL,
+        fileManager: FileManager = .default
+    ) throws {
+        let stem = url.deletingPathExtension().lastPathComponent
+        let ext = url.pathExtension
+        var destination = trash.appendingPathComponent(url.lastPathComponent)
+        var copy = 2
+        while fileManager.fileExists(atPath: destination.path) {
+            let name = "\(stem) \(copy)" + (ext.isEmpty ? "" : ".\(ext)")
+            destination = trash.appendingPathComponent(name)
+            copy += 1
+        }
+        try fileManager.moveItem(at: url, to: destination)
     }
 
     public static func makePlan(
@@ -262,7 +284,12 @@ public final class AgentAudioPruner {
                 do {
                     try trashItem(url)
                 } catch {
-                    failures.append(error.localizedDescription)
+                    let nsError = error as NSError
+                    var detail = "\(nsError.domain) \(nsError.code)"
+                    if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? NSError {
+                        detail += " <- \(underlying.domain) \(underlying.code)"
+                    }
+                    failures.append("\(url.lastPathComponent): \(error.localizedDescription) [\(detail)]")
                 }
             }
             if !failures.isEmpty {
