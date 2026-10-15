@@ -220,7 +220,8 @@ serve_check reclaim
 # pm2 owns the process: `pm2 ls` lists it, `pm2 logs` tails it, and stopping it
 # sends SIGINT to the whole tree so portless removes its route and mapping.
 type -P pm2 >/dev/null || die "pm2 not found on PATH ($PATH). Installed already? This shell's PATH is missing /opt/homebrew/bin. Otherwise run: /opt/homebrew/bin/npm i -g pm2"
-if pm2 pid "$NAME" 2>/dev/null | grep -q .; then
+# Match a bare pid line only: spawning the daemon (first run after a reboot) prints to stdout.
+if pm2 pid "$NAME" 2>/dev/null | grep -qxE '[0-9]+'; then
   # Step 2 reuses a live server, so one still here failed or is mid-boot.
   say "dev-up: pm2 already has $NAME, not answering; stopping it first"
   /usr/bin/python3 "$LEASE_TOOL" stop-name "$NAME" >&2 \

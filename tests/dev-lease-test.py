@@ -2,6 +2,7 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -116,6 +117,27 @@ class LeaseTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             lease.read("../elsewhere")
 
+    def test_macbook_online_reads_its_tailnet_peer(self):
+        def status(*peers):
+            out = json.dumps({"Peer": {str(i): {"DNSName": n, "Online": o} for i, (n, o) in enumerate(peers)}})
+            return subprocess.CompletedProcess([], 0, stdout=out)
+        cases = [((("rios-macbook-air.ts.net.", True), ("rio-raspberry-pi.ts.net.", False)), True),
+                 ((("rios-macbook-air.ts.net.", False), ("rio-raspberry-pi.ts.net.", True)), False)]
+        for peers, online in cases:
+            with patch.object(lease.subprocess, "run", return_value=status(*peers)):
+                self.assertIs(lease.macbook_online(), online)
+        # A renamed MacBook must not read as offline forever.
+        with patch.object(lease.subprocess, "run", return_value=status(("rios-macbook-pro.ts.net.", True))):
+            with self.assertRaises(RuntimeError):
+                lease.macbook_online()
+
+    def test_stop_pid_refuses_untracked_server(self):
+        self.save()
+        with patch.object(lease, "processes", return_value=[proc()]), patch.object(lease, "pm2") as pm2:
+            with self.assertRaises(RuntimeError):
+                lease.main(["stop-pid", "45678"])
+            pm2.assert_not_called()
+
     def test_no_daemon_means_no_processes_and_no_spawn(self):
         with patch.dict(os.environ, {"PM2_HOME": self.temp.name}), patch.object(lease, "pm2") as pm2:
             self.assertEqual(lease.processes(), [])
@@ -125,44 +147,46 @@ class LeaseTests(unittest.TestCase):
 @unittest.skipUnless(os.environ.get("DEV_LEASE_INTEGRATION"), "isolated pm2 + portless integration opt-in")
 class Pm2Tests(unittest.TestCase):
     def test_portless_server_lifecycle(self):
-        with tempfile.TemporaryDirectory(prefix="dev-lease-test-") as state:
-            env = dict(os.environ, DEV_LEASE_DIR=state, PM2_HOME=os.path.join(state, "pm2"))
-            def run(*args):
-                return subprocess.check_output(args, env=env, text=True, cwd=state).strip()
-            self.addCleanup(lambda: subprocess.run(["pm2", "kill"], env=env, capture_output=True))
-            name = "dev-lease-test-" + os.path.basename(state)[-8:].lower()
-            command = "import http.server,os; http.server.HTTPServer(('127.0.0.1',int(os.environ['PORT'])),http.server.SimpleHTTPRequestHandler).serve_forever()"
-            run("pm2", "start", "portless", "--name", name, "--interpreter", "none", "--no-autorestart",
-                "--kill-timeout", "20000", "--", "run", "--name", name, "/usr/bin/python3", "-c", command)
-            token = run(sys.executable, str(lease.HERE), "create", name)
-            pid = json.loads(run("pm2", "jlist"))[0]["pid"]
-            route = None
-            for _ in range(100):
-                routes = json.loads((Path.home() / ".portless/routes.json").read_text())
-                route = next((r for r in routes if r["pid"] == pid), None)
-                if route:
-                    try:
-                        with urllib.request.urlopen("http://127.0.0.1:%s" % route["port"], timeout=1) as response:
-                            self.assertEqual(response.status, 200)
-                        break
-                    except OSError:
-                        pass
-                time.sleep(0.1)
-            else:
-                self.fail("portless test server did not answer")
-            self.assertEqual(run(sys.executable, str(lease.HERE), "renew-pid", str(pid)), token)
-            run(sys.executable, str(lease.HERE), "sweep")
-            self.assertTrue((Path(state) / (token + ".json")).exists())
-            record = json.loads((Path(state) / (token + ".json")).read_text())
-            record["expires"] = 0
-            (Path(state) / (token + ".json")).write_text(json.dumps(record))
-            run(sys.executable, str(lease.HERE), "sweep")
-            self.assertFalse((Path(state) / (token + ".json")).exists())
-            self.assertEqual(json.loads(run("pm2", "jlist")), [])
-            with socket.socket() as sock:
-                self.assertNotEqual(sock.connect_ex(("127.0.0.1", route["port"])), 0)
+        # Cleanups run last-in first-out: pm2 kill must reach the daemon before its home is removed.
+        state = tempfile.mkdtemp(prefix="dev-lease-test-")
+        self.addCleanup(shutil.rmtree, state)
+        env = dict(os.environ, DEV_LEASE_DIR=state, PM2_HOME=os.path.join(state, "pm2"))
+        def run(*args):
+            return subprocess.check_output(args, env=env, text=True, cwd=state).strip()
+        self.addCleanup(lambda: subprocess.run(["pm2", "kill"], env=env, capture_output=True))
+        name = "dev-lease-test-" + os.path.basename(state)[-8:].lower()
+        command = "import http.server,os; http.server.HTTPServer(('127.0.0.1',int(os.environ['PORT'])),http.server.SimpleHTTPRequestHandler).serve_forever()"
+        run("pm2", "start", "portless", "--name", name, "--interpreter", "none", "--no-autorestart",
+            "--kill-timeout", "20000", "--", "run", "--name", name, "/usr/bin/python3", "-c", command)
+        token = run(sys.executable, str(lease.HERE), "create", name)
+        pid = json.loads(run("pm2", "jlist"))[0]["pid"]
+        route = None
+        for _ in range(100):
             routes = json.loads((Path.home() / ".portless/routes.json").read_text())
-            self.assertFalse(any(r["pid"] == pid for r in routes))
+            route = next((r for r in routes if r["pid"] == pid), None)
+            if route:
+                try:
+                    with urllib.request.urlopen("http://127.0.0.1:%s" % route["port"], timeout=1) as response:
+                        self.assertEqual(response.status, 200)
+                    break
+                except OSError:
+                    pass
+            time.sleep(0.1)
+        else:
+            self.fail("portless test server did not answer")
+        self.assertEqual(run(sys.executable, str(lease.HERE), "renew-pid", str(pid)), token)
+        run(sys.executable, str(lease.HERE), "sweep")
+        self.assertTrue((Path(state) / (token + ".json")).exists())
+        record = json.loads((Path(state) / (token + ".json")).read_text())
+        record["expires"] = 0
+        (Path(state) / (token + ".json")).write_text(json.dumps(record))
+        run(sys.executable, str(lease.HERE), "sweep")
+        self.assertFalse((Path(state) / (token + ".json")).exists())
+        self.assertEqual(json.loads(run("pm2", "jlist")), [])
+        with socket.socket() as sock:
+            self.assertNotEqual(sock.connect_ex(("127.0.0.1", route["port"])), 0)
+        routes = json.loads((Path.home() / ".portless/routes.json").read_text())
+        self.assertFalse(any(r["pid"] == pid for r in routes))
 
 
 if __name__ == "__main__":
