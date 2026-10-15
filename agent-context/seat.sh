@@ -16,7 +16,10 @@
 # Replaced the old screen-lock + `who` check: an unlocked Mac said "Rio is
 # here" for hours after he left, and it never saw the phone.
 #
-# Test seams: SEAT_HOST, SEAT_LOCAL_IDLE, SEAT_REMOTE_IDLE, SEAT_REMOTE_ERR.
+# Other Mac unreachable and offline on Tailscale = asleep, so not him either.
+#
+# Test seams: SEAT_HOST, SEAT_LOCAL_IDLE, SEAT_REMOTE_IDLE, SEAT_REMOTE_ERR,
+# SEAT_REMOTE_ONLINE.
 
 set -euo pipefail
 
@@ -28,8 +31,8 @@ case "$mode" in ''|--machine|--hook) ;; *) echo "seat.sh: unknown flag: $mode" >
 host=${SEAT_HOST:-$(scutil --get LocalHostName)}
 host=$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')
 case "$host" in
-  *mac-mini*) machine="Mac Mini";    other="MacBook Air"; other_ssh=macbook ;;
-  *macbook*)  machine="MacBook Air"; other="Mac Mini";    other_ssh=mini ;;
+  *mac-mini*) machine="Mac Mini";    other="MacBook Air"; other_ssh=macbook other_ts=rios-macbook-air ;;
+  *macbook*)  machine="MacBook Air"; other="Mac Mini";    other_ssh=mini    other_ts=rios-mac-mini ;;
   *) echo "seat.sh: unrecognized LocalHostName: $host" >&2; exit 1 ;;
 esac
 
@@ -69,6 +72,14 @@ else
     fi
   fi
   if [ -n "$remote_err" ]; then
+    online=${SEAT_REMOTE_ONLINE:-$(/Applications/Tailscale.app/Contents/MacOS/Tailscale status --json \
+      | jq -r --arg h "$other_ts." '.Peer[] | select(.DNSName | startswith($h)) | .Online')}
+  fi
+  if [ -n "$remote_err" ] && [ "$online" = false ]; then
+    seat="Seat: Phone (likely). $other is asleep (offline on Tailscale) and \
+$machine has had no input for $((local_idle / 60))m. Keep replies short and \
+skimmable, links tappable. $gui_warning"
+  elif [ -n "$remote_err" ]; then
     seat="Seat: Unknown. Could not check $other ($remote_err), so Rio may be \
 there or on his phone. $machine has had no input for $((local_idle / 60))m. $gui_warning"
   elif [ "$remote_idle" -lt "$THRESHOLD" ]; then

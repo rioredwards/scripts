@@ -28,8 +28,11 @@ out="$(SEAT_LOCAL_IDLE=600 SEAT_REMOTE_IDLE=900 "$seat")"
 check "both idle: phone"             "Seat: Phone (likely)" "$out"
 check "both idle: minutes shown"     "for 10m" "$out"
 
-out="$(SEAT_LOCAL_IDLE=600 SEAT_REMOTE_ERR="ssh: connect timed out" "$seat")"
+out="$(SEAT_LOCAL_IDLE=600 SEAT_REMOTE_ERR="ssh: connect timed out" SEAT_REMOTE_ONLINE=true "$seat")"
 check "unreachable: loud unknown"    "Seat: Unknown. Could not check MacBook Air (ssh: connect timed out)" "$out"
+
+out="$(SEAT_LOCAL_IDLE=600 SEAT_REMOTE_ERR="ssh: connect timed out" SEAT_REMOTE_ONLINE=false "$seat")"
+check "other Mac asleep: phone"      "Seat: Phone (likely). MacBook Air is asleep" "$out"
 
 # Real SSH path with a stub ssh on PATH: ioreg parsing, error capture, no wake.
 stub="$(mktemp -d)"
@@ -48,10 +51,10 @@ chmod +x "$stub/ssh"
 out="$(PATH="$stub:$PATH" STUB_SSH=idle SEAT_LOCAL_IDLE=600 "$seat")"
 check "ssh: ioreg parsed, phone"     "Seat: Phone (likely). Neither Mac has had keyboard or mouse input for 10m" "$out"
 
-out="$(PATH="$stub:$PATH" STUB_SSH=down SEAT_LOCAL_IDLE=600 "$seat")"
+out="$(PATH="$stub:$PATH" STUB_SSH=down SEAT_REMOTE_ONLINE=true SEAT_LOCAL_IDLE=600 "$seat")"
 check "ssh down: last error line"    "Could not check MacBook Air (ssh: connect to host macbook port 22: Operation timed out)" "$out"
 
-out="$(PATH="$stub:$PATH" STUB_SSH=silent SEAT_LOCAL_IDLE=600 "$seat")"
+out="$(PATH="$stub:$PATH" STUB_SSH=silent SEAT_REMOTE_ONLINE=true SEAT_LOCAL_IDLE=600 "$seat")"
 check "ssh silent fail: not phone"   "Could not check MacBook Air (ssh exited 1 with no output)" "$out"
 
 out="$(SEAT_HOST=rios-macbook-air SEAT_LOCAL_IDLE=600 SEAT_REMOTE_IDLE=2 "$seat")"
