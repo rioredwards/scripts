@@ -1,5 +1,6 @@
 #!/bin/sh
-# attention-judge.sh: pass is silent, each predicate over threshold bounces,
+# attention-judge.sh: pass is silent, each predicate over threshold bounces
+# in bounce mode and only logs in watch mode,
 # failures pass with a warning, skips never call the API.
 # Stubs curl and keyfor so no model is called; state goes to a temp TMPDIR.
 set -eu
@@ -35,7 +36,7 @@ check() {
   rc=0
   jq -nc --arg t "$tmp/t.jsonl" --arg r "Should I use waitFor or bump the timeout? ($n)" \
     "{session_id:\"s1\", transcript_path:\$t, last_assistant_message:\$r, stop_hook_active:false} ${5:-}" \
-    | PATH="$tmp/bin:$PATH" TMPDIR="$tmp/state" HOME="$HOME" AGENT_ATTENTION_JUDGE=on AGENT_DELEGATE='' \
+    | PATH="$tmp/bin:$PATH" TMPDIR="$tmp/state" HOME="$HOME" AGENT_ATTENTION_JUDGE="${mode:-bounce}" AGENT_DELEGATE='' \
       JUDGE_LOG="$tmp/log.jsonl" bash "$repo/hooks/attention-judge.sh" >"$tmp/out" 2>&1 || rc=$?
   calls="$(wc -l < "$tmp/calls" | tr -d ' ')"
   if [ -z "$3" ]; then [ ! -s "$tmp/out" ]; else grep -q -- "$3" "$tmp/out"; fi && seen=1 || seen=0
@@ -51,6 +52,7 @@ answers 0.1 0.1 0.85 > "$tmp/resp";       check "noise bounces" 2 "say done and 
 answers 0.1 0.1 0.1 500 > "$tmp/resp";    check "HTTP error warns, passes" 0 "systemMessage" 1
 answers 0.1 0.1 0.1 200 refusal > "$tmp/resp"; check "refusal warns, passes" 0 "refusal on needless_ask" 1
 answers 0.95 0.1 0.1 > "$tmp/resp"
+mode=watch; check "watch mode logs, never bounces" 0 "" 1; mode=
 check "rewrite pass skips" 0 "" 0 '| .stop_hook_active=true'
 check "delegate skips" 0 "" 0 '| .agent_id="a1"'
 check "codex suggestion skips" 0 "" 0 '| .last_assistant_message="{\"suggestion\":\"Can we?\"}"'
@@ -59,11 +61,12 @@ check "codex suggestion skips" 0 "" 0 '| .last_assistant_message="{\"suggestion\
 rm -f "$tmp/calls"; touch "$tmp/calls"
 for _ in 1 2; do
   jq -nc --arg t "$tmp/t.jsonl" '{session_id:"s2", transcript_path:$t, last_assistant_message:"same"}' \
-    | PATH="$tmp/bin:$PATH" TMPDIR="$tmp/state" AGENT_ATTENTION_JUDGE=on AGENT_DELEGATE='' \
+    | PATH="$tmp/bin:$PATH" TMPDIR="$tmp/state" AGENT_ATTENTION_JUDGE=watch AGENT_DELEGATE='' \
       JUDGE_LOG="$tmp/log.jsonl" bash "$repo/hooks/attention-judge.sh" >/dev/null 2>&1 || true
 done
 [ "$(wc -l < "$tmp/calls" | tr -d ' ')" -eq 1 ] || { echo "FAIL: verdict not shared, $(wc -l < "$tmp/calls") calls"; fail=1; }
 grep -q '"prompt":"fix the flaky test"' "$tmp/log.jsonl" || { echo "FAIL: log missing prompt"; fail=1; }
+grep -q '"verdict":"error HTTP 500' "$tmp/log.jsonl" || { echo "FAIL: log missing error verdict"; fail=1; }
 
 [ "$fail" -eq 0 ] && echo "attention-judge-test: ok"
 exit "$fail"

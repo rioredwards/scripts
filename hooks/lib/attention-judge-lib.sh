@@ -3,14 +3,17 @@
 #
 # OpenAI's Decisions API (/v1/decisions, gpt-6-luna) answers three yes/no
 # questions about the final reply, each as a probability. Over its threshold,
-# the reply bounces back for a rewrite (agent-skills#48).
+# the reply would bounce back for a rewrite (agent-skills#48).
 #
-# Two hooks ask: attention-judge.sh (to bounce) and the turn-end adapters (to
-# skip a pass that is about to be rewritten). A model verdict is not
-# repeatable, so the first caller stores it per reply and the second reads it:
-# one API call, one answer, whoever runs first.
+# Watch mode (the default) only logs: calibration on 80 real replies found no
+# threshold that catches bad replies without bouncing good ones, so bouncing
+# waits on Rio rating a week of logged verdicts.
 #
-#   AGENT_ATTENTION_JUDGE   on | off (default on)
+# A model verdict is not repeatable, so the first caller stores it per reply
+# and any later caller reads it: one API call, one answer. A bouncing judge
+# needs this so the turn-end adapters can skip a pass about to be rewritten.
+#
+#   AGENT_ATTENTION_JUDGE   watch | bounce | off (default watch)
 #
 # judge_verdict prints one line: skip | pass | bounce <names> | error <why>
 set -u
@@ -22,11 +25,8 @@ JUDGE_THRESHOLD_unclear=0.8
 JUDGE_THRESHOLD_noise=0.8
 JUDGE_LOG="${JUDGE_LOG:-$HOME/.cache/attention-judge/verdicts.jsonl}"
 
-# Codex fires Stop for its prompt-suggestion pass too; the "reply" is a JSON
-# suggestion Rio never reads as a message.
-reply_is_suggestion() {
-  printf '%s' "$1" | grep -Eq '^[[:space:]]*\{"suggestion":'
-}
+. "$HOME/scripts/hooks/lib/reply-cap-lib.sh"
+
 
 _judge_questions() {
   jq -n '[
@@ -40,21 +40,31 @@ _judge_input() {
   printf 'Rio is a solo developer. AI agents write his code; he steers at the decision level and his attention is his scarcest resource. Judge only the AGENT REPLY.\n\nRIO LATEST MESSAGE:\n%s\n\nAGENT REPLY:\n%s\n' "$1" "$2"
 }
 
+# Every verdict, errors included, lands in the log Rio's ratings are drawn from.
+_judge_log() { # verdict ms answers-json
+  mkdir -p "$(dirname "$JUDGE_LOG")"
+  jq -nc --arg s "$session" --arg p "$prompt" --arg r "$reply" --arg v "$1" \
+    --argjson ms "$2" --argjson a "$3" \
+    '{ts:(now|todate), session:$s, verdict:$v, ms:$ms, p:($a|map({(.name):.probability})|add), prompt:$p, reply:$r}' \
+    >> "$JUDGE_LOG" 2>/dev/null
+  echo "$1"
+}
+
 # One API call. Prints `pass`, `bounce <names>`, or `error <why>`; logs it.
 _judge_call() {
   prompt="$1"; reply="$2"; session="$3"
-  key="$(keyfor OPENAI_API_KEY 2>/dev/null)" || { echo "error keyfor OPENAI_API_KEY failed"; return; }
+  key="$(keyfor OPENAI_API_KEY 2>/dev/null)" || { _judge_log "error keyfor OPENAI_API_KEY failed" 0 '[]'; return; }
   body="$(jq -n --arg m "$JUDGE_MODEL" --arg i "$(_judge_input "$prompt" "$reply")" \
     --argjson q "$(_judge_questions)" '{model:$m, input:$i, questions:$q}')"
   start="$(perl -MTime::HiRes=time -e 'printf "%d", time*1000')"
   resp="$(printf '%s' "$body" | curl -sS --max-time 4 -w '\n%{http_code}' "$JUDGE_URL" \
     -H "Authorization: Bearer $key" -H 'Content-Type: application/json' -d @- 2>&1)" || {
-    echo "error $(printf '%s' "$resp" | head -n 1 | cut -c1-120)"; return; }
+    _judge_log "error $(printf '%s' "$resp" | head -n 1 | cut -c1-120)" 0 '[]'; return; }
   ms=$(( $(perl -MTime::HiRes=time -e 'printf "%d", time*1000') - start ))
   code="$(printf '%s' "$resp" | tail -n 1)"
   json="$(printf '%s' "$resp" | sed '$d')"
   if [ "$code" != 200 ]; then
-    echo "error HTTP $code $(printf '%s' "$json" | jq -r '.error.message // empty' 2>/dev/null | cut -c1-120)"
+    _judge_log "error HTTP $code $(printf '%s' "$json" | jq -r '.error.message // empty' 2>/dev/null | cut -c1-120)" "$ms" '[]'
     return
   fi
   verdict="$(printf '%s' "$json" | jq -r \
@@ -65,18 +75,13 @@ _judge_call() {
       else ($a | map(select(.probability >= $t[.name])) | map(.name)) as $hit
         | if ($hit | length) == 0 then "pass" else "bounce " + ($hit | join(",")) end
       end' 2>/dev/null)" || verdict="error unreadable response"
-  mkdir -p "$(dirname "$JUDGE_LOG")"
-  jq -nc --arg s "$session" --arg p "$prompt" --arg r "$reply" --arg v "$verdict" \
-    --argjson ms "$ms" --argjson a "$(printf '%s' "$json" | jq -c '.answers // []' 2>/dev/null || echo '[]')" \
-    '{ts:(now|todate), session:$s, verdict:$v, ms:$ms, p:($a|map({(.name):.probability})|add), prompt:$p, reply:$r}' \
-    >> "$JUDGE_LOG" 2>/dev/null
-  echo "$verdict"
+  _judge_log "$verdict" "$ms" "$(printf '%s' "$json" | jq -c '.answers // []' 2>/dev/null || echo '[]')"
 }
 
 judge_verdict() {
   payload="$1"
   [ -f "$HOME/scripts/agent-hooks-env.sh" ] && . "$HOME/scripts/agent-hooks-env.sh"
-  [ "${AGENT_ATTENTION_JUDGE:-on}" = off ] && { echo skip; return; }
+  [ "${AGENT_ATTENTION_JUDGE:-watch}" = off ] && { echo skip; return; }
   . "$HOME/scripts/hooks/lib/delegate.sh"
   hook_is_delegate "$payload" && { echo skip; return; }
   [ "$(printf '%s' "$payload" | jq -r '.stop_hook_active // false')" = true ] && { echo skip; return; }
@@ -89,8 +94,7 @@ judge_verdict() {
   id="$(printf '%s\n%s' "$session" "$reply" | shasum -a 256 | cut -c1-32)"
   out="$dir/$id"
   if mkdir "$out.lock" 2>/dev/null; then
-    . "$HOME/scripts/hooks/lib/reply-cap-lib.sh"
-    _judge_call "$(reply_last_prompt "$payload")" "$reply" "$session" > "$out.tmp"
+    _judge_call "$(reply_last_prompt "$payload" commands)" "$reply" "$session" > "$out.tmp"
     mv "$out.tmp" "$out"
   else
     n=0
@@ -99,11 +103,3 @@ judge_verdict() {
   [ -f "$out" ] && cat "$out" || echo "error timed out waiting for another caller's verdict"
 }
 
-# For side-effect hooks: true when attention-judge.sh will bounce this reply.
-reply_judge_will_bounce() {
-  jq -e '[.hooks.Stop[]?.hooks[]?.command] | any(test("attention-judge"))' \
-    "$HOME/.claude/settings.json" >/dev/null 2>&1 \
-    || jq -e '[.hooks.Stop[]?.hooks[]?.command] | any(test("attention-judge"))' \
-    "$HOME/.codex/hooks.json" >/dev/null 2>&1 || return 1
-  case "$(judge_verdict "$1")" in bounce*) return 0 ;; *) return 1 ;; esac
-}

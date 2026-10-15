@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # attention-judge.sh: Stop hook. An outside model judges whether the final
-# reply deserves Rio's attention as written; if not, the reply bounces once.
+# reply deserves Rio's attention as written. Watch mode logs the verdict only;
+# bounce mode sends a failing reply back once.
 #
 # Questions and thresholds live in lib/attention-judge-lib.sh. Verdicts and
 # probabilities land in ~/.cache/attention-judge/verdicts.jsonl for
@@ -10,10 +11,11 @@
 # sees a warning line on every failed turn. Approved on agent-skills#48: loud,
 # but an outage never stalls every session on both Macs.
 #
-#   AGENT_ATTENTION_JUDGE   on | off (default on)
+#   AGENT_ATTENTION_JUDGE   watch | bounce | off (default watch)
 #
-# Register in the Stop array (Claude settings, Codex hooks.json), timeout 6.
-# ⚠️ Never "async": an async Stop hook cannot block a stop.
+# Registered async in the Stop array (Claude settings, Codex hooks.json), so
+# watching adds no wait. ⚠️ Bounce mode needs a blocking registration (timeout
+# 6, not async) and reply_will_be_rewritten wired to the stored verdict.
 set -uo pipefail
 
 . "$HOME/scripts/hooks/lib/attention-judge-lib.sh"
@@ -23,6 +25,7 @@ verdict="$(judge_verdict "$PAYLOAD")"
 
 case "$verdict" in
   skip|pass) exit 0 ;;
+  bounce*) [ "${AGENT_ATTENTION_JUDGE:-watch}" = bounce ] || exit 0 ;;
   error*)
     jq -nc --arg m "⚠️ attention-judge failed, reply not judged: ${verdict#error }" '{systemMessage:$m}'
     exit 0 ;;

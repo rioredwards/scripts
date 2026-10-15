@@ -27,6 +27,7 @@ Small personal command wrappers and automation helpers. App-sized tools live in 
 - `keyfor` - the one way to read an API key: `keyfor NAME` or `keyfor --run NAME -- cmd`. Keys live in an age-encrypted store in `~/.dotfiles`.
 - `agent-budget` - LOC appetite for the work in a repo: `set <loc>`, `status` (exit 1 when over), `clear`. Enforced by `hooks/loc-budget.sh`.
 - `agent-toggle` - flip machine-local agent-hook knobs (speak, audio, text, ...) from anywhere, including over SSH. `agent-toggle` lists them.
+- `hooks/attention-judge.sh` - Stop hook: OpenAI's Decisions API rates each final reply (needless ask, unclear, noise). `agent-toggle attention-judge watch|bounce|off`; watch (default) only logs to `~/.cache/attention-judge/verdicts.jsonl`.
 - `agent-hooks-env.sh` - shared profile loader sourced by hook scripts (env, then local, then synced profile).
 - `agy-write-guard` - Antigravity pre-tool hook that denies write tools unless `AGY_WRITE_GUARD=allow`.
 - `automation-cue.sh` - show or hide a fullscreen automation cue via Hammerspoon: `start` | `stop`.

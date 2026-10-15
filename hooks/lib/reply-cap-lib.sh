@@ -23,11 +23,13 @@ SHORT_ASK_CAP=80
 
 # Rio's latest prompt from a Claude or Codex transcript, newest first. Prints
 # nothing when the newest prompt is wrapper text (skill/command invocations,
-# injected context), so those never count as short asks.
+# injected context), so those never count as short asks. Pass `commands` as $2
+# to get a slash command as `/name args` instead (the attention judge needs
+# what Rio asked for, and most of his asks are commands).
 reply_last_prompt() {
   _t="$(printf '%s' "$1" | jq -r '.transcript_path // empty' 2>/dev/null)"
   [ -f "$_t" ] || return 0
-  tail -r "$_t" 2>/dev/null | jq -rc '
+  tail -r "$_t" 2>/dev/null | jq -rc --arg cmds "${2:-}" '
     if .type=="event_msg" and .payload.type=="user_message" then
       "U\t" + ((.payload.message // "") | gsub("\\s+"; " "))
     elif .type=="user" and (.isMeta // false | not) and (.isCompactSummary // false | not) then
@@ -36,9 +38,19 @@ reply_last_prompt() {
       | select(. != "")
       | sub("^\\s*<!-- reply -->"; "")
       | select(test("^\\s*\\[Request interrupted") | not)
+      | if $cmds == "commands" and test("<command-name>") then
+          (capture("<command-name>(?<n>[^<]*)</command-name>").n) + " "
+          + (try capture("<command-args>(?<a>[\\s\\S]*?)</command-args>").a catch "")
+        else . end
       | "U\t" + gsub("\\s+"; " ")
     else empty end
   ' 2>/dev/null | head -n 1 | cut -f2- | awk '/^[[:space:]]*</{next} 1'
+}
+
+# Codex fires Stop for its prompt-suggestion pass too; the "reply" is a JSON
+# suggestion Rio never reads as a message.
+reply_is_suggestion() {
+  printf '%s' "$1" | grep -Eq '^[[:space:]]*\{"suggestion":'
 }
 
 # The cap, or empty when disabled / nonsense / jq missing.

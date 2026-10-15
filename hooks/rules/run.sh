@@ -61,6 +61,8 @@ else
   hook_is_delegate "$PAYLOAD" && LIMITED=true
   TEXT="$(printf '%s' "$PAYLOAD" | jq -r '.last_assistant_message // empty' 2>/dev/null)"
   [ -n "$TEXT" ] || exit 0
+  . "$HOME/scripts/hooks/lib/reply-cap-lib.sh"
+  reply_is_suggestion "$TEXT" && exit 0
 fi
 
 VERDICT="$(
