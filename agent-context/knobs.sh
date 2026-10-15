@@ -15,8 +15,7 @@ set -euo pipefail
 
 mode="${1:-}"
 case "$mode" in ''|--hook) ;; *) echo "knobs.sh: unknown flag: $mode" >&2; exit 1 ;; esac
-# A UserPromptSubmit hook exiting 2 blocks Rio's prompt, and jq exits 2 on a
-# missing file. Fail as a plain, non-blocking error instead.
+# Exit 2 would block Rio's prompt (jq exits 2 on a missing file): fail with 1.
 if [ "$mode" = --hook ]; then trap 'exit 1' ERR; fi
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

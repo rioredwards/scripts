@@ -70,8 +70,7 @@ fi
 AGENT_SESSION_ID="$(printf '%s' "$PAYLOAD" | jq -r '.session_id // empty' 2>/dev/null)"
 export AGENT_SESSION_ID
 [ -r "$HOME/scripts/agent-hooks-env.sh" ] && . "$HOME/scripts/agent-hooks-env.sh"
-# A missing or broken registry drops only the `when`-gated rules, never the
-# ungated ones (never-merge-pr must keep firing). validate.sh fails it loudly.
+# A bad registry drops only `when`-gated rules; never-merge-pr and kin still fire.
 KNOB_LIST="$(jq -cs '.[0].knobs | arrays' "$KNOBS" 2>/dev/null)"
 [ -n "$KNOB_LIST" ] || KNOB_LIST='[]'
 
