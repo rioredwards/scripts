@@ -60,7 +60,6 @@ Several commands here are symlinks into `~/.dotfiles/scripts/` so they stay on P
 - `dotfiles-autosync.plist`
 - `drift-check.sh`
 - `git-sync`
-- `herdr-start.sh`
 - `install-git-hooks.sh`
 - `maintenance-doctor.sh`
 - `path_drift_audit.py`

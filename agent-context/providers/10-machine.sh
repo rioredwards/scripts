@@ -14,14 +14,14 @@ esac
 
 echo "Machine: $machine"
 
-# Seat detection. SSH_CONNECTION alone is NOT enough: agents usually run in a
-# herdr pane, and the herdr daemon is long-lived. Panes inherit the daemon's
+# Seat detection. SSH_CONNECTION alone is NOT enough: agents often run in a
+# terminal multiplexer pane, and its daemon is long-lived. Panes inherit the daemon's
 # environment: whatever was set when it first started, often weeks ago from a
 # local iTerm window: not the environment of the client attached right now.
 # So an SSH-driven pane looks local, and the provider confidently reported
 # "Rio is sitting at this Mac" while he was on the other one. Process ancestry
-# fails the same way: the pane's parent is herdr, not sshd. (tmux has this
-# exact bug; the multiplexer is the reason, not the specific tool.)
+# fails the same way: the pane's parent is the multiplexer, not sshd. (Seen with
+# herdr and tmux alike; the multiplexer is the reason, not the specific tool.)
 #
 # The screen lock is the signal that survives, because it answers the real
 # question directly: not "how did this shell get here" but "can anyone see

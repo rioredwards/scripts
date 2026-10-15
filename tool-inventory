@@ -62,7 +62,6 @@ drift-check.sh | syntax
 git-commit-selector.sh | syntax
 git-quicklog.sh | syntax
 git-sync | syntax
-herdr-start.sh | syntax
 icloud-wait-uploaded | syntax
 install-git-hooks.sh | syntax
 maintenance-doctor.sh | syntax
@@ -100,7 +99,6 @@ web-research | skip: covered by ~/tools/web-research/test.sh
 agent-sessions | "$HOME/dev/agent-sessions/bin/agent-sessions" --help
 session-handoff | "$HOME/.dotfiles/.agents/bin/session-handoff" --help
 apple | "$HOME/dev/shortcuts-workshop/bin/apple" version
-herdr | herdr --version
 pm2 | pm2 --version
 codex | [20s] codex --version
 claude | [20s] claude --version
