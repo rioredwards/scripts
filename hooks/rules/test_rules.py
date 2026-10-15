@@ -118,6 +118,29 @@ class RulesTests(unittest.TestCase):
                     if text in blocked:
                         self.assertIn('pr-issue-titles', result.stderr)
 
+    def test_wrap_up_names_not_numbers(self):
+        """The next-step box cannot hold links, so it names PRs and issues in words."""
+        tool = "mcp__ccd_turn__wrap_up"
+        blocked = [
+            {"recap": "What's left: 3 small fixes (#207, #228, #159).", "ask": "Start the three fixes?"},
+            {"recap": "Done.", "ask": "Merge #42?"},
+            {"recap": "Done:\n#207 fixed"},
+            {"recap": "Order #5 shipped; PR#207 waits."},
+        ]
+        allowed = [
+            {"recap": "What's left: the invite fix, error visibility, and number reset.", "ask": "Start them?"},
+            {"recap": "Safeway Store #123 is mapped; color #123456 unchanged."},
+        ]
+        for data in blocked + allowed:
+            with self.subTest(data=data):
+                result = self.run_hook("tool", {"tool_name": tool, "tool_input": data})
+                self.assertEqual(result.returncode, 0, result.stderr)
+                if data in blocked:
+                    verdict = json.loads(result.stdout)["hookSpecificOutput"]
+                    self.assertEqual(verdict["permissionDecision"], "deny")
+                else:
+                    self.assertNotIn("deny", result.stdout)
+
     def test_tool_inputs(self):
         """Em dashes are denied only when they are being written into a file."""
         blocked = [

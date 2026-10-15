@@ -293,6 +293,16 @@
       "text": "Your reply cites a PR or issue by number alone. Rio rarely knows what exists, let alone the numbers. Name each one by its title as a markdown link, e.g. [Fix label printing (#924)](https://github.com/owner/repo/pull/924). Look titles up with `gh pr view N --json title,url` or `gh issue view N --json title,url`."
     },
     {
+      "id": "wrap-up-names-not-numbers",
+      "on": "tool",
+      "match": {
+        "tool": "wrap_up$",
+        "input": "(?i)(^|\\\\n|pr|issue|[^[:alnum:]&#])(?<!store )(?<!order )(?<!invoice )(?<!ticket )(?<!account )(?<!item )#[0-9]{1,5}\\b"
+      },
+      "do": "deny",
+      "text": "Blocked: the next-step box cites a PR or issue by number (#N). Rio cannot place numbers, and the box cannot hold links. Name each one in plain words instead, e.g. \"the removed-staffer invite fix\", not \"#207\". Put titled links in your closing message if it has one."
+    },
+    {
       "id": "ask-needs-step-5",
       "on": "response",
       "when": {
