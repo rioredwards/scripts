@@ -11,7 +11,7 @@
 #
 #   dev-ls kill 2       # stop the server on row 2 (or: dev-ls kill straightaway)
 #   dev-ls restart 2    # stop it, then dev-up again in the same checkout
-#   dev-ls prune        # expire owned servers/panes whose 12-hour lease ended
+#   dev-ls prune        # expire owned servers whose 12-hour lease ended
 #
 # A target is a row number from the list, or any text matching exactly one row.
 # An ambiguous or unmatched target fails loudly rather than guessing.

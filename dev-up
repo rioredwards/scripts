@@ -3,37 +3,36 @@
 # dev-up: start this repo's dev server the way Rio wants it, in ONE command.
 #
 # Finds the repo's own start script, runs it through portless (named, stable,
-# tailnet-reachable port) inside a herdr pane, waits for the URL, remembers it
-# for the statusline, and prints it. No port hunting, no pane surveys, no
+# tailnet-reachable port) as a named pm2 process, waits for the URL, remembers it
+# for the statusline, and prints it. No port hunting, no process surveys, no
 # guessing. If a server for this checkout is already up and answering, prints its
 # URL and does nothing else (up but erroring: exit 1, never auto-restarted;
 # DEV_UP_REUSE_TIMEOUT=10 seconds to wait for it). Also self-heals the two things that used to strand it:
 # a dead Tailscale Serve mapping squatting on 443 (reclaimed, so the app keeps
-# its usual URL) and a stopped herdr server (started headless).
+# its usual URL) and a leftover pm2 process from a failed run (stopped).
 #
 #   dev-up                 # detect the start script, start, print URL
 #   dev-up -- <command...> # start this exact command instead of detecting
 #   DEV_UP_TIMEOUT=120 dev-up
 #
-# Prints on success (stdout, last line):   URL pane=<herdr pane id>
+# Prints on success (stdout, last line):   URL pm2=<name> lease=<token> created|reused
 # Exit codes: 0 started or already running · 1 server failed or reused server
-# erroring (pane tail printed when we started it) · 2 could not even try (no script, no herdr, not a repo).
+# erroring (log tail printed when we started it) · 2 could not even try (no script, no pm2, not a repo).
+# Logs: pm2 logs <name> · list: dev-ls · stop: dev-lease stop <token>
 #
 # Agents: this IS the sanctioned dev-server start (RIO_RUN_OK is implied).
 set -euo pipefail
 
 if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
-  sed -n '3,22p' "$0"; exit 0
+  sed -n '3,23p' "$0"; exit 0
 fi
 LEASE_TOOL="$(cd "$(dirname "$0")" && pwd)/dev-lease"
-lease=""; herr=""
-herdr() { command herdr --session "${DEV_HERDR_SESSION:-default}" "$@"; }
+lease=""
 cleanup() {
   status=$?
   if [[ $status != 0 && -n "$lease" ]]; then
     /usr/bin/python3 "$LEASE_TOOL" stop "$lease" >&2 || say "dev-up: cleanup failed; inspect lease $lease"
   fi
-  [[ -z "$herr" ]] || rm -f "$herr"
   return "$status"
 }
 trap cleanup EXIT
@@ -43,7 +42,8 @@ die()  { say "dev-up: $*"; exit 2; }
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a git repo. cd into the repo checkout, then rerun: dev-up"
 cd "$ROOT"
-TIMEOUT_MS=$(( ${DEV_UP_TIMEOUT:-90} * 1000 ))
+# One pm2 name per checkout: worktrees share a basename, so add a path hash.
+NAME="dev-$(basename "$ROOT")-$(printf '%s' "$ROOT" | shasum | cut -c1-6)"
 
 # ── 1. What to run ────────────────────────────────────────────────────────────
 CMD=()
@@ -99,7 +99,8 @@ while IFS= read -r pid; do
       renewed="$(/usr/bin/python3 "$LEASE_TOOL" renew-pid "$pid")"
       dev-url set "$url" >/dev/null 2>&1 || true
       say "dev-up: already running for this checkout (pid $pid)"
-      printf '%s pane=? lease=%s reused\n' "$url" "$renewed"
+      [[ "$renewed" == untracked ]] && reused_name="?" || reused_name="$NAME"
+      printf '%s pm2=%s lease=%s reused\n' "$url" "$reused_name" "$renewed"
       exit 0
     fi
   fi
@@ -107,8 +108,8 @@ done < <(printf '%s\n' "$existing" | sed -n 's/.*(pid \([0-9]*\)).*/\1/p')
 
 # ── 3. Is the portless proxy up? ──────────────────────────────────────────────
 # If it is not, `portless run` tries to start it on port 443, which needs sudo,
-# and the pane sits at a password prompt nobody can answer until the timeout.
-# Start it ourselves on the unprivileged port instead, before opening a pane.
+# and the server waits at a password prompt nobody can answer until the timeout.
+# Start it ourselves on the unprivileged port instead, before starting the app.
 if ! pgrep -f 'portless proxy start' >/dev/null 2>&1; then
   say "dev-up: portless proxy is down, starting it on 1355 (no sudo needed)"
   portless proxy start --port 1355 --https >/dev/null 2>&1 \
@@ -117,8 +118,8 @@ fi
 
 # ── 3b. Reclaim Tailscale Serve ports whose backend is dead ──────────────────
 # portless only removes its `tailscale serve` mapping on a graceful exit (it
-# traps SIGINT/SIGTERM, not SIGHUP), so when herdr stops and kills the pane the
-# mapping outlives the app, and the next run drifts from :443 to :8443 and
+# traps SIGINT/SIGTERM, not SIGHUP or SIGKILL), so a hard-killed server leaves the
+# mapping behind, and the next run drifts from :443 to :8443 and
 # every doc pointing at the usual URL breaks. Reclaim a mapping in portless's
 # port range (443, 8443+) only if nothing listens on its proxied local port AND no live
 # portless supervisor owns that port (portless registers the mapping before the
@@ -215,74 +216,38 @@ PY
 }
 serve_check reclaim
 
-# ── 4. A herdr pane, split off one that already lives in this repo ────────────
-type -P herdr >/dev/null || die "herdr not found on PATH ($PATH). Long-running servers must run in a herdr pane. Installed already? This shell's PATH is missing its directory. Otherwise run: brew install herdr"
-herr="$(mktemp)"
-herdr_err() {  # $1 = code | message: field of herdr's JSON error on stderr
-  python3 -c 'import json,sys
-try: print(json.load(open(sys.argv[1]))["error"][sys.argv[2]])
-except Exception: pass' "$herr" "$1" 2>/dev/null
-}
-if ! snap="$(herdr api snapshot 2>"$herr")" && [[ "$(herdr_err code)" == server_not_running ]]; then
-  # The server dies with a reboot or `herdr server stop`. Start it headless (no
-  # TUI needed; Rio's `herdr` attaches to it later). It outlives this shell.
-  hlog="${TMPDIR:-/tmp}/dev-up-herdr-server.log"
-  say "dev-up: herdr server is not running, starting it headless (log: $hlog)"
-  (nohup herdr --session "${DEV_HERDR_SESSION:-default}" server >"$hlog" 2>&1 </dev/null &)
-  for _ in $(seq 1 20); do
-    sleep 0.5
-    snap="$(herdr api snapshot 2>"$herr")" && break
-  done
+# ── 4. Start it as a named pm2 process ─────────────────────────────────────────
+# pm2 owns the process: `pm2 ls` lists it, `pm2 logs` tails it, and stopping it
+# sends SIGINT to the whole tree so portless removes its route and mapping.
+type -P pm2 >/dev/null || die "pm2 not found on PATH ($PATH). Installed already? This shell's PATH is missing /opt/homebrew/bin. Otherwise run: /opt/homebrew/bin/npm i -g pm2"
+if pm2 pid "$NAME" 2>/dev/null | grep -q .; then
+  # Step 2 reuses a live server, so one still here failed or is mid-boot.
+  say "dev-up: pm2 already has $NAME, not answering; stopping it first"
+  /usr/bin/python3 "$LEASE_TOOL" stop-name "$NAME" >&2 \
+    || die "$NAME is in pm2 but dev-up holds no lease for it. Look at it (pm2 logs $NAME), then: pm2 delete $NAME && dev-up"
 fi
-if [[ -z "${snap:-}" ]]; then
-  hmsg="$(herdr_err message)"
-  die "herdr api snapshot failed: ${hmsg:-$(tr -d "\r" <"$herr" | head -3)}"
-fi
-main_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
-src="$(printf '%s' "$snap" | ROOT="$ROOT" MAIN="$main_root" python3 -c '
-import json,os,sys
-s=json.load(sys.stdin)["result"]["snapshot"]
-panes=s["panes"]; root=os.environ["ROOT"]; main=os.environ["MAIN"]
-def pick(pred):
-    for p in panes:
-        if pred(p.get("cwd","")): return p["pane_id"]
-pid = pick(lambda c: c==root) or pick(lambda c: c.startswith(root+"/")) \
-   or pick(lambda c: c==main) or pick(lambda c: c.startswith(main+"/")) \
-   or (panes[0]["pane_id"] if panes else "")
-print(pid)')"
-if [[ -z "$src" ]]; then
-  # Use the new workspace's root, so no unleased spare shell is left behind.
-  created="$(herdr workspace create --cwd "$ROOT" --no-focus)"
-  pane_key=root_pane
-else
-  created="$(herdr pane split "$src" --direction right --cwd "$ROOT" --no-focus)"
-  pane_key=pane
-fi
-pane="$(printf '%s' "$created" | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"][sys.argv[1]]["pane_id"])' "$pane_key")"
-terminal="$(printf '%s' "$created" | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"][sys.argv[1]]["terminal_id"])' "$pane_key")"
-[[ -n "$pane" ]] || die "herdr pane split returned no pane id. Rerun: dev-up. If it repeats, the server is wedged: herdr server stop && herdr (this exits pane processes, so it is Rio's call)"
-lease="$(/usr/bin/python3 "$LEASE_TOOL" create "$pane" "$terminal")"
-sleep 1  # let the shell reach its prompt
+LOG="${DEV_UP_LOG_DIR:-$HOME/.local/state/dev-up}/$NAME.log"
+mkdir -p "$(dirname "$LOG")"; : > "$LOG"
+started="$(pm2 start portless --name "$NAME" --interpreter none --cwd "$ROOT" --no-autorestart \
+  --kill-timeout 20000 --log "$LOG" --merge-logs -- run --tailscale "${CMD[@]}" 2>&1)" \
+  || die "pm2 start failed: $(printf '%s' "$started" | tail -5). Fix that, then rerun: dev-up"
+lease="$(/usr/bin/python3 "$LEASE_TOOL" create "$NAME")"
 
-# ── 5. Run through portless and wait for the tailnet URL ──────────────────────
-launch="$(python3 - "$LEASE_TOOL" "$lease" "${CMD[@]}" <<'PY'
-import os, shlex, sys
-env = ["DEV_LEASE_DIR=" + os.environ.get("DEV_LEASE_DIR", os.path.expanduser("~/.local/state/dev-leases"))]
-print(shlex.join(["exec", "env"] + env + ["/usr/bin/python3", sys.argv[1], "run", sys.argv[2], "portless", "run", "--tailscale"] + sys.argv[3:]))
-PY
-)"
-herdr pane run "$pane" "$launch" >/dev/null
-herdr pane wait-output "$pane" --source recent-unwrapped \
-  --regex 'Tailscale -> https://|🔴|EADDRINUSE|Error:|error:|Traceback|exit code|elevated privileges|Password:' \
-  --timeout "$TIMEOUT_MS" >/dev/null 2>&1 || true
-tail="$(herdr pane read "$pane" --source recent-unwrapped --lines 80 2>/dev/null || true)"
+# ── 5. Wait for the tailnet URL in its log ─────────────────────────────────────
+deadline=$(( SECONDS + ${DEV_UP_TIMEOUT:-90} ))
+until grep -qE 'Tailscale -> https://|🔴|EADDRINUSE|Error:|error:|Traceback|exit code|elevated privileges|Password:' "$LOG"; do
+  (( SECONDS < deadline )) || break
+  [[ "$(pm2 pid "$NAME")" =~ ^[1-9] ]] || break  # exited before printing anything useful
+  sleep 1
+done
+tail="$(tail -80 "$LOG")"
 url="$(printf '%s\n' "$tail" | sed -n 's/.*Tailscale -> \(https:\/\/[^[:space:]]*\).*/\1/p' | tail -1)"
 # A password prompt never answers itself: say so now instead of timing out.
 if [[ -z "$url" ]] && printf '%s' "$tail" | grep -q 'elevated privileges\|Password:'; then
-  die "portless is asking for a sudo password in pane $pane (it wants port 443). Nothing can type it there. Start the proxy on the unprivileged port first: portless proxy start --port 1355 --https"
+  die "portless is asking for a sudo password (it wants port 443). Nothing can type it there. Start the proxy on the unprivileged port first: portless proxy start --port 1355 --https"
 fi
 if [[ -z "$url" ]]; then
-  say "dev-up: no tailnet URL after ${DEV_UP_TIMEOUT:-90}s. If the tail below shows a slow boot, retry: DEV_UP_TIMEOUT=180 dev-up. Pane $pane tail:"
+  say "dev-up: no tailnet URL after ${DEV_UP_TIMEOUT:-90}s. If the tail below shows a slow boot, retry: DEV_UP_TIMEOUT=180 dev-up. Log $LOG tail:"
   printf '%s\n' "$tail" | tail -30 >&2
   exit 1
 fi
@@ -294,11 +259,11 @@ probe_url "$url" "${DEV_UP_TIMEOUT:-90}" || true
 code="$PROBE_CODE"
 case "$code" in
   2*|3*|401|403) ;;
-  *) say "dev-up: $url still answers HTTP $code after ${DEV_UP_TIMEOUT:-90}s. Pane $pane tail:"
-     herdr pane read "$pane" --source recent-unwrapped --lines 40 2>/dev/null | tail -30 >&2; exit 1 ;;
+  *) say "dev-up: $url still answers HTTP $code after ${DEV_UP_TIMEOUT:-90}s. Log $LOG tail:"
+     tail -30 "$LOG" >&2; exit 1 ;;
 esac
 
 dev-url set "$url" >/dev/null 2>&1 || true
 serve_check explain "$url"
-say "dev-up: ${CMD[*]} is up in herdr pane $pane (HTTP $code)"
-printf '%s pane=%s lease=%s created\n' "$url" "$pane" "$lease"
+say "dev-up: ${CMD[*]} is up as pm2 process $NAME (HTTP $code). Logs: pm2 logs $NAME"
+printf '%s pm2=%s lease=%s created\n' "$url" "$NAME" "$lease"

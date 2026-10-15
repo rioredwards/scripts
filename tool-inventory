@@ -101,5 +101,6 @@ agent-sessions | "$HOME/dev/agent-sessions/bin/agent-sessions" --help
 session-handoff | "$HOME/.dotfiles/.agents/bin/session-handoff" --help
 apple | "$HOME/dev/shortcuts-workshop/bin/apple" version
 herdr | herdr --version
+pm2 | pm2 --version
 codex | [20s] codex --version
 claude | [20s] claude --version

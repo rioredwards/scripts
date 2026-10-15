@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Owned dev-server leases. Use dev-up to create/renew; release TOKEN at task completion.
+"""Owned dev-server leases on pm2 processes. dev-up creates/renews; release TOKEN at task completion.
 
-stop TOKEN stops one owned server; sweep expires leases. install schedules sweeps
-on the Mini only. Existing untracked servers are never adopted or stopped.
+stop TOKEN stops one owned server; sweep expires leases. install schedules an hourly
+sweep on the Mini only. Servers dev-up did not start are never adopted or stopped.
 """
 import contextlib
 import fcntl
@@ -11,7 +11,6 @@ import os
 from pathlib import Path
 import plistlib
 import re
-import signal
 import socket
 import subprocess
 import sys
@@ -57,127 +56,66 @@ def records():
     return [json.loads(p.read_text()) for p in directory().glob("*.json")]
 
 
-def identity(pid):
-    if type(pid) is not int or pid <= 1:
-        raise ValueError("refusing invalid/system PID")
-    result = subprocess.run(["ps", "-ww", "-p", str(pid), "-o", "stat=", "-o", "lstart=", "-o", "command="],
-                            capture_output=True, text=True, check=False)
-    if result.returncode == 1 and not result.stdout.strip():
-        return None
-    result.check_returncode()
-    fields = result.stdout.strip().split(None, 1)
-    if not fields or fields[0].startswith("Z"):
-        return None
-    return fields[1]
-
-
-def process(pid):
-    return {"pid": pid, "identity": identity(pid)}
-
-
-def check(saved):
-    current = identity(saved["pid"])
-    if current is None:
-        return False
-    if not saved["identity"] or current != saved["identity"]:
-        raise RuntimeError("process identity changed; refusing cleanup")
-    return True
-
-
-def herdr(record, *args):
-    result = subprocess.run(["herdr", "--session", record["session"], *args],
-                            capture_output=True, text=True, timeout=15)
+def pm2(*args):
+    result = subprocess.run(["pm2", *args], capture_output=True, text=True, timeout=60)
     if result.returncode:
-        try:
-            error = json.loads(result.stderr)["error"]
-        except (ValueError, KeyError):
-            raise RuntimeError(result.stderr or result.stdout)
-        if error["code"] == "pane_not_found":
-            return None
-        raise RuntimeError(error["message"])
-    return json.loads(result.stdout)["result"]
+        raise RuntimeError("pm2 %s failed: %s" % (" ".join(args), (result.stderr or result.stdout).strip()))
+    return result.stdout
 
 
-def pane_state(record):
-    state = herdr(record, "pane", "get", record["pane"])
-    if state is None:
+def daemon_alive():
+    # Asking pm2 itself would spawn a daemon just to report an empty list.
+    home = Path(os.environ.get("PM2_HOME", Path.home() / ".pm2"))
+    try:
+        os.kill(int((home / "pm2.pid").read_text()), 0)
+        return True
+    except (FileNotFoundError, ValueError, ProcessLookupError):
         return False
-    if state["pane"]["terminal_id"] != record["terminal"]:
-        raise RuntimeError("pane identity changed; refusing cleanup")
-    return True
 
 
-def create(pane, terminal=None):
+def processes():
+    return json.loads(pm2("jlist")) if daemon_alive() else []
+
+
+def process(record):
+    """The leased pm2 process, None if gone. A reused pm_id fails closed."""
+    for proc in processes():
+        if proc["pm_id"] == record["pm_id"]:
+            if proc["name"] != record["name"] or proc["pm2_env"]["created_at"] != record["created"]:
+                raise RuntimeError("pm2 process %s is not the leased one; refusing cleanup" % record["pm_id"])
+            return proc
+    return None
+
+
+def create(name):
     with locked():
-        record = {"id": uuid.uuid4().hex, "pane": pane, "cwd": os.getcwd(),
-                  "session": os.environ.get("DEV_HERDR_SESSION", "default"),
+        matches = [p for p in processes() if p["name"] == name]
+        if len(matches) != 1:
+            raise RuntimeError("expected one pm2 process named %s, found %d" % (name, len(matches)))
+        proc = matches[0]
+        record = {"id": uuid.uuid4().hex, "name": name, "pm_id": proc["pm_id"],
+                  "created": proc["pm2_env"]["created_at"], "cwd": os.getcwd(),
                   "expires": time.time() + TTL, "shared": False}
-        record["terminal"] = terminal or herdr(record, "pane", "get", pane)["pane"]["terminal_id"]
-        # Persist ownership before waiting for the terminal shell to spawn.
-        try:
-            save(record)
-        except OSError:
-            # No command was sent yet. Close only the exact empty/new shell.
-            if pane_state(record):
-                info = herdr(record, "pane", "process-info", "--pane", pane)["process_info"]
-                if all(p["pid"] == info["shell_pid"] for p in info["foreground_processes"]):
-                    herdr(record, "pane", "close", pane)
-            raise
-        print(record["id"], flush=True)
-        for _ in range(30):
-            info = herdr(record, "pane", "process-info", "--pane", pane)["process_info"]
-            if info["shell_pid"] and info["shell_pid"] > 1:
-                record["shell"] = process(info["shell_pid"])
-                save(record)
-                return record["id"]
-            time.sleep(0.1)
-        raise RuntimeError("pane shell did not become ready")
-
-
-def run(token, command):
-    # Exec replaces the pane shell. There is no interactive prompt to repurpose
-    # after the server exits. Portless owns graceful shutdown of its children.
-    with locked():
-        record = read(token)
-        if not pane_state(record) or os.getpid() != record["shell"]["pid"]:
-            raise RuntimeError("runner is not the recorded pane shell")
-        record["runner"] = process(os.getpid())
         save(record)
-        child = subprocess.Popen(command, start_new_session=True)
-        try:
-            time.sleep(0.1)  # allow the shebang interpreter to exec before recording
-            record["child"] = process(child.pid)
-            save(record)
-        except BaseException:
-            child.terminate()
-            child.wait(timeout=20)
-            raise
-    def forward(signum, frame):
-        if child.poll() is None:
-            child.send_signal(signal.SIGTERM)
-    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
-        signal.signal(sig, forward)
-    return child.wait()
+        return record["id"]
+
+
+def find(match):
+    for record in records():
+        proc = process(record)
+        if proc and match(record, proc):
+            return record
+    return None
 
 
 def renew_pid(pid):
     with locked():
-        for record in records():
-            if record.get("child", {}).get("pid") == pid:
-                if not check(record["child"]) or not check(record["runner"]):
-                    raise RuntimeError("owned server has exited")
-                record.update(expires=time.time() + TTL, shared=True)
-                save(record)
-                return record["id"]
-    return "untracked"
-
-
-def wait_gone(saved):
-    deadline = time.monotonic() + 20
-    while check(saved):
-        if time.monotonic() >= deadline:
-            raise RuntimeError("graceful shutdown timed out; left intact for inspection")
-        time.sleep(0.1)
+        record = find(lambda r, p: p["pid"] == pid)
+        if not record:
+            return "untracked"
+        record.update(expires=time.time() + TTL, shared=True)
+        save(record)
+        return record["id"]
 
 
 def stop(token, expired_only=False, release=False):
@@ -188,47 +126,51 @@ def stop(token, expired_only=False, release=False):
         if release and record.get("shared"):
             print("dev-lease: reused by another task; kept until lease expiry")
             return
-        pane_exists = pane_state(record)
-        # Preflight every identity before sending any signal. Never select a
-        # process tree, process group, fuzzy name, or PID from an old route.
-        live = {key: check(record[key]) for key in ("child", "runner") if key in record}
-        if not live and pane_exists and "shell" in record:
-            check(record["shell"])
-        if live.get("child"):
-            os.kill(record["child"]["pid"], signal.SIGTERM)
-            wait_gone(record["child"])
-        if live.get("runner"):
-            wait_gone(record["runner"])
-        if pane_exists and pane_state(record):
-            info = herdr(record, "pane", "process-info", "--pane", record["pane"])
-            if info:
-                info = info["process_info"]
-                allowed = record.get("shell", {}).get("pid") if not live else None
-                if any(p["pid"] != allowed for p in info["foreground_processes"]):
-                    raise RuntimeError("pane has other processes; refusing close")
-                if not live and allowed and identity(allowed) != record["shell"]["identity"]:
-                    raise RuntimeError("pane shell changed; refusing close")
-            herdr(record, "pane", "close", record["pane"])
+        # pm2 sends SIGINT to the process tree, so portless removes its route and
+        # Tailscale mapping, then SIGKILLs whatever outlives dev-up's kill timeout.
+        if process(record):
+            pm2("delete", str(record["pm_id"]))
+            if process(record):
+                raise RuntimeError("pm2 process %s survived delete; left for inspection" % record["pm_id"])
         path_for(token).unlink()
         print("dev-lease: stopped " + token)
+
+
+def stop_where(match, what):
+    with locked():
+        matches = [r for r in records() if match(r)]
+    if len(matches) != 1:
+        raise RuntimeError("no unique owned lease for %s; untracked servers need manual inspection" % what)
+    stop(matches[0]["id"])
 
 
 def sweep():
     failed = False
     for record in records():
-        if record["expires"] <= time.time():
-            try:
+        try:
+            if record["expires"] <= time.time():
                 stop(record["id"], expired_only=True)
-            except (RuntimeError, OSError, subprocess.SubprocessError) as error:
-                print("dev-lease: %s: %s" % (record["id"], error), file=sys.stderr)
-                failed = True
+            elif not process(record):
+                # Crashed or lost with a reboot: nothing left to stop.
+                stop(record["id"])
+        except (RuntimeError, OSError, subprocess.SubprocessError) as error:
+            print("dev-lease: %s: %s" % (record["id"], error), file=sys.stderr)
+            failed = True
     if failed:
-        raise RuntimeError("one or more expired leases need inspection")
+        raise RuntimeError("one or more leases need inspection")
 
 
 def require_mini():
     if "mini" not in socket.gethostname().lower():
         raise RuntimeError("scheduled cleanup runs only on the Mac Mini")
+
+
+def macbook_online():
+    # ssh to an offline MacBook sends it a wake signal; skip it instead.
+    status = json.loads(subprocess.run(["tailscale", "status", "--json"], capture_output=True,
+                                       text=True, check=True).stdout)
+    return any(p["DNSName"].startswith("rios-macbook-air.") and p["Online"]
+               for p in (status.get("Peer") or {}).values())
 
 
 def install():
@@ -238,7 +180,7 @@ def install():
     path = Path.home() / "Library/LaunchAgents" / (LABEL + ".plist")
     path.parent.mkdir(parents=True, exist_ok=True)
     config = {"Label": LABEL, "ProgramArguments": ["/usr/bin/python3", str(HERE), "sweep-all"],
-              "StartInterval": 300, "RunAtLoad": True,
+              "StartInterval": 3600, "RunAtLoad": True,
               "EnvironmentVariables": {"PATH": str(Path.home() / "scripts") + ":/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"},
               "StandardOutPath": str(log), "StandardErrorPath": str(log)}
     path.write_bytes(plistlib.dumps(config))
@@ -255,23 +197,26 @@ def main(args):
         return 0
     action = args[0]
     if action == "create":
-        create(args[1], args[2] if len(args) > 2 else None)
-    elif action == "run":
-        return run(args[1], args[2:])
+        print(create(args[1]))
     elif action == "renew-pid":
         print(renew_pid(int(args[1])))
     elif action in ("stop", "release"):
         stop(args[1], release=action == "release")
     elif action == "stop-pid":
-        matches = [r for r in records() if r.get("child", {}).get("pid") == int(args[1])]
-        if len(matches) != 1:
-            raise RuntimeError("no unique owned lease; untracked servers need manual inspection")
-        stop(matches[0]["id"])
+        pid = int(args[1])
+        with locked():
+            record = find(lambda r, p: p["pid"] == pid)
+        stop_where(lambda r: record and r["id"] == record["id"], "pid %d" % pid)
+    elif action == "stop-name":
+        stop_where(lambda r: r["name"] == args[1], args[1])
     elif action == "sweep":
         sweep()
     elif action == "sweep-all":
         require_mini()
         local = subprocess.run(["/usr/bin/python3", str(HERE), "sweep"])
+        if not macbook_online():
+            print("dev-lease: MacBook offline; its leases wait for the next sweep")
+            return int(local.returncode != 0)
         remote = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "macbook",
                                  "PATH=$HOME/scripts:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin /usr/bin/python3 $HOME/scripts/dev-lease sweep"], timeout=120)
         return int(local.returncode != 0 or remote.returncode != 0)
