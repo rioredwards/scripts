@@ -230,7 +230,7 @@ fi
 LOG="${DEV_UP_LOG_DIR:-$HOME/.local/state/dev-up}/$NAME.log"
 mkdir -p "$(dirname "$LOG")"; : > "$LOG"
 started="$(pm2 start portless --name "$NAME" --interpreter none --cwd "$ROOT" --no-autorestart \
-  --kill-timeout 20000 --log "$LOG" --merge-logs -- run --tailscale "${CMD[@]}" 2>&1)" \
+  --kill-timeout 20000 --output "$LOG" --error "$LOG" -- run --tailscale "${CMD[@]}" 2>&1)" \
   || die "pm2 start failed: $(printf '%s' "$started" | tail -5). Fix that, then rerun: dev-up"
 lease="$(/usr/bin/python3 "$LEASE_TOOL" create "$NAME")"
 
