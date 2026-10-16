@@ -85,6 +85,7 @@ class SharedHooks(unittest.TestCase):
         for f in (curl, keyfor):
             f.chmod(0o755)
         return dict(PATH=f'{bindir}:{os.environ["PATH"]}', TMPDIR=str(td), AGENT_SPIN_CHECK='on',
+                    OPENAI_CALL_COUNT_DIR=str(td / 'openai-calls'),
                     AGENT_SPIN_CHECK_EVERY='50', AGENT_SPIN_CHECK_FIRST_WRITE='on',
                     AGENT_SPIN_CHECK_STOP='on', AGENT_SPIN_CHECK_LOG=str(td / 'fires.log'),
                     AGENT_SPIN_CHECK_MODEL='gpt-6-sol', AGENT_DELEGATE='')
@@ -265,6 +266,34 @@ class SharedHooks(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stderr)
             self.assertIn('SPIN-CHECK IS BROKEN', json.loads(r.stdout)['systemMessage'])
             self.assertIn('HTTP 500', (td / 'fires.log').read_text())
+
+    def test_daily_call_cap_stops_calls_loudly(self):
+        """A runaway replay cannot spend the month: past the per-day cap no call is made, the
+        hook says it is broken, and the cap is raised on purpose with one env var."""
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            t = self.spin_transcript(td, [
+                {'type': 'user', 'message': {'content': 'fix it'}},
+                {'type': 'assistant', 'message': {'content': [{'type': 'tool_use', 'name': 'Bash', 'input': {'command': 'ls'}}]}}])
+            stop = {'session_id': 'cap', 'transcript_path': t, 'hook_event_name': 'Stop',
+                    'stop_hook_active': False, 'last_assistant_message': 'Done.'}
+            env = {**self.spin_env(td, p={'unverified_claim': 0.9}, confirm={
+                'quote': 'Done.', 'evidence': 'Nothing ran.', 'verdict': 'confirm'}), 'OPENAI_DAILY_CALL_CAP': '1'}
+            r = self.run_hook('spin-check.sh', stop, **env)
+            self.assertEqual(r.returncode, 2, r.stderr)  # Decisions call 1 of 1 allowed; the second look is call 1 of 1 on its own counter
+            self.assertEqual((self.calls(td), self.confirms(td)), (1, 1))
+            counters = sorted(p.name for p in (td / 'openai-calls').iterdir())
+            self.assertEqual([c.split('.')[1] for c in counters], ['decisions', 'responses'])
+            self.assertIn('spin-check.sh', (td / 'openai-calls' / counters[0]).read_text())
+            r = self.run_hook('spin-check.sh', {**stop, 'last_assistant_message': 'Done again.'}, **env)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            msg = json.loads(r.stdout)['systemMessage']
+            self.assertIn('SPIN-CHECK IS BROKEN, Decisions API failed: decisions daily cap: 2 calls today, cap 1', msg)
+            self.assertIn('OPENAI_DAILY_CALL_CAP', msg)
+            self.assertEqual(self.calls(td), 1)
+            r = self.run_hook('spin-check.sh', {**stop, 'session_id': 'cap2', 'last_assistant_message': 'Done thrice.'},
+                              **{**env, 'OPENAI_DAILY_CALL_CAP': '100'})
+            self.assertEqual((r.returncode, self.calls(td)), (2, 2), r.stderr)
 
     def test_delegate_drift_check_does_not_recurse(self):
         r = self.run_hook('spin-check.sh', {'session_id': 'delegate-check'},

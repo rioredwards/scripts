@@ -37,7 +37,7 @@ check() {
   rm -rf "$tmp/state/claude-spin-check"
   rc=0
   printf '{"session_id":"s1","hook_event_name":"PostToolUse","transcript_path":"%s","cwd":"/x"}' "$tmp/t.jsonl" \
-    | PATH="$tmp/bin:$PATH" TMPDIR="$tmp/state" AGENT_SPIN_CHECK=on AGENT_SPIN_CHECK_EVERY=1 \
+    | PATH="$tmp/bin:$PATH" TMPDIR="$tmp/state" OPENAI_CALL_COUNT_DIR="$tmp/calls" AGENT_SPIN_CHECK=on AGENT_SPIN_CHECK_EVERY=1 \
       AGENT_SPIN_CHECK_LOG=off AGENT_DELEGATE='' bash "$repo/hooks/spin-check.sh" >/dev/null 2>"$tmp/err" || rc=$?
   if [ "$rc" -ne "$4" ]; then
     echo "FAIL: $5: expected exit $4, got $rc"; sed 's/^/  | /' "$tmp/err"; fail=1

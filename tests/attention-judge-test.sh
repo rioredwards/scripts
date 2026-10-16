@@ -36,7 +36,7 @@ check() {
   rc=0
   jq -nc --arg t "$tmp/t.jsonl" --arg r "Should I use waitFor or bump the timeout? ($n)" \
     "{session_id:\"s1\", transcript_path:\$t, last_assistant_message:\$r, stop_hook_active:false} ${5:-}" \
-    | PATH="$tmp/bin:$PATH" TMPDIR="$tmp/state" HOME="$HOME" AGENT_ATTENTION_JUDGE="${mode:-bounce}" AGENT_DELEGATE='' \
+    | PATH="$tmp/bin:$PATH" TMPDIR="$tmp/state" OPENAI_CALL_COUNT_DIR="$tmp/openai-calls" HOME="$HOME" AGENT_ATTENTION_JUDGE="${mode:-bounce}" AGENT_DELEGATE='' \
       JUDGE_LOG="$tmp/log.jsonl" bash "$repo/hooks/attention-judge.sh" >"$tmp/out" 2>&1 || rc=$?
   calls="$(wc -l < "$tmp/calls" | tr -d ' ')"
   if [ -z "$3" ]; then [ ! -s "$tmp/out" ]; else grep -q -- "$3" "$tmp/out"; fi && seen=1 || seen=0
@@ -61,7 +61,7 @@ check "codex suggestion skips" 0 "" 0 '| .last_assistant_message="{\"suggestion\
 rm -f "$tmp/calls"; touch "$tmp/calls"
 for _ in 1 2; do
   jq -nc --arg t "$tmp/t.jsonl" '{session_id:"s2", transcript_path:$t, last_assistant_message:"same"}' \
-    | PATH="$tmp/bin:$PATH" TMPDIR="$tmp/state" AGENT_ATTENTION_JUDGE=watch AGENT_DELEGATE='' \
+    | PATH="$tmp/bin:$PATH" TMPDIR="$tmp/state" OPENAI_CALL_COUNT_DIR="$tmp/openai-calls" AGENT_ATTENTION_JUDGE=watch AGENT_DELEGATE='' \
       JUDGE_LOG="$tmp/log.jsonl" bash "$repo/hooks/attention-judge.sh" >/dev/null 2>&1 || true
 done
 [ "$(wc -l < "$tmp/calls" | tr -d ' ')" -eq 1 ] || { echo "FAIL: verdict not shared, $(wc -l < "$tmp/calls") calls"; fail=1; }

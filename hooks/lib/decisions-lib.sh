@@ -6,6 +6,8 @@
 # handling live here once.
 #
 #   DECISIONS_URL   endpoint (default OpenAI; tests point it at a stub)
+#   Every call counts against the daily cap in call-budget-lib.sh; past it the
+#   call is not made and the result is an error naming the cap.
 #
 # decisions_ask INPUT QUESTIONS_JSON [MAX_SECS]
 #   QUESTIONS_JSON: [{name, instructions}, ...] (sent as predicates)
@@ -19,6 +21,8 @@
 #   decides what a refusal means.
 set -u
 
+. "$HOME/scripts/hooks/lib/call-budget-lib.sh"
+
 DECISIONS_MODEL=gpt-6-luna
 DECISIONS_URL="${DECISIONS_URL:-https://api.openai.com/v1/decisions}"
 
@@ -27,6 +31,7 @@ _decisions_ms() { perl -MTime::HiRes=time -e 'printf "%d", time*1000'; }
 decisions_ask() {
   _d_start="$(_decisions_ms)"
   _d_err() { jq -nc --arg e "$1" --argjson ms "$(( $(_decisions_ms) - _d_start ))" '{ms:$ms, error:$e}'; }
+  _d_over="$(call_budget_take decisions)" || { _d_err "$_d_over"; return; }
   _d_key="$(keyfor OPENAI_API_KEY 2>/dev/null)" || { _d_err "keyfor OPENAI_API_KEY failed"; return; }
   _d_body="$(jq -n --arg m "$DECISIONS_MODEL" --arg i "$1" --argjson q "$2" \
     '{model:$m, input:$i, questions:($q | map({type:"predicate"} + .))}')"
