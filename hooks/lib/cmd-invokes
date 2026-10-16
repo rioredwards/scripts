@@ -37,5 +37,6 @@ sub strip {
 }
 
 my $cmd = strip(do { local $/; <STDIN> } // '');
-my $prefix = '(?:^|[\n;&|({`])\s*(?:\w+=\S*\s+)*(?:(?:then|do|else|!|command|exec|env|sudo|time|nohup)\s+)*(?:\S*/)?';
+my $sudo = 'sudo(?:\s+(?:-[ugphC]|--(?:user|group|prompt|close-from))\s+\S+|\s+-\S+)*';
+my $prefix = '(?:^|[\n;&|({`])\s*(?:(?:\w+=\S*|then|do|else|if|elif|while|until|!|command|exec|env|time|nohup|' . $sudo . ')\s+)*(?:\S*/)?';
 exit($cmd =~ /$prefix(?:$want)(?:\s|$|[;&|)])/m ? 0 : 1);

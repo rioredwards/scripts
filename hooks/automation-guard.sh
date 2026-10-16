@@ -18,7 +18,7 @@
 # In-flight tracking: parallel Bash calls mean pre/post can interleave, so each
 # matched command drops a marker file (hash of the command) and the cue only
 # comes down when the marker dir is empty. Markers older than the stale window
-# are swept on every event, so a killed agent can't strand the overlay.
+# are swept on every event. The cue also expires without another hook event.
 #
 # Settings follow the agent-hooks convention (profile vars in
 # ~/.dotfiles/zsh/profiles/agent-hooks.sh, env wins over profile):
@@ -48,7 +48,10 @@ CMD="$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)"
 
 # A stranded overlay is worse than a missing one, so sweep on every event.
 mkdir -p "$inflight"
-find "$inflight" -type f -mmin "+$stale_min" -delete 2>/dev/null
+expired="$(find "$inflight" -type f -mmin "+$stale_min" -print -delete 2>/dev/null)"
+if [ -n "$expired" ] && [ -z "$(ls -A "$inflight" 2>/dev/null)" ]; then
+  "$cue" stop >/dev/null 2>&1
+fi
 
 cue_down() {
   rm -f "$inflight"/* 2>/dev/null
@@ -71,27 +74,21 @@ drives_gui() {
     *automation-cue*) return 1 ;;
   esac
 
-  # Quoted text is data, not a command: `git commit -m 'fix screencapture'`
-  # must not raise the overlay. Tool names are matched against the stripped
-  # form; the argument patterns below need the original, since a deeplink or
-  # app path is usually quoted.
-  bare="$(printf '%s' "$1" | sed -e "s/'[^']*'/''/g" -e 's/"[^"]*"/""/g')"
-
-  # Command-position match on the GUI tools Rio has on PATH.
-  printf '%s' "$bare" | grep -Eq \
-    '(^|[[:space:];&|(){}`/])(click-tool|cliclick|screencapture|ax-dialog|tbshot|sc)([[:space:]]|$)' && return 0
+  invokes="$(dirname "$0")/lib/cmd-invokes"
+  printf '%s' "$1" | "$invokes" \
+    '(click-tool|cliclick|screencapture|ax-dialog|tbshot|sc)' && return 0
 
   # Shortcuts run headless-ish but can raise UI.
-  printf '%s' "$bare" | grep -Eq '(^|[[:space:];&|(){}`])shortcuts[[:space:]]+run([[:space:]]|$)' && return 0
+  printf '%s' "$1" | "$invokes" 'shortcuts\s+run' && return 0
 
-  # `open` that launches or fronts an app, or fires a deeplink. Plain
-  # `open somefile.txt` is left alone: too common, rarely a takeover.
-  printf '%s' "$bare" | grep -Eq '(^|[[:space:];&|(){}`/])open([[:space:]]|$)' &&
-    printf '%s' "$1" | grep -Eq '(^|[[:space:];&|(){}`/])open[[:space:]]+.*(-[aRn][[:space:]]|[a-z][a-z0-9+.-]*://|\.app)' && return 0
+  # Opening a file, app or deeplink can front another app. Arguments named
+  # "open" are inert; the shared parser checks command position.
+  printf '%s' "$1" | "$invokes" 'open' &&
+    return 0
 
   # AppleScript that types, clicks, fronts an app, or throws up a dialog.
   # `display notification` is deliberately excluded: it steals nothing.
-  printf '%s' "$bare" | grep -Eq 'osascript' &&
+  printf '%s' "$1" | "$invokes" 'osascript' &&
     printf '%s' "$1" | grep -Eq 'System Events|keystroke|key code|display dialog|to activate|click at|perform action' && return 0
 
   return 1
@@ -104,7 +101,7 @@ marker="$inflight/$(printf '%s' "$CMD" | md5 -q 2>/dev/null || printf '%s' "$CMD
 case "$EVENT" in
   PreToolUse)
     : >"$marker"
-    "$cue" start >/dev/null 2>&1
+    "$cue" start "$((stale_min * 60))" >/dev/null 2>&1
     ;;
   PostToolUse)
     rm -f "$marker" 2>/dev/null
