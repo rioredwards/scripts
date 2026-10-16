@@ -1,0 +1,223 @@
+#!/usr/bin/python3
+"""sa-error-watch: daily search of the Vercel production runtime logs of straightaway-next for `sa-app-error`.
+Stdlib only, Apple's /usr/bin/python3 (same reason as tool-check).
+
+  sa-error-watch            query the window since the last good run (first run: 24h) up to now.
+                            No hits: prints one line, exits 0, writes nothing.
+                            Hits: writes ~/dev/project-manager/inbox/YYYY-MM-DD-sa-error-watch.md
+                            (a status line plus one ask, which is how Rio is pinged), exits 0.
+                            Query failure (CLI error, timeout, unreadable output): message on stderr,
+                            exit 1, state NOT advanced, so the next run covers the gap.
+  sa-error-watch --from-file F   read vercel JSON lines from F instead of calling vercel (tests; writes
+                            nothing to the state file).
+
+The app emits one JSON line per failure (apps/web/src/lib/error-log.ts: tag, source, message, digest,
+path). Runtime logs: Pro + Observability Plus keeps 30 days, a query window is capped at 14 days, so
+a window is clamped to 13 days. Auth is the vercel CLI login (~/Library/Application Support/com.vercel.cli).
+
+Test overrides (env): SA_ERROR_WATCH_INBOX_DIR, _STATE, _VERCEL (cli path), _NOW (ISO time with zone).
+"""
+import argparse
+import collections
+import datetime
+import json
+import os
+import subprocess
+import sys
+import time
+
+HOME = os.path.expanduser("~")
+TAG = "sa-app-error"
+PROJECT = "straightaway-next"
+SCOPE = "straightaway"
+LOGS_URL = "https://vercel.com/%s/%s/logs" % (SCOPE, PROJECT)
+DEFAULT_WINDOW = 24 * 3600
+MAX_WINDOW = 13 * 24 * 3600
+CLI_TIMEOUT = 300
+SHOWN = 5  # distinct errors listed in the report
+
+
+def _path(var, default):
+    return os.path.expanduser(os.environ.get(var) or default)
+
+
+INBOX_DIR = _path("SA_ERROR_WATCH_INBOX_DIR", "~/dev/project-manager/inbox")
+STATE = _path("SA_ERROR_WATCH_STATE", "~/Library/Logs/sa-error-watch/last-run")
+VERCEL = os.environ.get("SA_ERROR_WATCH_VERCEL") or "vercel"
+
+ENV = dict(os.environ)
+ENV["PATH"] = ":".join(dict.fromkeys(["/opt/homebrew/bin", "/usr/local/bin"] + ENV.get("PATH", "").split(":") + ["/usr/bin", "/bin"]))
+
+
+def die(msg):
+    print("sa-error-watch: " + msg, file=sys.stderr)
+    sys.exit(1)
+
+
+def now():
+    v = os.environ.get("SA_ERROR_WATCH_NOW")
+    if not v:
+        return time.time()
+    d = datetime.datetime.fromisoformat(v.replace("Z", "+00:00"))
+    if d.tzinfo is None:
+        die("SA_ERROR_WATCH_NOW needs a zone: %r" % v)
+    return d.timestamp()
+
+
+def iso(epoch):
+    return datetime.datetime.fromtimestamp(epoch, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def window(end):
+    """Start of the window: the last good run, clamped to MAX_WINDOW; first run looks back 24h."""
+    try:
+        with open(STATE, encoding="utf-8") as f:
+            start = float(f.read().strip())
+    except FileNotFoundError:
+        return end - DEFAULT_WINDOW
+    except ValueError:
+        die("state file %s is unreadable; delete it to restart from a 24h window" % STATE)
+    if start > end:
+        die("state file %s is in the future" % STATE)
+    return max(start, end - MAX_WINDOW)
+
+
+def fetch(since, until):
+    """Run `vercel logs` and return its stdout lines. Any failure is fatal."""
+    cmd = [VERCEL, "logs", "--project", PROJECT, "--scope", SCOPE, "--environment", "production",
+           "--since", iso(since), "--until", iso(until), "--query", TAG, "--json", "--no-branch",
+           "--limit", "5000", "--non-interactive"]
+    try:
+        p = subprocess.run(cmd, cwd=HOME, env=ENV, stdin=subprocess.DEVNULL, capture_output=True,
+                           text=True, timeout=CLI_TIMEOUT)
+    except FileNotFoundError:
+        die("vercel CLI not found (%s); brew install vercel-cli" % VERCEL)
+    except subprocess.TimeoutExpired:
+        die("vercel logs timed out after %ds" % CLI_TIMEOUT)
+    if p.returncode != 0:
+        die("vercel logs exited %d: %s" % (p.returncode, (p.stderr.strip() or p.stdout.strip())[-600:]))
+    return p.stdout.splitlines()
+
+
+def parse_entries(lines):
+    entries = []
+    for n, raw in enumerate(lines, 1):
+        line = raw.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            die("vercel logs output line %d is not JSON: %s" % (n, line[:200]))
+        if not isinstance(entry, dict):
+            die("vercel logs output line %d is not an object: %s" % (n, line[:200]))
+        entries.append(entry)
+    return entries
+
+
+def errors_in(entries):
+    """One dict per sa-app-error line. A request entry holds app console lines in logs[]; its own
+    `message` repeats them, so it is only read when logs[] carries none."""
+    found, seen = [], set()
+    for e in entries:
+        texts = [l.get("message") or "" for l in (e.get("logs") or []) if isinstance(l, dict)]
+        if not any(TAG in t for t in texts):
+            texts = [e.get("message") or ""]
+        for text in texts:
+            for line in text.splitlines():
+                if TAG not in line:
+                    continue
+                key = (e.get("id"), line)
+                if key in seen:
+                    continue
+                seen.add(key)
+                try:
+                    obj = json.loads(line)
+                except ValueError:
+                    obj = None
+                if not isinstance(obj, dict) or obj.get("tag") != TAG:
+                    obj = {"source": "unparsed", "message": line}
+                found.append({
+                    "source": str(obj.get("source") or "?"),
+                    "message": str(obj.get("message") or "(no message)"),
+                    "path": str(obj.get("path") or e.get("requestPath") or "?"),
+                    "digest": str(obj.get("digest") or ""),
+                    "ts": e.get("timestamp"),
+                })
+    return found
+
+
+def clean(text, n=160):
+    """One line, no ' | ' (the ask separator), clipped."""
+    t = " ".join(str(text).split()).replace(" | ", " / ").replace("|", "/")
+    return t if len(t) <= n else t[: n - 3] + "..."
+
+
+def report(errs, since, until):
+    groups = collections.Counter((e["message"], e["path"]) for e in errs)
+    sources = collections.Counter(e["source"] for e in errs)
+    digests = list(dict.fromkeys(e["digest"] for e in errs if e["digest"]))
+    window_txt = "%s to %s" % (iso(since), iso(until))
+    by_source = ", ".join("%d %s" % (c, s) for s, c in sources.most_common())
+    lines = ["- status: SA production app errors: %d in %s (%s)" % (len(errs), window_txt, by_source)]
+    for (msg, path), c in groups.most_common(SHOWN):
+        lines.append("- status: %dx %s at %s" % (c, clean(msg), clean(path, 80)))
+    if len(groups) > SHOWN:
+        lines.append("- status: and %d more distinct errors" % (len(groups) - SHOWN))
+    top = clean(groups.most_common(1)[0][0][0], 90)
+    dig = (" Digests: " + ", ".join(clean(d, 40) for d in digests[:5]) + ".") if digests else ""
+    lines.append(
+        "- ask: %d app error%s in production logs (%d distinct; top: %s). Have an agent investigate? | "
+        "yes: start core:loop in straightaway-next to find the cause of these sa-app-error lines and fix it.%s "
+        "Query: vercel logs --project %s --scope %s --environment production --since %s --until %s --query %s | "
+        "link: %s (Production, search %s)"
+        % (len(errs), "" if len(errs) == 1 else "s", len(groups), top, dig, PROJECT, SCOPE,
+           iso(since), iso(until), TAG, LOGS_URL, TAG))
+    return lines
+
+
+def write_inbox(day, lines):
+    os.makedirs(INBOX_DIR, exist_ok=True)
+    dest = os.path.join(INBOX_DIR, "%s-sa-error-watch.md" % day)
+    tmp = os.path.join(INBOX_DIR, ".sa-error-watch.tmp")
+    body = "\n".join(lines) + "\n"
+    if os.path.exists(dest):  # a same-day re-run must not erase an earlier, unread report
+        with open(dest, encoding="utf-8") as f:
+            body = f.read() + body
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(body)
+    os.replace(tmp, dest)
+    return dest
+
+
+def save_state(until):
+    os.makedirs(os.path.dirname(STATE), exist_ok=True)
+    tmp = STATE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write("%d\n" % until)
+    os.replace(tmp, STATE)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("--from-file", help="read vercel JSON lines from this file instead of calling vercel")
+    args = ap.parse_args()
+    until = now()
+    since = window(until)
+    if args.from_file:
+        with open(args.from_file, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    else:
+        lines = fetch(since, until)
+    errs = errors_in(parse_entries(lines))
+    if errs:
+        day = datetime.datetime.fromtimestamp(until).strftime("%Y-%m-%d")
+        print("sa-error-watch: %d error%s; inbox: %s" % (len(errs), "" if len(errs) == 1 else "s", write_inbox(day, report(errs, since, until)).replace(HOME, "~", 1)))
+    else:
+        print("sa-error-watch: 0 errors in %s to %s" % (iso(since), iso(until)))
+    if not args.from_file:
+        save_state(until)
+
+
+if __name__ == "__main__":
+    main()

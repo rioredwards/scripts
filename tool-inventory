@@ -39,6 +39,7 @@ pr-for-branch | pr-for-branch --help
 pr-loc | pr-loc --help
 pr-review | pr-review --help
 recap-repo-audio | recap-repo-audio -h
+sa-error-watch | sa-error-watch --help
 sc | sc --help
 text-phone-summary | text-phone-summary --help
 tool-check | tool-check --help
