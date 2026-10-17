@@ -37,8 +37,13 @@ PAYLOAD="$(cat)"
 
 start="${EPOCHREALTIME:-0}"
 err="$(mktemp -t hooklog)"
+# No pipefail here: a hook that exits before reading stdin (a knob that is off)
+# makes printf die of SIGPIPE on a big payload, and the wrapper must report the
+# hook's own exit code, not 141.
+set +o pipefail
 OUT="$(printf '%s' "$PAYLOAD" | sh -c "$CMD" 2>"$err")"
 CODE=$?
+set -o pipefail
 end="${EPOCHREALTIME:-0}"
 
 # Replay first, log second: never make a hook slower to observe it.
