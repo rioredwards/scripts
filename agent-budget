@@ -150,7 +150,7 @@ case "$cmd" in
     [ -n "$pre" ] || pre="$(pre_lines "$sha")"
     printf 'BASE=%s\nLOC=%s\nFILES=%s\nBRANCH=%s\nSET_AT=%s\nCARRY=%s\nCARRY_FILES=%s\nPRE=%s\n' "$sha" "$loc" "$files" "$branch" "$(date +%s)" "$carry" "$carryfiles" "$pre" > "$STATE"
     rm -f "$WARNED"
-    printf 'budget set: %s LOC%s, measured from %s\n' "$loc" "${files:+, $files new files}" "$(git rev-parse --short "$sha")"
+    printf 'budget set: %s LOC%s, measured from %s%s%s\n' "$loc" "${files:+, $files new files}" "$(git rev-parse --short "$sha")" "$([ "$carry" -gt 0 ] && echo ", $carry LOC already counted on this branch")" "$([ "$carryfiles" -gt 0 ] && echo ", $carryfiles new files already counted on this branch")"
     ;;
 
   clear)
