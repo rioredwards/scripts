@@ -25,6 +25,24 @@
     { "name": "cue-stale", "key": "AGENT_AUTOMATION_CUE_STALE", "kind": "value", "doc": "minutes before a stranded cue clears" },
     { "name": "attention-judge", "aliases": ["judge"], "key": "AGENT_ATTENTION_JUDGE", "kind": "value", "doc": "outside model rates each reply: watch | bounce | off" },
 
+    { "name": "night", "key": "AGENT_NIGHT", "kind": "value", "default": "normal", "label": "🌙 night",
+      "doc": "master dial for the nightly Codex jobs on the Mini (score, triage, implement)",
+      "options": {
+        "off": "No nightly work: each job exits at once.",
+        "low": "Score files 1 issue (stops at 5 open needs-approval); triage 1 issue; implement 1 PR.",
+        "normal": "Score files 3 (stops at 10); triage 3; implement 2 PRs.",
+        "high": "Score files 5 (stops at 20); triage 6; implement 4 PRs."
+      } },
+    { "name": "night-score", "key": "AGENT_NIGHT_SCORE", "kind": "value", "default": "auto", "label": "🌙 score",
+      "doc": "nightly scorer override; auto follows night",
+      "options": { "auto": "Follow night.", "off": "Scorer exits at once.", "low": "Files 1 issue; stops at 5 open needs-approval.", "normal": "Files 3; stops at 10.", "high": "Files 5; stops at 20." } },
+    { "name": "night-triage", "key": "AGENT_NIGHT_TRIAGE", "kind": "value", "default": "auto", "label": "🌙 triage",
+      "doc": "nightly triage override; auto follows night",
+      "options": { "auto": "Follow night.", "off": "Triage exits at once.", "low": "Triage 1 issue.", "normal": "Triage 3.", "high": "Triage 6." } },
+    { "name": "night-implement", "key": "AGENT_NIGHT_IMPLEMENT", "kind": "value", "default": "auto", "label": "🌙 implement",
+      "doc": "nightly implementer override; auto follows night",
+      "options": { "auto": "Follow night.", "off": "Implementer exits at once.", "low": "Opens 1 PR.", "normal": "Opens 2 PRs.", "high": "Opens 4 PRs." } },
+
     { "name": "reply-cap", "aliases": ["words"], "key": "AGENT_REPLY_MAX_WORDS", "kind": "value", "session": true, "default": "200", "label": "💬 cap",
       "doc": "prose-word ceiling on a reply",
       "options": { "off": "", "100": "", "200": "", "300": "" } },
