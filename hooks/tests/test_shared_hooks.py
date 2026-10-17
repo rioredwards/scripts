@@ -9,6 +9,77 @@ import unittest
 ROOT = Path(__file__).resolve().parents[2]
 
 
+class SessionFooter(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.td = Path(self.temp.name)
+        gh = self.td / 'gh'
+        gh.write_text('''#!/bin/sh
+set -eu
+case "$3" in
+  https://github.com/acme/app/issues/12) file="$FOOTER_TEST_DIR/issue" ;;
+  https://github.com/acme/app/pull/34) file="$FOOTER_TEST_DIR/pr" ;;
+  *) exit 1 ;;
+esac
+case "$2" in
+  view) cat "$file" ;;
+  edit) cat > "$file"; printf '%s\\n' "$1 $3" >> "$FOOTER_TEST_DIR/edits" ;;
+  *) exit 1 ;;
+esac
+''')
+        gh.chmod(0o755)
+        for kind in ('issue', 'pr'):
+            (self.td / kind).write_text('Original body\n\nSession: prior-session\n')
+
+    def run_hook(self, command, response, sid='new-session', key='command'):
+        payload = {'session_id': sid, 'tool_input': {key: command}, 'tool_response': response}
+        r = subprocess.run(['bash', str(ROOT / 'hooks/issue-session-footer.sh')],
+                           input=json.dumps(payload), text=True, capture_output=True,
+                           env={**os.environ, 'PATH': f'{self.td}:{os.environ["PATH"]}',
+                                'FOOTER_TEST_DIR': str(self.td)}, timeout=15)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r
+
+    def test_create_and_edit_both_kinds(self):
+        for kind, segment, number in [('issue', 'issues', 12), ('pr', 'pull', 34)]:
+            url = f'https://github.com/acme/app/{segment}/{number}'
+            self.run_hook(f'gh {kind} create --title x --body y', url)
+            self.run_hook(f'gh {kind} edit {number} --title z', {'stdout': url})
+            body = (self.td / kind).read_text()
+            self.assertEqual(body, 'Original body\n\nSession: prior-session\n\nSession: new-session\n')
+        self.assertEqual(len((self.td / 'edits').read_text().splitlines()), 2)
+
+    def test_codex_cmd_payload(self):
+        self.run_hook('gh pr create --title x --body y',
+                      {'output': 'https://github.com/acme/app/pull/34'}, key='cmd')
+        self.assertIn('Session: new-session', (self.td / 'pr').read_text())
+
+    def test_quoted_mentions_and_reads_do_nothing(self):
+        for command in ['echo "gh pr create"', "rg 'gh issue edit' .", 'gh pr view 34']:
+            self.run_hook(command, 'https://github.com/acme/app/pull/34')
+        self.assertFalse((self.td / 'edits').exists())
+
+    def test_url_only_in_command_does_nothing(self):
+        self.run_hook('gh pr create --body https://github.com/acme/app/pull/34', 'failed')
+        self.assertFalse((self.td / 'edits').exists())
+
+    def test_only_matching_kind_is_stamped(self):
+        self.run_hook('gh pr create --title x',
+                      'https://github.com/acme/app/issues/12\nhttps://github.com/acme/app/pull/34')
+        self.assertNotIn('new-session', (self.td / 'issue').read_text())
+        self.assertIn('Session: new-session', (self.td / 'pr').read_text())
+
+    def test_footer_is_a_complete_line(self):
+        (self.td / 'pr').write_text('Session: new-session-longer\n')
+        self.run_hook('gh pr edit 34 --title x', 'https://github.com/acme/app/pull/34')
+        self.assertIn('\nSession: new-session\n', (self.td / 'pr').read_text())
+
+    def test_missing_session_does_nothing(self):
+        self.run_hook('gh pr create --title x', 'https://github.com/acme/app/pull/34', sid='')
+        self.assertFalse((self.td / 'edits').exists())
+
+
 class SharedHooks(unittest.TestCase):
     def run_hook(self, name, payload, **env):
         return subprocess.run(['bash', str(ROOT / 'hooks' / name)],
