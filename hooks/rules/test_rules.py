@@ -499,6 +499,19 @@ class RulesTests(unittest.TestCase):
                 out = self.run_hook("tool", {"tool_name": "Bash", "tool_input": {"command": cmd}})
                 self.assertNotIn("utils:system", out.stdout)
 
+    def test_subagent_skill_line(self):
+        """Subagent briefs must say which skill to load (or none); web lookups are exempt."""
+        def spawn(prompt, kind="core:reviewer"):
+            return self.run_hook("tool", {"tool_name": "Agent", "tool_input": {
+                "description": "x", "prompt": prompt, "subagent_type": kind}})
+        blocked = spawn("review the diff")
+        self.assertEqual(json.loads(blocked.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertIn("deny", spawn("Do X. Mention the Skill: line later.").stdout)
+        for out in (spawn("Skill: core:review (plugins/core/skills/review/SKILL.md). Load it first."),
+                    spawn("Skill: none\nfind the config"),
+                    spawn("read this url", "web-fetch")):
+            self.assertNotIn("deny", out.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -333,6 +333,16 @@
       },
       "do": "remind",
       "text": "Rio set attention to away for this session: nobody will answer, so never end on a question to him. Take the safest reversible path and keep working to done or budget. A real step-5 decision goes to the PM inbox as an `- ask:` line (headless rule); carry on with whatever does not depend on it. Nothing irreversible meanwhile."
+    },
+    {
+      "id": "subagent-skill-line",
+      "on": "tool",
+      "match": {
+        "tool": "^(Agent|Task)$"
+      },
+      "unless": "\"prompt\":\"[[:space:]]*(?i:skill):|\"subagent_type\":\"(web-fetch|claude-code-guide|statusline-setup)\"",
+      "do": "deny",
+      "text": "BLOCKED: subagent briefs open with a `Skill:` line. If a skill covers this task or part of it, write `Skill: <plugin:name> (<path to its SKILL.md>). Load it first: Skill tool, else read the file.` Paraphrasing a skill loses it. If none fits, write `Skill: none`. Then re-send."
     }
   ]
 }
