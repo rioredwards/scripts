@@ -28,6 +28,7 @@ Small personal command wrappers and automation helpers. App-sized tools live in 
 - `agent-budget` - LOC appetite for the work in a repo: `set <loc>`, `status` (exit 1 when over), `clear`. Enforced by `hooks/loc-budget.sh`.
 - `hooks/attention-judge.sh` - Stop hook: OpenAI's Decisions API rates each final reply (needless ask, unclear, noise). `agent-toggle attention-judge watch|bounce|off`; watch (default) only logs to `~/.cache/attention-judge/verdicts.jsonl`.
 - `hooks/lib/decisions-lib.sh` - shared client for OpenAI's Decisions API (yes/no probabilities, <1s); used by attention-judge and spin-check.
+- `hooks/lib/spin-judge.sh VIEW` - spin-check's final-reply judge: a Codex run on the ChatGPT plan that reads the view from `hooks/lib/spin_view.py TRANSCRIPT` and may grep the transcript before it flags. Inputs kept in `~/.cache/spin-check/inputs/`.
 - `agent-toggle` - flip agent-hook knobs (speak, audio, text, ...) from anywhere, including over SSH; `--session ID` sets one session's knobs (attention, quality, appetite, tokens, reply cap). Every knob lives in `agent-knobs.json`; `agent-toggle` lists them.
 - `agent-hooks-env.sh` - shared profile loader sourced by hook scripts (env, then session, then local, then synced profile).
 - `agy-write-guard` - Antigravity pre-tool hook that denies write tools unless `AGY_WRITE_GUARD=allow`.
