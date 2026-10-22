@@ -104,11 +104,21 @@ class SharedHooks(unittest.TestCase):
                 self.assertEqual(marker.read_text(), 'plan')
             r = self.run_hook('loop-reminder.sh', {'session_id': sid}, LOOP_REMINDER_INTERVAL_SECS='0')
             self.assertIn('last phase skill loaded: plan', json.loads(r.stdout)['hookSpecificOutput']['additionalContext'])
-            r = self.run_hook('loop-compact-reanchor.sh', {'session_id': sid})
+            r = self.run_hook('compact-reanchor.sh', {'session_id': sid})
             self.assertIn('Last phase skill loaded: plan', r.stdout)
+            self.assertIn('checkpoint with Rio', r.stdout)
         finally:
             marker.unlink(missing_ok=True)
             stamp.unlink(missing_ok=True)
+
+    def test_compaction_asks_for_a_scope_checkpoint(self):
+        """Compaction only happens deep into long work, so it is the trigger for Rio's
+        scope check-in. Delegates report to an agent, not Rio, so they stay quiet."""
+        r = self.run_hook('compact-reanchor.sh', {'session_id': f'no-loop-{os.getpid()}'})
+        self.assertIn('checkpoint with Rio', r.stdout)
+        self.assertNotIn('core:loop', r.stdout)
+        r = self.run_hook('compact-reanchor.sh', {'session_id': 'x', 'agent_id': 'sub'})
+        self.assertEqual(r.stdout, '')
 
     def test_daily_call_cap_stops_calls_loudly(self):
         """A runaway replay cannot spend the month: past the per-day cap the lib refuses and

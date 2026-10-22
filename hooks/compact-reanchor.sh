@@ -1,28 +1,34 @@
 #!/usr/bin/env bash
-# loop-compact-reanchor.sh: restore core:loop state right after context compaction.
+# compact-reanchor.sh: re-add what compaction drops, right after it happens.
 #
-# SessionStart (matcher: compact). Compaction summaries preserve the task but drop the
-# loop protocol, so agents stop invoking phase skills mid-loop. If this session has a
-# loop-phase marker (/tmp/claude-loop-phase-<session_id>, written by
-# loop-phase-tracker.sh), print the loop state to stdout: SessionStart stdout is added
-# to context visible to the model.
+# SessionStart (matcher: compact). Compaction only happens deep into long work, so it is
+# the trigger for Rio's scope checkpoint (agents can't sense elapsed time). Mid-core:loop
+# (marker /tmp/claude-loop-phase-<session_id>, written by loop-phase-tracker.sh), it also
+# restores the loop protocol the summary drops. SessionStart stdout is added to context.
+# Delegates report to an agent, not Rio: no output.
 #
-# Fails open: no jq, no marker, malformed input → exit 0 with no output.
+# Fails open: no jq or malformed input → exit 0 with no output.
 set -uo pipefail
 
 command -v jq >/dev/null 2>&1 || exit 0
+. "$HOME/scripts/hooks/lib/delegate.sh"
 
 INPUT="$(cat)"
+hook_is_delegate "$INPUT" && exit 0
 SID="$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)"
 [ -n "$SID" ] || exit 0
+
+cat <<'EOF2'
+📌 Context was just compacted, so this is long-running work. Rio's rule: big work needs his yes on
+scope, size, and end point. If he hasn't okayed the current scope, or it grew past what he
+approved, checkpoint with Rio now: what's done, what's left, how much more.
+EOF2
 
 MARKER="/tmp/claude-loop-phase-${SID}"
 [ -r "$MARKER" ] || exit 0
 PHASE="$(cat "$MARKER" 2>/dev/null)"
-[ -n "$PHASE" ] || exit 0
-
 case "$PHASE" in
-  complete|retro) exit 0 ;;
+  ''|complete|retro) exit 0 ;;
 esac
 
 # Declared composition (phases + routes) from $GIT_DIR/claude-loop-plan, if the loop wrote one.
@@ -33,11 +39,11 @@ if [ -n "$CWD" ]; then
   [ -n "$GD" ] && [ -r "$GD/claude-loop-plan" ] && COMP="$(head -c 400 "$GD/claude-loop-plan" 2>/dev/null)"
 fi
 
-cat <<EOF
+cat <<EOF2
 🚨 Context was just compacted mid-core:loop. Last phase skill loaded: ${PHASE}.${COMP:+ Declared composition: ${COMP}. Hold the declared depth; re-route only with a stated reason.}
 The loop protocol likely got lost in the summary, re-anchor before continuing:
 1. Reload core:loop (Claude: Skill tool; Codex: read SKILL.md).
 2. Load each phase's skill before phase work or delegation.
 3. Re-read the issue (plan of record) per the loop's re-entry steps.
-EOF
+EOF2
 exit 0
