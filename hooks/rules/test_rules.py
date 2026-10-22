@@ -241,6 +241,40 @@ class RulesTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("no-fallbacks", result.stderr)
 
+    def test_merges_need_rio_on_every_path(self):
+        """Any agent, any merge path: shell gh, the REST endpoint, or an MCP merge tool."""
+        blocked = [
+            ("Bash", {"command": "gh pr merge 12 --squash"}),
+            ("exec_command", {"cmd": "gh pr merge --auto 12"}),
+            ("Bash", {"command": "gh api -X PUT repos/a/b/pulls/12/merge"}),
+            ("mcp__github__merge_pull_request", {"pull_number": 12}),
+            ("mcp__ccd_pr__set_auto_merge", {"enabled": True}),
+        ]
+        allowed = [
+            ("Bash", {"command": "RIO_MERGE_OK=1 gh pr merge 12"}),
+            ("Bash", {"command": "gh pr view 12 --json mergeable"}),
+            ("Bash", {"command": "git merge origin/main"}),
+        ]
+        for name, data in blocked:
+            with self.subTest(blocked=data):
+                out = self.run_hook("tool", {"tool_name": name, "tool_input": data}).stdout
+                self.assertEqual(json.loads(out)["hookSpecificOutput"]["permissionDecision"], "deny")
+        for name, data in allowed:
+            with self.subTest(allowed=data):
+                self.assertNotIn("merge a PR", self.run_hook("tool", {"tool_name": name, "tool_input": data}).stdout)
+
+    def test_automations_get_the_mini_reminder(self):
+        hits = [
+            ("Bash", {"command": "launchctl bootstrap gui/501 ~/Library/LaunchAgents/x.plist"}),
+            ("exec_command", {"cmd": "crontab -l > c; crontab c"}),
+            ("Write", {"file_path": "/Users/x/Library/LaunchAgents/com.rio.job.plist", "content": "x"}),
+            ("mcp__scheduled-tasks__create_scheduled_task", {"name": "daily"}),
+        ]
+        for name, data in hits:
+            with self.subTest(hit=data):
+                self.assertIn("Mac Mini", self.run_hook("tool", {"tool_name": name, "tool_input": data}).stdout)
+        self.assertNotIn("Mac Mini", self.run_hook("tool", {"tool_name": "Bash", "tool_input": {"command": "launchctl list"}}).stdout)
+
     def test_piped_git_push_is_blocked(self):
         """A pipe turns a refused push into exit 0; unpiped or pipefail pushes pass."""
         blocked = [

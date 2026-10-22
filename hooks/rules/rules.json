@@ -140,12 +140,42 @@
       "id": "never-merge-pr",
       "on": "tool",
       "match": {
-        "tool": "^Bash$",
-        "input": "gh[[:space:]]+pr[[:space:]]+merge"
+        "tool": "^(Bash|exec_command|shell)$",
+        "input": "gh[[:space:]]+pr[[:space:]]+merge|gh[[:space:]]+api[^\\n;|&]*pulls/[^/[:space:]]+/merge"
       },
       "unless": "RIO_MERGE_OK=1",
       "do": "deny",
       "text": "BLOCKED: Rio never lets an agent merge a PR without his explicit, in-conversation permission. Ask him, in your reply, whether to merge. Only if he says yes, re-run the command prefixed with `RIO_MERGE_OK=1 `. This is an automated gate, not a denial from Rio."
+    },
+    {
+      "id": "never-merge-pr-mcp",
+      "on": "tool",
+      "match": {
+        "tool": "^mcp__.*(merge_pull_request|merge_pr|set_auto_merge)",
+        "input": "."
+      },
+      "do": "deny",
+      "text": "BLOCKED: Rio never lets an agent merge a PR (or turn on auto-merge) without his explicit, in-conversation permission. Ask him in your reply. Only if he says yes, merge with `RIO_MERGE_OK=1 gh pr merge ...` instead. This is an automated gate, not a denial from Rio."
+    },
+    {
+      "id": "automations-on-mini",
+      "on": "tool",
+      "match": {
+        "tool": "^(Bash|exec_command|shell|Write|Edit|MultiEdit)$",
+        "content": "launchctl[[:space:]]+(load|bootstrap)|(^|[^[:alnum:]_-])crontab[[:space:]]+(?!-l([[:space:]]|$))|LaunchAgents/[^\"[:space:]]*\\.plist"
+      },
+      "do": "remind",
+      "text": "Rio's automations (launchd, cron, scheduled tasks) run on the Mac Mini, and desktop scheduled tasks land in the app hosting this session. Check the `Machine:` line in your context first; on the MacBook, install it on the Mini over `ssh mini` instead. Nudge, not a block."
+    },
+    {
+      "id": "automations-on-mini-mcp",
+      "on": "tool",
+      "match": {
+        "tool": "^mcp__scheduled-tasks__create_scheduled_task$",
+        "input": "."
+      },
+      "do": "remind",
+      "text": "Rio's automations (launchd, cron, scheduled tasks) run on the Mac Mini, and desktop scheduled tasks land in the app hosting this session. Check the `Machine:` line in your context first; on the MacBook, install it on the Mini over `ssh mini` instead. Nudge, not a block."
     },
     {
       "id": "no-draft-pr",
