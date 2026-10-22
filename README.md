@@ -10,6 +10,7 @@ Small personal command wrappers and automation helpers. App-sized tools live in 
 - `annotate` - draw arrows, callout labels, boxes, circles and blur redactions on an image. `annotate shot.png --callout 600,400:340,306:"this chip"`. Run `annotate shot.png --grid` first to read coordinates off a labelled overlay, and `--info` for dimensions. Agents use it to point Rio at a spot instead of describing it.
 - `cal-add` - create an Apple Calendar event (defaults to "Work Time Tracking"). `cal-add "Title" --start "YYYY-MM-DD HH:MM" --duration 20 [--notes ...]`; `cal-add --list` for calendar names. Needs an unlocked GUI session on the running Mac.
 - `cleanshot` - minimal CleanShot X CLI firing `cleanshot://` URL commands. Run `cleanshot` to list aliases; `--dry-run` prints the URL.
+- `screenshot-enrich` - Mini-only background OCR and category tags for new CleanShot exports. See [Screenshot enrichment](#screenshot-enrichment).
 - `dev-up` - start the current repo's dev server the sanctioned way in one command: finds the start script, runs it through portless as a named pm2 process, waits until it answers, sets `dev-url`, prints the tailnet URL. Agents run this instead of guessing. `dev-up -- <cmd>` for an explicit command.
 - `dev-ls` - what dev servers are running on this Mac, with health, URL and uptime. `dev-ls --json` for tools.
 - `dev-lease` - servers `dev-up` started (pm2 processes) expire 12 hours after launch or reuse. `release TOKEN` cleans task-owned servers unless reused; `stop TOKEN` explicitly stops one. `dev-ls kill` requires one owned target. Untracked servers remain untouched. `dev-lease install` installs the Mini-only hourly sweep across both Macs; an offline MacBook is skipped, not woken. Browser activity does not renew leases. Logs: `~/Library/Logs/dev-lease.log`.
@@ -99,3 +100,40 @@ only for the command's lifetime; it releases the hold on exit.
 
 Closed-lid battery wake remains experimental: a live one-minute SSH task lost
 connectivity despite its idle-sleep assertion. Reliable task completion is unverified.
+
+## Screenshot enrichment
+
+`screenshot-enrich install` baselines the current CleanShot export folder, then installs a Mini-only
+LaunchAgent checking every 30 seconds. Only new top-level PNG/JPEG files are processed, after two
+stable observations. Existing images are excluded. Reinstalling preserves that baseline.
+
+Apple Vision (`~/dev/click-tool/ocr-json`) writes UTF-8 OCR beside each image as `image.jpg.txt`,
+including an empty file when no text is detected. User-written sidecars are never overwritten.
+If an image changes before processing finishes, only the worker's unchanged prior OCR is replaced.
+Decisions (`gpt-6-luna`) chooses a category and whether it needs image evidence. It gets at most
+one additional image pass. OCR text and the filename are sent to OpenAI; the image is sent only
+when the first pass requests it. Category labels become native Finder tags prefixed `Screenshot: `:
+Development, Business Data, Communication, Reference, Media, Interface Design, or Unclear.
+Unrelated tags, image contents, filenames and directories are preserved.
+
+State and successful responses live in `~/Library/Application Support/screenshot-enrich/state.sqlite`.
+Keep this state: it prevents archive backfill and repeat paid calls. OCR persists through API failures;
+completed stages resume on retry. Failures retry after five minutes and log to
+`~/Library/Logs/screenshot-enrich.log`. Each run processes at most eight files; API calls use
+`keyfor OPENAI_API_KEY` and the shared daily call guard. A refused response logs an error, not a tag.
+Processed filenames are treated as complete; later edits to completed images do not refresh OCR.
+
+- `screenshot-enrich status`: counts, API input usage and outstanding errors.
+- `screenshot-enrich scan`: one scan, nonzero on processing failures.
+- `screenshot-enrich initialize`: exclude existing images without installing the job.
+- `--folder PATH --state PATH`: isolated validation or a deliberately separate archive.
+- Pause: `launchctl bootout gui/$(id -u)/com.rioredwards.screenshot-enrich`.
+- Resume: `screenshot-enrich install`.
+
+The single Mini job handles MacBook captures after iCloud sync. No MacBook worker is needed.
+Spotlight/Finder tag visibility and iCloud propagation can lag behind the completed local write.
+
+Installation builds `~/Applications/Screenshot Enrich.app` as the background worker's macOS identity.
+If the scheduled job logs an iCloud permission error, enable this app in System Settings >
+Privacy & Security > Full Disk Access. Foreground success does not prove background access. The installer verifies
+the app signature and reuses its binary when unchanged; rebuilding can require granting access again.

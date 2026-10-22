@@ -23,6 +23,7 @@ cal-add | cal-add --help
 check-home-paths.sh | cd "$HOME/scripts" && check-home-paths.sh --all --no-fix >/dev/null
 claude-latest | claude-latest 2>&1 | grep -q 'usage: claude-latest'
 cleanshot | cleanshot --help
+screenshot-enrich | screenshot-enrich --help
 dev-lease | dev-lease --help
 dev-ls | dev-ls --help
 dev-scan | dev-scan --help
