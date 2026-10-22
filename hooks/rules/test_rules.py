@@ -249,11 +249,16 @@ class RulesTests(unittest.TestCase):
             ("Bash", {"command": "gh api -X PUT repos/a/b/pulls/12/merge"}),
             ("mcp__github__merge_pull_request", {"pull_number": 12}),
             ("mcp__ccd_pr__set_auto_merge", {"enabled": True}),
+            ("mcp__github__enable_pr_auto_merge", {"pull_number": 12}),
+            ("Bash", {"command": "gh api graphql -f query='mutation {\n mergePullRequest(input: {pullRequestId: \"X\"}) { clientMutationId } }'"}),
+            ("Bash", {"command": "gh api graphql -f query='mutation { enablePullRequestAutoMerge(input: {pullRequestId: \"X\"}) { clientMutationId } }'"}),
         ]
         allowed = [
             ("Bash", {"command": "RIO_MERGE_OK=1 gh pr merge 12"}),
             ("Bash", {"command": "gh pr view 12 --json mergeable"}),
             ("Bash", {"command": "git merge origin/main"}),
+            ("Bash", {"command": "gh api graphql -f query='{ viewer { login } }'"}),
+            ("mcp__github__disable_pr_auto_merge", {"pull_number": 12}),
         ]
         for name, data in blocked:
             with self.subTest(blocked=data):

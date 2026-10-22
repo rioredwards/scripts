@@ -141,7 +141,7 @@
       "on": "tool",
       "match": {
         "tool": "^(Bash|exec_command|shell)$",
-        "input": "gh[[:space:]]+pr[[:space:]]+merge|gh[[:space:]]+api[^\\n;|&]*pulls/[^/[:space:]]+/merge"
+        "input": "gh[[:space:]]+pr[[:space:]]+merge|gh[[:space:]]+api[^\\n;|&]*pulls/[^/[:space:]]+/merge|(?s)gh[[:space:]]+api[[:space:]]+graphql.*(mergePullRequest|enablePullRequestAutoMerge)"
       },
       "unless": "RIO_MERGE_OK=1",
       "do": "deny",
@@ -151,7 +151,7 @@
       "id": "never-merge-pr-mcp",
       "on": "tool",
       "match": {
-        "tool": "^mcp__.*(merge_pull_request|merge_pr|set_auto_merge)",
+        "tool": "^mcp__.*(merge_pull_request|merge_pr|(enable|set)_(pr_|pull_request_)?auto_merge)",
         "input": "."
       },
       "do": "deny",
