@@ -104,7 +104,7 @@
         "content": "\"(file_path|notebook_path)\":\"[^\"]*((^|[^[:alnum:]_.-])(agent-skills|\\.dotfiles)/|hooks/rules/|\\.agents/AGENTS\\.md)"
       },
       "do": "remind",
-      "text": "You are editing Rio's agentic system (skills, ledger, hooks, agent rules, dotfiles). All system changes go through the `utils:system` skill, invoke it FIRST if you haven't this session: it records intent in LEDGER.md, finds prior art, and owns publish + verify across both Macs. If it is already loaded, carry on."
+      "text": "You are editing Rio's agentic system (skills, ledger, hooks, agent rules, dotfiles). All system changes go through the `utils:system` skill, invoke it FIRST if you haven't since this session started or was last compacted (compaction drops its rules): it records intent in LEDGER.md, finds prior art, and owns publish + verify across both Macs."
     },
     {
       "id": "system-changes-via-skill-bash",
@@ -114,7 +114,7 @@
         "input": "(?s)^(?=.*((^|[^[:alnum:]_.-])agent-skills/|(^|[^[:alnum:]_.-])\\.dotfiles([/;&[:space:]]|$)|hooks/rules([/;&[:space:]]|$)|\\.agents/AGENTS\\.md)).*(<<|>>|sed[[:space:]]+-i|mv[[:space:]]|ln[[:space:]]|jq[^|;&]*>|(echo|printf)[^|>;&]*>(?![[:space:]]*/dev/null([^[:alnum:]_./-]|$)))"
       },
       "do": "remind",
-      "text": "This shell command writes into Rio's agentic system (skills, ledger, hooks, agent rules, dotfiles). All system changes go through the `utils:system` skill, invoke it FIRST if you haven't this session. If it is already loaded, carry on."
+      "text": "This shell command writes into Rio's agentic system (skills, ledger, hooks, agent rules, dotfiles). All system changes go through the `utils:system` skill, invoke it FIRST if you haven't since this session started or was last compacted (compaction drops its rules)."
     },
     {
       "id": "no-editing-plugin-snapshots",
