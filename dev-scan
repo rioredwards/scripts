@@ -162,12 +162,26 @@ def git_facts(path, base):
     """
     # No optional locks: a plain status rewrites the index, and an agent
     # committing in this checkout at that moment would hit index.lock.
-    status = git(path, "--no-optional-locks", "status", "--porcelain")
+    status = git(path, "--no-optional-locks", "status", "--porcelain", "-z", "--untracked-files=all")
     if status is None:
         die(f"git status failed in {path}")
-    lines = [line for line in status.split("\n") if line]
+    # Rename records have a second NUL-delimited source path, not another change.
+    lines = []
+    records = iter(status.split("\0"))
+    for line in records:
+        if line:
+            lines.append(line)
+            if "R" in line[:2] or "C" in line[:2]:
+                next(records, None)
     untracked = sum(1 for line in lines if line.startswith("??"))
-    facts = {"lastCommit": last_commit(path), "changed": len(lines) - untracked, "untracked": untracked}
+    ignored = git(path, "ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z")
+    common = git(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    head = git(path, "rev-parse", "HEAD")
+    if ignored is None or common is None or head is None:
+        die(f"cannot read retirement facts in {path}")
+    facts = {"lastCommit": last_commit(path), "changed": len(lines) - untracked, "untracked": untracked,
+             "ignored": [entry for entry in ignored.split("\0") if entry],
+             "commonDir": common.strip(), "head": head.strip()}
     if base is None:
         return {**facts, "unpushed": None, "ahead": None, "behind": None, "base": None}
     [unpushed] = git_counts(path, "rev-list", "--count", "HEAD", "--not", "--remotes")
@@ -198,6 +212,7 @@ def cmd_worktrees(repo_dir):
                     "dir": path,
                     "branch": current.get("branch") or "detached",
                     "isMain": not worktrees,
+                    "locked": current.get("locked", False),
                 }
             )
         current.clear()
@@ -210,6 +225,8 @@ def cmd_worktrees(repo_dir):
             current["branch"] = line[len("branch refs/heads/") :]
         elif line.startswith("prunable") or line == "bare":
             current["skip"] = True
+        elif line == "locked" or line.startswith("locked "):
+            current["locked"] = True
     flush()
 
     head = git(repo_dir, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
