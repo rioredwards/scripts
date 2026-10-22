@@ -20,6 +20,62 @@ class RulesTests(unittest.TestCase):
             input=json.dumps(payload), text=True, capture_output=True, env=env,
         )
 
+    def test_ui_launches_require_verified_safety(self):
+        # Only submit hook payloads. These commands are never executed.
+        commands = [
+            "pnpm run e2e", "npm run e2e:only", "pnpm test:e2e",
+            "yarn e2e", "bun run test:e2e", "pnpm --filter desktop run e2e",
+            "npx playwright test", "pnpm exec playwright test tests/app.spec.ts",
+            "./node_modules/.bin/playwright test", "npx cypress run",
+            "pnpm run pr:shots", "node scripts/pr-shots.mjs",
+            "ssh macbook 'pnpm run e2e'", "timeout 60 npx playwright test",
+            "cd /tmp && pnpm run e2e",
+        ]
+        for agent, tool, key in (("claude", "Bash", "command"),
+                                 ("codex", "exec_command", "cmd"),
+                                 ("codex", "shell", "command")):
+            for command in commands:
+                with self.subTest(agent=agent, command=command):
+                    payload = {"tool_name": tool, "tool_input": {key: command}}
+                    result = self.run_hook("tool", payload, agent)
+                    self.assertEqual(json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
+                    self.assertIn("ui-tests-need-safe-target", result.stdout)
+                    for mode in ("headless", "approved", "isolated"):
+                        payload["tool_input"][key] = f"RIO_UI_TEST_MODE={mode} {command}"
+                        self.assertNotIn("permissionDecision", self.run_hook("tool", payload, agent).stdout)
+            for command in ("pnpm test", "pnpm run typecheck", "pnpm run build",
+                            "npx playwright show-report", "rg 'playwright test' .",
+                            "echo 'headless: false'", "echo 'npx playwright test'",
+                            "python3 - <<'PY'\ncommands = ['pnpm run e2e', '--headed']\nPY",
+                            "python3 - <<'PY'\ncases = ['npx playwright test && npx cypress open', 'timeout 60 npx playwright test --headed']\nPY"):
+                result = self.run_hook("tool", {"tool_name": tool, "tool_input": {key: command}}, agent)
+                self.assertNotIn('"permissionDecision": "deny"', result.stdout)
+
+    def test_explicit_visible_launches_cannot_claim_headless(self):
+        commands = [
+            "npx playwright test --headed", "npx playwright test --ui",
+            "npx playwright test --debug", "PWDEBUG=1 npx playwright test",
+            "node -e 'chromium.launch({headless: false})'",
+            "python3 -c 'browser.launch(headless=False)'",
+            "node -e 'electron.launch({args: []})'",
+            "npx cypress open", "cypress open",
+            "npx playwright test && npx cypress open",
+            "cd /tmp && npx playwright test --headed",
+        ]
+        for agent, tool, key in (("claude", "Bash", "command"),
+                                 ("codex", "exec_command", "cmd")):
+            for command in commands:
+                for mode in ("", "headless", "approved", "isolated", "approvedly"):
+                    with self.subTest(agent=agent, command=command, mode=mode):
+                        cmd = f"RIO_UI_TEST_MODE={mode} {command}" if mode else command
+                        result = self.run_hook("tool", {"tool_name": tool, "tool_input": {key: cmd}}, agent)
+                        if mode in ("approved", "isolated"):
+                            self.assertNotIn("permissionDecision", result.stdout)
+                        else:
+                            self.assertEqual(json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
+        payload = {"tool_name": "mcp__node_repl__js", "tool_input": {"code": "await electron.launch({})"}}
+        self.assertIn("visible-tests-need-consent", self.run_hook("tool", payload).stdout)
+
     def test_em_dash_replies_pass(self):
         """Em dashes only matter in files; replies are never bounced for them."""
         for agent in ("claude", "codex"):

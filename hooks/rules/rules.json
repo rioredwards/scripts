@@ -14,6 +14,39 @@
   ],
   "rules": [
     {
+      "id": "ui-tests-need-safe-target",
+      "on": "tool",
+      "match": {
+        "tool": "^(Bash|exec_command|shell)$",
+        "input": "(?m)^[ \\t]*(?:(?:env\\s+)?[A-Za-z_]\\w*=[^\\s;&|]+\\s+)*(?:(?:cd|pushd)[ \\t]+[^;\\n&|]+[ \\t]*(?:&&|;)[ \\t]*)?(?:(?:env\\s+)?[A-Za-z_]\\w*=[^\\s;&|]+\\s+)*(?:(?:ssh|timeout|gtimeout)\\s+[^;\\n&|]*?\\s+[\\x22\\x27]?)?((?:(?:npx|pnpm\\s+exec|yarn\\s+exec|bunx)\\s+)?(?:[^\\s;&|]*/)?playwright\\s+test\\b|cypress\\s+(run|open)\\b|npx\\s+cypress\\s+(run|open)\\b|\\b(npm|pnpm|yarn|bun)\\s+([^;&|\\n]*\\s)?(e2e([:.-][\\w.-]+)?|test[:.-]e2e([:.-][\\w.-]+)?|pr:shots)\\b|node\\s+[^;&|\\n]*pr-shots\\.[cm]?js\\b)"
+      },
+      "unless": "(^|[\\s;\"\\x27])(env\\s+)?RIO_UI_TEST_MODE=(approved|isolated|headless)(?=[\\s;\"\\x27]|$)",
+      "do": "deny",
+      "text": "BLOCKED: UI tests can take over Rio's desktop. Before launching, inspect the actual config and launch helper. Prefix this one command with RIO_UI_TEST_MODE=headless only for a verified headless run (Electron is visible even without --headed); approved only after Rio explicitly approves this visible run; or isolated only after verifying the target is unused and cannot steal focus/input from his active desktop. A second monitor or Space alone is not isolation. For any visible run, have a bounded timeout and an independent stop command ready first. Never bypass this gate through another tool or wrapper. If safety is unknown, keep working headlessly or ask Rio."
+    },
+    {
+      "id": "visible-tests-need-consent",
+      "on": "tool",
+      "match": {
+        "tool": "^(Bash|exec_command|shell)$",
+        "input": "(?m)^[ \\t]*(?=[^\\n]*(--headed\\b|\\bPWDEBUG\\s*=\\s*[1-9]|\\bheadless\\s*:\\s*(false|False)|\\bheadless\\s*=\\s*False|\\b_?electron\\s*\\.\\s*launch\\s*\\(|\\bplaywright\\s+test\\b[^;&|\\n]*--(ui|debug)\\b|\\bcypress\\s+open\\b))(?:(?:env\\s+)?[A-Za-z_]\\w*=[^\\s;&|]+\\s+)*(?:(?:cd|pushd)[ \\t]+[^;\\n&|]+[ \\t]*(?:&&|;)[ \\t]*)?(?:(?:env\\s+)?[A-Za-z_]\\w*=[^\\s;&|]+\\s+)*(?:(?:ssh|timeout|gtimeout)\\s+[^;\\n&|]*?\\s+[\\x22\\x27]?)?(?:[^\\s;&|]*/)?(npx|pnpm|npm|yarn|bun|bunx|node|python3?|playwright|cypress)\\b"
+      },
+      "unless": "(^|[\\s;\"\\x27])(env\\s+)?RIO_UI_TEST_MODE=(approved|isolated)(?=[\\s;\"\\x27]|$)",
+      "do": "deny",
+      "text": "BLOCKED: visible browser/Electron tests need Rio's explicit approval for this run, or verified isolation on an unused computer/display that cannot steal focus or input. Another monitor, Space, remote SSH, or an idle-time guess does not prove isolation. Only then prefix this command with RIO_UI_TEST_MODE=approved or RIO_UI_TEST_MODE=isolated. Prepare a bounded timeout and an independent stop command first. Otherwise use headless testing; do not work around this gate."
+    },
+    {
+      "id": "visible-tests-need-consent-native",
+      "on": "tool",
+      "match": {
+        "tool": "^mcp__.*(js|evaluate|run)$",
+        "input": "(?s)(--headed\\b|\\bPWDEBUG\\s*=\\s*[1-9]|\\bheadless\\s*:\\s*(false|False)|\\bheadless\\s*=\\s*False|\\b_?electron\\s*\\.\\s*launch\\s*\\(|\\bplaywright\\s+test\\b[^;&|\\n]*--(ui|debug)\\b|\\bcypress\\s+open\\b)"
+      },
+      "unless": "(^|[\\s;\"\\x27])(env\\s+)?RIO_UI_TEST_MODE=(approved|isolated)(?=[\\s;\"\\x27]|$)",
+      "do": "deny",
+      "text": "BLOCKED: visible browser/Electron tests need Rio's explicit approval for this run, or verified isolation on an unused computer/display that cannot steal focus or input. Another monitor, Space, remote SSH, or an idle-time guess does not prove isolation. Only then prefix this command with RIO_UI_TEST_MODE=approved or RIO_UI_TEST_MODE=isolated. Prepare a bounded timeout and an independent stop command first. Otherwise use headless testing; do not work around this gate."
+    },
+    {
       "id": "prefer-trash",
       "on": "tool",
       "match": {

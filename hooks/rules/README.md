@@ -90,6 +90,18 @@ plus `list-variables`, so values never reach a transcript. `railway-cli-read-onl
 `deployment list`, `service list`, `domain list`, `docs` stay open. Deny list, not allow
 list, so `railway logs && railway up` cannot slip through. Ledger: L-0114.
 
+## UI tests
+
+Common test launchers require `RIO_UI_TEST_MODE=headless` (inspect the config and
+launch helper first), `approved` (explicit consent for this run), or `isolated`
+(verified unused target that cannot steal active-desktop focus/input). Visible
+launches reject the headless declaration. Have a timeout and independent stop
+command ready before visible tests. Another monitor or Space alone is not isolation.
+
+These Claude/Codex gates match direct launches, common SSH/timeout wrappers, and
+explicit visible JS launches. They rely on agent verification, not OS enforcement;
+indirect scripts and unusual command chains still follow the shared global rule.
+
 ## Raw tabs
 
 `no-writing-raw-tabs` denies a Bash command or file write that has a Sheets write verb

@@ -35,7 +35,7 @@ if [ "$KIND" = "tool" ]; then
   # Preserve the legacy command/path projection for existing rules.
   INPUT="$(printf '%s' "$PAYLOAD" | jq -r '
     .tool_input | if type == "object" then
-      (.command // (del(.file_path, .notebook_path) | tostring))
+      (.command // .cmd // (del(.file_path, .notebook_path) | tostring))
     else (. // "" | tostring) end
   ' 2>/dev/null)"
   # Whole input for content rules; only known existing-content fields are exempt.
