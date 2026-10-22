@@ -141,7 +141,7 @@
       "on": "tool",
       "match": {
         "tool": "^(Bash|exec_command|shell)$",
-        "input": "gh[[:space:]]+pr[[:space:]]+merge|gh[[:space:]]+api[^\\n;|&]*pulls/[^/[:space:]]+/merge|(?s)gh[[:space:]]+api[[:space:]]+graphql.*(mergePullRequest|enablePullRequestAutoMerge)"
+        "input": "(?s)(^|\"cmd\":\"|[\\n;&|(){}`[:space:]])gh[[:space:]]+(pr[[:space:]]+merge|api[^\\n;|&]*pulls/[^/[:space:]]+/merge|api[[:space:]]+graphql.*(mergePullRequest|enablePullRequestAutoMerge))"
       },
       "unless": "RIO_MERGE_OK=1",
       "do": "deny",
@@ -161,8 +161,18 @@
       "id": "automations-on-mini",
       "on": "tool",
       "match": {
-        "tool": "^(Bash|exec_command|shell|Write|Edit|MultiEdit)$",
-        "content": "launchctl[[:space:]]+(load|bootstrap)|(^|[^[:alnum:]_-])crontab[[:space:]]+(?!-l([[:space:]]|$))|LaunchAgents/[^\"[:space:]]*\\.plist"
+        "tool": "^(Bash|exec_command|shell)$",
+        "input": "(^|\"cmd\":\"|[\\n;&|(){}`])[[:space:]]*(launchctl[[:space:]]+(load|bootstrap)|crontab[[:space:]]+(?!-l([[:space:]]|$)))"
+      },
+      "do": "remind",
+      "text": "Rio's automations (launchd, cron, scheduled tasks) run on the Mac Mini, and desktop scheduled tasks land in the app hosting this session. Check the `Machine:` line in your context first; on the MacBook, install it on the Mini over `ssh mini` instead. Nudge, not a block."
+    },
+    {
+      "id": "automations-on-mini-plist",
+      "on": "tool",
+      "match": {
+        "tool": "^(Write|Edit|MultiEdit|apply_patch)$",
+        "content": "LaunchAgents/[^\"[:space:]]*\\.plist"
       },
       "do": "remind",
       "text": "Rio's automations (launchd, cron, scheduled tasks) run on the Mac Mini, and desktop scheduled tasks land in the app hosting this session. Check the `Machine:` line in your context first; on the MacBook, install it on the Mini over `ssh mini` instead. Nudge, not a block."

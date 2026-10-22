@@ -257,6 +257,7 @@ class RulesTests(unittest.TestCase):
             ("Bash", {"command": "RIO_MERGE_OK=1 gh pr merge 12"}),
             ("Bash", {"command": "gh pr view 12 --json mergeable"}),
             ("Bash", {"command": "git merge origin/main"}),
+            ("Bash", {"command": "grep -rn 'gh pr merge' hooks/"}),
             ("Bash", {"command": "gh api graphql -f query='{ viewer { login } }'"}),
             ("mcp__github__disable_pr_auto_merge", {"pull_number": 12}),
         ]
@@ -278,7 +279,10 @@ class RulesTests(unittest.TestCase):
         for name, data in hits:
             with self.subTest(hit=data):
                 self.assertIn("Mac Mini", self.run_hook("tool", {"tool_name": name, "tool_input": data}).stdout)
-        self.assertNotIn("Mac Mini", self.run_hook("tool", {"tool_name": "Bash", "tool_input": {"command": "launchctl list"}}).stdout)
+        for cmd in ("launchctl list", "cat ~/Library/LaunchAgents/x.plist", "grep -n crontab notes.md"):
+            with self.subTest(quiet=cmd):
+                self.assertNotIn("Mac Mini", self.run_hook("tool", {"tool_name": "Bash", "tool_input": {"command": cmd}}).stdout)
+        self.assertNotIn("Mac Mini", self.run_hook("tool", {"tool_name": "Write", "tool_input": {"file_path": "/x/notes.md", "content": "crontab -e"}}).stdout)
 
     def test_piped_git_push_is_blocked(self):
         """A pipe turns a refused push into exit 0; unpiped or pipefail pushes pass."""

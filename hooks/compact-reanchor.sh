@@ -18,11 +18,12 @@ hook_is_delegate "$INPUT" && exit 0
 SID="$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)"
 [ -n "$SID" ] || exit 0
 
-cat <<'EOF2'
+cat <<'EOF'
 📌 Context was just compacted, so this is long-running work. Rio's rule: big work needs his yes on
 scope, size, and end point. If he hasn't okayed the current scope, or it grew past what he
 approved, checkpoint with Rio now: what's done, what's left, how much more.
-EOF2
+Under `attention: away` nobody answers: write the inbox `- ask:` line and stop at the approved scope.
+EOF
 
 MARKER="/tmp/claude-loop-phase-${SID}"
 [ -r "$MARKER" ] || exit 0
@@ -39,11 +40,11 @@ if [ -n "$CWD" ]; then
   [ -n "$GD" ] && [ -r "$GD/claude-loop-plan" ] && COMP="$(head -c 400 "$GD/claude-loop-plan" 2>/dev/null)"
 fi
 
-cat <<EOF2
+cat <<EOF
 🚨 Context was just compacted mid-core:loop. Last phase skill loaded: ${PHASE}.${COMP:+ Declared composition: ${COMP}. Hold the declared depth; re-route only with a stated reason.}
 The loop protocol likely got lost in the summary, re-anchor before continuing:
 1. Reload core:loop (Claude: Skill tool; Codex: read SKILL.md).
 2. Load each phase's skill before phase work or delegation.
 3. Re-read the issue (plan of record) per the loop's re-entry steps.
-EOF2
+EOF
 exit 0

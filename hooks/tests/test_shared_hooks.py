@@ -116,6 +116,7 @@ class SharedHooks(unittest.TestCase):
         scope check-in. Delegates report to an agent, not Rio, so they stay quiet."""
         r = self.run_hook('compact-reanchor.sh', {'session_id': f'no-loop-{os.getpid()}'})
         self.assertIn('checkpoint with Rio', r.stdout)
+        self.assertIn('attention: away', r.stdout)
         self.assertNotIn('core:loop', r.stdout)
         r = self.run_hook('compact-reanchor.sh', {'session_id': 'x', 'agent_id': 'sub'})
         self.assertEqual(r.stdout, '')
@@ -128,6 +129,8 @@ class SharedHooks(unittest.TestCase):
         self.assertIn('utils:sesh --topic', c)
         self.assertIn('/core:loop', c)
         r = self.run_hook('task-start.sh', {'session_id': 's', 'prompt': 'x', 'agent_id': 'sub'})
+        self.assertEqual(r.stdout, '')
+        r = self.run_hook('task-start.sh', {'session_id': 's', 'prompt': '<task-notification>done</task-notification>'})
         self.assertEqual(r.stdout, '')
 
     def test_daily_call_cap_stops_calls_loudly(self):

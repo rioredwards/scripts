@@ -11,6 +11,8 @@ command -v jq >/dev/null 2>&1 || exit 0
 
 INPUT="$(cat)"
 hook_is_delegate "$INPUT" && exit 0
+# Background events (task notifications, reminders) arrive as prompts too; they start nothing.
+case "$(printf '%s' "$INPUT" | jq -r '.prompt // ""' 2>/dev/null)" in '<task-notification'*|'<system-reminder'*) exit 0 ;; esac
 
 jq -nc --arg c "If this message starts a task (not a reply or a pure question about this session): run \`utils:sesh --topic <task> --light\` before your first action, since how it was last done beats docs, defaults, and guesses. Non-trivial task: suggest \`/core:loop\` first." \
   '{hookSpecificOutput:{hookEventName:"UserPromptSubmit",additionalContext:$c}}'
