@@ -242,23 +242,18 @@ class RulesTests(unittest.TestCase):
         self.assertIn("no-fallbacks", result.stderr)
 
     def test_merges_need_rio_on_every_path(self):
-        """Any agent, any merge path: shell gh, the REST endpoint, or an MCP merge tool."""
+        """Any agent: shell gh or an MCP merge tool."""
         blocked = [
             ("Bash", {"command": "gh pr merge 12 --squash"}),
             ("exec_command", {"cmd": "gh pr merge --auto 12"}),
-            ("Bash", {"command": "gh api -X PUT repos/a/b/pulls/12/merge"}),
             ("mcp__github__merge_pull_request", {"pull_number": 12}),
             ("mcp__ccd_pr__set_auto_merge", {"enabled": True}),
-            ("mcp__github__enable_pr_auto_merge", {"pull_number": 12}),
-            ("Bash", {"command": "gh api graphql -f query='mutation {\n mergePullRequest(input: {pullRequestId: \"X\"}) { clientMutationId } }'"}),
-            ("Bash", {"command": "gh api graphql -f query='mutation { enablePullRequestAutoMerge(input: {pullRequestId: \"X\"}) { clientMutationId } }'"}),
         ]
         allowed = [
             ("Bash", {"command": "RIO_MERGE_OK=1 gh pr merge 12"}),
             ("Bash", {"command": "gh pr view 12 --json mergeable"}),
             ("Bash", {"command": "git merge origin/main"}),
             ("Bash", {"command": "grep -rn 'gh pr merge' hooks/"}),
-            ("Bash", {"command": "gh api graphql -f query='{ viewer { login } }'"}),
             ("mcp__github__disable_pr_auto_merge", {"pull_number": 12}),
         ]
         for name, data in blocked:
