@@ -290,7 +290,7 @@
       },
       "unless": "(^|[^[:alnum:]_.-])agent-skills/|hooks/rules/|\\.agents/AGENTS\\.md",
       "do": "remind",
-      "text": "You are changing one of Rio's personal tools. Before you finish, run it once the way he would: no special flags, no warm state, no session you already have open. His rule: the work is done when the next person can run it, not when the code is written. A tool left broken turns a one-minute task into his whole morning. If you genuinely cannot run it here (needs credentials, a device, his screen), name it as unverified in your reply instead of leaving it assumed. Nudge, not a block."
+      "text": "You are changing one of Rio's personal tools. Before you finish, run it once the way he would: no special flags, no warm state, no session you already have open. His rule: the work is done when the next person can run it, not when the code is written. A tool left broken turns a one-minute task into his whole morning. If you genuinely cannot run it here (needs credentials, a device, his screen), name it as unverified in your reply instead of leaving it assumed. Then push it (`~/scripts`, `~/.dotfiles`) and verify it on the other Mac over `ssh`, dependencies included. Nudge, not a block."
     },
     {
       "id": "tooling-must-still-run-bash",
@@ -301,7 +301,7 @@
       },
       "unless": "(^|[^[:alnum:]_.-])agent-skills/|hooks/rules/|\\.agents/AGENTS\\.md",
       "do": "remind",
-      "text": "This writes into one of Rio's personal tools. Before you finish, run it once the way he would: no special flags, no warm state. The work is done when the next person can run it, not when the code is written. If you cannot run it here, name it as unverified in your reply. Nudge, not a block."
+      "text": "This writes into one of Rio's personal tools. Before you finish, run it once the way he would: no special flags, no warm state. The work is done when the next person can run it, not when the code is written. If you cannot run it here, name it as unverified in your reply. Then push it (`~/scripts`, `~/.dotfiles`) and verify it on the other Mac over `ssh`, dependencies included. Nudge, not a block."
     },
     {
       "id": "no-piped-full-pytest",
