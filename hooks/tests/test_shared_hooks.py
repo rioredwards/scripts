@@ -120,6 +120,16 @@ class SharedHooks(unittest.TestCase):
         r = self.run_hook('compact-reanchor.sh', {'session_id': 'x', 'agent_id': 'sub'})
         self.assertEqual(r.stdout, '')
 
+    def test_task_start_nudge_reaches_main_agent_only(self):
+        """Each prompt from Rio may start a task: the main agent is told to check past
+        sessions first and offer core:loop. Delegates get their task from an agent."""
+        r = self.run_hook('task-start.sh', {'session_id': 's', 'prompt': 'fix the header'})
+        c = json.loads(r.stdout)['hookSpecificOutput']['additionalContext']
+        self.assertIn('utils:sesh --topic', c)
+        self.assertIn('/core:loop', c)
+        r = self.run_hook('task-start.sh', {'session_id': 's', 'prompt': 'x', 'agent_id': 'sub'})
+        self.assertEqual(r.stdout, '')
+
     def test_daily_call_cap_stops_calls_loudly(self):
         """A runaway replay cannot spend the month: past the per-day cap the lib refuses and
         says why, and the cap is raised on purpose with one env var."""
