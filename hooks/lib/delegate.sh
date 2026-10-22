@@ -8,7 +8,7 @@
 #
 # Three signals, any one wins:
 #   AGENT_DELEGATE=1  exported by whoever spawned the delegate
-#                     (agent-router delegate, spin-check)
+#                     (agent-router delegate)
 #   agent_id          present in Claude Code hook payloads only when the tool
 #                     call happened inside a native subagent (verified 2026-09-05)
 #   originator        "Claude Code" in the Codex transcript's session_meta: the

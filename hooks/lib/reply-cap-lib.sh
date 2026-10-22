@@ -56,7 +56,7 @@ reply_is_suggestion() {
   printf '%s' "$1" | grep -Eq '^[[:space:]]*\{"suggestion":'
 }
 
-# Shared plumbing for Stop-time reviewers (attention-judge, spin-check). Each
+# Shared plumbing for Stop-time reviewers (attention-judge). Each
 # keeps its own question, verdict and log; these two answer "should a reviewer
 # look at this reply at all?" and "has another caller already asked?".
 
@@ -180,39 +180,11 @@ reply_rules_will_bounce() {
   [ "$?" -eq 2 ]
 }
 
-# True when spin-check's final-reply review (L-0012) will bounce this reply.
-# Runs the hook as a probe: the hook stores one verdict per reply, so the probe
-# and the real Stop run share a single reviewer call and always agree.
-reply_spin_will_bounce() {
-  payload="$1"
-  hook="${AGENT_SPIN_CHECK_HOOK:-$HOME/scripts/hooks/spin-check.sh}"
-  [ -r "$hook" ] || return 1
-  command -v jq >/dev/null 2>&1 || return 1
-
-  # Registered on Stop for THIS agent, or nobody will ask for a rewrite. Codex
-  # also skips a hook Rio has not trusted in /hooks (trust is per position), and
-  # an untrusted one must not cost him the turn-end note.
-  transcript="$(printf '%s' "$payload" | jq -r '.transcript_path // empty')"
-  if [ -n "$transcript" ] && [ "$(head -n 1 "$transcript" 2>/dev/null | jq -r '.type // empty' 2>/dev/null)" = session_meta ]; then
-    idx="$(jq -r '.hooks.Stop // [] | map(any(.hooks[]?; .command | test("spin-check\\.sh"))) | index(true) // empty' \
-      "$HOME/.codex/hooks.json" 2>/dev/null)"
-    [ -n "$idx" ] || return 1
-    grep -qF "\"$HOME/.codex/hooks.json:stop:$idx:0\"]" "$HOME/.codex/config.toml" 2>/dev/null || return 1
-  else
-    jq -e '[.hooks.Stop[]?.hooks[]?.command] | any(test("spin-check\\.sh"))' \
-      "$HOME/.claude/settings.json" >/dev/null 2>&1 || return 1
-  fi
-
-  printf '%s' "$payload" | AGENT_SPIN_CHECK_PROBE=1 bash "$hook" >/dev/null 2>&1
-  [ "$?" -eq 2 ]
-}
-
 # True when this reply is about to be rewritten for ANY reason: over the length
-# cap, tripping a response rule, or flagged by spin-check's final-reply review.
+# cap or tripping a response rule.
 # This is the predicate a hook with real side effects wants; `reply_will_bounce`
 # alone covers only one of the reasons.
 reply_will_be_rewritten() {
   reply_will_bounce "$1" && return 0
-  reply_rules_will_bounce "$1" && return 0
-  reply_spin_will_bounce "$1"
+  reply_rules_will_bounce "$1"
 }

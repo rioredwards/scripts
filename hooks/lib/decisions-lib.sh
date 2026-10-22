@@ -2,7 +2,7 @@
 # decisions-lib.sh: the one client for OpenAI's Decisions API (/v1/decisions).
 # It answers yes/no questions about a text, each as a probability, with no
 # reason. Typical latency well under 1s. Shared by every hook that judges with
-# it (attention-judge, spin-check), so the key, endpoint, timeout and error
+# it (attention-judge), so the key, endpoint, timeout and error
 # handling live here once.
 #
 #   DECISIONS_URL   endpoint (default OpenAI; tests point it at a stub)
@@ -13,7 +13,7 @@
 #   QUESTIONS_JSON: [{name, instructions}, ...] (sent as predicates)
 #   Prints one JSON line: {"ms":N,"p":{name:probability,...},"refused":[name,...]}
 #   or {"ms":N,"error":"why"}. A refused question has no probability; the
-#   model declines a few inputs (about 1 in 25 in spin-check replays), so a
+#   model declines a few inputs (about 1 in 25 in replays), so a
 #   refusal is per input, not a broken API. A missing answer is an error.
 # decisions_over RESULT THRESHOLDS_JSON
 #   Prints `over <name,name>` (any answered question at or over its threshold),

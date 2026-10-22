@@ -4,7 +4,7 @@
 # about 6,000 Decisions and 1,500 Responses calls in a day (the hooks alone make
 # about 600 and 150) and nothing stopped them. Every call appends one line to
 # today's counter; past the cap the libs return an error instead of calling,
-# which the hooks report loudly (spin-check says it is broken, once per session).
+# which the hooks report loudly.
 #
 #   OPENAI_DAILY_CALL_CAP   calls per API per day (default 1500). Raise it on
 #                           purpose for a replay or eval: OPENAI_DAILY_CALL_CAP=20000
