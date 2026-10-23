@@ -80,3 +80,19 @@ atomically (tmp + mv).
 
 Input: Rio's last prompt (`reply_last_prompt`, 2000 chars) and the reply's last 12000 chars (the
 ask is usually at the end). Output: `label` (1-4 words) and `text` in Rio's voice.
+
+## Status and next steps (2026-10-23)
+
+Spike, running live as a trial. Disposition: promote after Rio uses it for a few days; until then
+prompt quality and the category set are drafts (`SPIKE:` comments mark shortcuts).
+
+- UI V1: Raycast "Reply Options" in `~/dev/rio-raycast-toolbox`, opened by Hyper+Z
+  (`hammerspoon://replyoptions`). Enter copies the reply, Cmd+R regenerates. Nothing is sent
+  into any app.
+- Not built yet: Actions Ring (plan: fixed category bubbles that send a chord or open
+  `hammerspoon://replyoptions`, since Options+ can't render live labels without a Logi SDK
+  plugin); injection into Claude (`$.prompt.fill` mod) or Codex; MacBook picker (the hook also
+  generates there once `~/scripts` pulls; `agent-toggle reply-options off` stops it).
+- Unverified by a human: the Hyper+Z press, Enter-to-copy HUD, Cmd+R in the UI, and Raycast's
+  one-time "Always Open Command" prompt.
+- Known limit: a brand-new Claude chat may store `title: null` until its next turn.
