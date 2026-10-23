@@ -70,7 +70,7 @@ atomically (tmp + mv).
 
   UIs map tokens to their own palette and render an unknown category or color gray, never drop it.
   A category can repeat (two accepts for "go with A" and "go with B").
-- `title` (at `get` time): Claude desktop session store
+- `title` (stored at `generate` time; a null Codex one is retried at `get`): Claude desktop store
   (`~/Library/Application Support/Claude/claude-code-sessions/**/local_*.json`, `cliSessionId`
   match) or Codex `~/.codex/state_5.sqlite` `threads` (`name`, else `title`, read-only).
 - `stale` (at `get` time): the transcript has a user line newer than `created_at`, meaning Rio

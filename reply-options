@@ -21,23 +21,18 @@ mkdir -p "$dir" || die "cannot create $dir"
 # Fixed by the engine, never by the model. UIs render unknown ones gray.
 COLORS='{"accept":"green","reject":"red","redirect":"orange","narrow":"yellow","explain":"blue","clarify":"blue","verify":"purple","defer":"gray"}'
 
-INSTR='You suggest replies for Rio, a solo developer who steers AI coding agents at the decision level. An agent just finished its turn and is waiting on him. Write 2 to 4 messages Rio could send back next, each a real, distinct next move for THIS reply.
-
-Voice: Rio types short, plain, direct messages. First person, casual, no greetings, no thanks, no filler, no em dashes. Usually one sentence, at most two, under 25 words. Name the concrete thing, never generic text like "Sounds good". It reads like a quick chat message, not a task spec. Examples of his tone: "yes, ship the cache fix", "go with B, skip the migration for now", "check it on the macbook first", "say that again in plain words".
-
-Categories (pick only ones that fit; repeating one is fine, e.g. two accepts for "go with A" and "go with B"):
-- accept: yes, go ahead with what the agent proposed or asked
-- reject: no, do not do it
-- redirect: take a different approach or goal instead
-- narrow: smaller scope, only part of it, the simplest version
-- explain: say it again in plainer, shorter words
-- clarify: a pointed question about one specific point
-- verify: prove a claim first (run it, show evidence, check)
-- defer: not now, park it or file it
-
-label: 1 to 4 words for a picker. text: the full message Rio would send.
-If the reply is a pure report that needs nothing from Rio, return no options and a short skip_reason; otherwise skip_reason is null.
-The agent reply may be cut to its last part; its question or ask is usually at the end.'
+INSTR='Rio, a solo developer, steers AI coding agents. An agent just finished its turn and waits on him. Write 2 to 4 messages RIO types back TO THE AGENT, each a distinct real next move for this reply.
+Every text is the human talking to the agent: an instruction or question to "you". Never the agent speaking, never a to-do note, never a promise ("I will..."): when the agent asked Rio to do something himself, write him reporting back after doing it ("Done, ...") or asking about it. Plain words, aim under 15, never over 30. No greetings, thanks, filler or em dashes. Name the concrete thing.
+label: a 2 to 4 word button name ("Ship it", "Park #319", "Prove Node 22").
+Categories (only ones that fit; one may repeat, e.g. two accepts "go with A" and "go with B"): accept = yes, go ahead or done; reject = no, do not; redirect = different approach or goal; narrow = smaller scope; explain = say it plainer or why; clarify = pointed question about one point; verify = prove a claim first; defer = not now, park it.
+Bad -> good, from real cases:
+- accept: "I will run Sync with Spreadsheet once and send you the result." -> "Done, the sync ran clean. Check that September landed."
+- clarify: "Can you verify the dashboard is ready for me to sign in and sync?" -> "Do I need to sign in again before I sync?"
+- verify: "Test a real GUI app launch on both Macs and confirm it sees mise Node 22.23.4." -> "Prove a GUI app sees Node 22 on both Macs."
+- reject: "Leave #319 unchanged for now." -> "No, leave #319 as is."
+- explain: "Explanation of the Neon preview limit." -> "Explain why the Neon preview limit matters here."
+- narrow: "Review the hand links against the dotfiles setup so they survive sync." -> "Just fix the stow conflicts, leave Ruby alone."
+A pure report that needs nothing from Rio: no options and a short skip_reason; otherwise skip_reason is null. The reply may be cut to its last part; its ask is usually at the end.'
 
 PROPS='{"options":{"type":"array","items":{"type":"object","additionalProperties":false,
   "required":["category","label","text"],"properties":{
@@ -86,14 +81,14 @@ $tail_reply"
   [ -n "$res" ] || res='{"ms":0,"error":"llm_json printed nothing"}'
   printf '%s' "$res" | jq --argjson colors "$COLORS" --arg agent "$agent" --arg session "$session" \
     --arg cwd "$cwd" --arg transcript "$transcript" --arg sha "$sha" --arg model "$model" \
-    --arg excerpt "$(printf '%s' "$reply" | head -c 400 | iconv -c -f UTF-8 -t UTF-8 2>/dev/null | tr '\n' ' ' | cut -c1-200)" '
+    --arg title "$(title_of "$agent" "$session")" --arg excerpt "$(printf '%s' "$reply" | head -c 400 | iconv -c -f UTF-8 -t UTF-8 2>/dev/null | tr '\n' ' ' | cut -c1-200)" '
     (.out.options // []) as $o | ($o | length) as $n
     | (if .error then {status:"error", error:.error}
        elif $n == 0 and ((.out.skip_reason // "") != "") then {status:"skipped", skip_reason:.out.skip_reason}
        elif $n < 2 or $n > 4 then {status:"error", error:"model returned \($n) options, want 2-4"}
        elif any($o[]; (.label == "") or (.text == "")) then {status:"error", error:"model returned an empty label or text"}
        else {status:"ready"} end) as $st
-    | {v:1, status:$st.status, agent:$agent, session:$session, title:null, cwd:$cwd, transcript:$transcript,
+    | {v:1, status:$st.status, agent:$agent, session:$session, title:(if $title == "" then null else $title end), cwd:$cwd, transcript:$transcript,
        reply_sha:$sha, reply_excerpt:$excerpt, created_at:(now | todate), model:$model, ms:.ms, stale:false,
        error:($st.error // null), skip_reason:($st.skip_reason // null),
        options:(if $st.status == "ready"
@@ -124,14 +119,15 @@ is_stale() {
     | .timestamp >= $c' 2>/dev/null | grep -qx true && echo true || echo false
 }
 
-# State file plus get-time fields (title, stale).
+# State file plus stale. Title is stored at generate time (the Claude lookup
+# greps a 59 MB store); only a missing Codex title is looked up here (cheap).
 annotate() {
-  a="$(jq -r '"\(.agent)\t\(.session)\t\(.created_at)\t\(.transcript)"' "$1")" || die "unreadable $1"
-  IFS='	' read -r ag se ca tr <<EOF
+  a="$(jq -r '"\(.agent)\t\(.session)\t\(.created_at)\t\(.transcript)\t\(.title)"' "$1")" || die "unreadable $1"
+  IFS='	' read -r ag se ca tr ti <<EOF
 $a
 EOF
-  jq -c --arg t "$(title_of "$ag" "$se")" --argjson s "$(is_stale "$ca" "$tr")" \
-    '.title = (if $t == "" then null else $t end) | .stale = $s' "$1"
+  t=""; [ "$ti" = null ] && [ "$ag" = codex ] && t="$(title_of codex "$se")"
+  jq -c --arg t "$t" --argjson s "$(is_stale "$ca" "$tr")" '(if $t != "" then .title = $t end) | .stale = $s' "$1"
 }
 
 # Last assistant text in a transcript (lazy --generate path).
