@@ -54,7 +54,7 @@ atomically (tmp + mv).
 
 - `options` is non-empty only when `status` is `ready` (1-4 items, ids `o1`..`oN` in model order).
   `skipped` means the model judged the reply a pure report and gave a `skip_reason`. `error`
-  carries `error` (API failure, spent cap, or not 1-4 options; 0 needs a skip_reason). `ms` is the model call's latency.
+  carries `error` (API failure, spent cap, not 1-4 options, or a text with [ or {; 0 needs a skip_reason). `ms` is the model call's latency.
 - `category` and its fixed `color` token:
 
   | category | color | meaning |

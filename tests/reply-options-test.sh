@@ -30,6 +30,8 @@ gen '{"suggestion":"Can we?"}' s2 2>/dev/null; [ "$(calls)" = 1 ] && [ ! -e "$tm
 
 answer '{"options":[{"category":"accept","label":"Ok","text":"ok"}],"skip_reason":null}'
 gen "one option" s5 && [ "$(jq -r .status "$tmp/state/claude-s5.json")" = ready ] || fail "one option should be ready"
+answer '{"options":[{"category":"accept","label":"Ok","text":"Done, result was [result]"}],"skip_reason":null}'
+if gen "placeholder" s6 2>/dev/null; then fail "a placeholder text should fail"; fi
 answer '{"options":[],"skip_reason":null}'
 if gen "no options, no reason" s3 2>"$tmp/err"; then fail "zero options without a skip_reason should fail"; fi
 grep -q "0 options" "$tmp/err" && [ "$(jq -r .status "$tmp/state/claude-s3.json")" = error ] || fail "bad answer not an error file"
