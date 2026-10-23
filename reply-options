@@ -1,0 +1,199 @@
+#!/bin/sh
+# reply-options: 2-4 categorized replies Rio could send back to an agent that
+# just finished a turn. Engine only; UIs read its JSON. Contract: reply-options.md
+#
+#   reply-options generate --agent claude|codex --session ID --cwd DIR --transcript PATH [--force] < reply
+#   reply-options get --latest [--generate]
+#   reply-options get --session ID [--generate] [--force]
+#   reply-options get --recent [N]
+set -u
+
+lib="$HOME/scripts/hooks/lib"
+. "$lib/llm-lib.sh"
+. "$lib/reply-cap-lib.sh"
+
+dir="${REPLY_OPTIONS_DIR:-$HOME/.cache/reply-options}"
+model="${REPLY_OPTIONS_MODEL:-gpt-6-luna}"
+die() { echo "reply-options: $*" >&2; exit 1; }
+usage() { sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; }
+mkdir -p "$dir" || die "cannot create $dir"
+
+# Fixed by the engine, never by the model. UIs render unknown ones gray.
+COLORS='{"accept":"green","reject":"red","redirect":"orange","narrow":"yellow","explain":"blue","clarify":"blue","verify":"purple","defer":"gray"}'
+
+INSTR='You suggest replies for Rio, a solo developer who steers AI coding agents at the decision level. An agent just finished its turn and is waiting on him. Write 2 to 4 messages Rio could send back next, each a real, distinct next move for THIS reply.
+
+Voice: Rio types short, plain, direct messages. First person, casual, no greetings, no thanks, no filler, no em dashes. Usually one sentence, at most two, under 25 words. Name the concrete thing, never generic text like "Sounds good". It reads like a quick chat message, not a task spec. Examples of his tone: "yes, ship the cache fix", "go with B, skip the migration for now", "check it on the macbook first", "say that again in plain words".
+
+Categories (pick only ones that fit; repeating one is fine, e.g. two accepts for "go with A" and "go with B"):
+- accept: yes, go ahead with what the agent proposed or asked
+- reject: no, do not do it
+- redirect: take a different approach or goal instead
+- narrow: smaller scope, only part of it, the simplest version
+- explain: say it again in plainer, shorter words
+- clarify: a pointed question about one specific point
+- verify: prove a claim first (run it, show evidence, check)
+- defer: not now, park it or file it
+
+label: 1 to 4 words for a picker. text: the full message Rio would send.
+If the reply is a pure report that needs nothing from Rio, return no options and a short skip_reason; otherwise skip_reason is null.
+The agent reply may be cut to its last part; its question or ask is usually at the end.'
+
+PROPS='{"options":{"type":"array","items":{"type":"object","additionalProperties":false,
+  "required":["category","label","text"],"properties":{
+  "category":{"type":"string","enum":["accept","reject","redirect","narrow","explain","clarify","verify","defer"]},
+  "label":{"type":"string"},"text":{"type":"string"}}}},
+  "skip_reason":{"type":["string","null"]}}'
+
+# Atomic write of state JSON on stdin to $1.
+write_state() { cat > "$1.tmp.$$" && mv "$1.tmp.$$" "$1" || die "cannot write $1"; }
+
+cmd_generate() {
+  agent="" session="" cwd="" transcript="" force=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --agent) agent="$2"; shift 2 ;; --session) session="$2"; shift 2 ;;
+      --cwd) cwd="$2"; shift 2 ;; --transcript) transcript="$2"; shift 2 ;;
+      --force) force=1; shift ;; *) die "generate: unknown arg $1" ;;
+    esac
+  done
+  case "$agent" in claude|codex) ;; *) die "generate: --agent must be claude or codex" ;; esac
+  case "$session" in ''|*[!A-Za-z0-9_-]*) die "generate: bad --session '$session'" ;; esac
+  reply="$(cat)"
+  [ -n "$reply" ] || die "generate: empty reply on stdin"
+  if reply_is_suggestion "$reply"; then echo "reply-options: skip codex prompt suggestion" >&2; return 0; fi
+  file="$dir/$agent-$session.json"
+  sha="$(printf '%s' "$reply" | shasum -a 256 | cut -c1-16)"
+  if [ -z "$force" ] && [ -f "$file" ] &&
+     jq -e --arg s "$sha" '.reply_sha == $s and .status != "error"' "$file" >/dev/null 2>&1; then
+    return 0
+  fi
+  find "$dir" -maxdepth 1 -name '*.json' -mtime +3 -delete 2>/dev/null
+  # The hook appends failures to generate.log; keep it bounded, truncating in
+  # place so an open append fd keeps working.
+  log="$dir/generate.log"
+  if [ -f "$log" ] && [ "$(wc -l < "$log")" -gt 1000 ]; then tail -n 200 "$log" > "$log.tmp" && cat "$log.tmp" > "$log"; fi
+  prompt="$(reply_last_prompt "$(jq -nc --arg t "$transcript" '{transcript_path:$t}')" | cut -c1-2000)"
+  # SPIKE: byte cut can split a character; iconv -c drops the fragment.
+  tail_reply="$(printf '%s' "$reply" | tail -c 12000 | iconv -c -f UTF-8 -t UTF-8 2>/dev/null)"
+  cut_note=""; [ "${#reply}" -gt 12000 ] && cut_note=" (cut: last 12000 characters only)"
+  input="RIO'S LAST MESSAGE TO THE AGENT
+${prompt:-(unknown)}
+
+AGENT REPLY${cut_note}
+$tail_reply"
+  res="$(llm_json "$model" "$INSTR" "$input" "$PROPS" 25 reply-options)"
+  [ -n "$res" ] || res='{"ms":0,"error":"llm_json printed nothing"}'
+  printf '%s' "$res" | jq --argjson colors "$COLORS" --arg agent "$agent" --arg session "$session" \
+    --arg cwd "$cwd" --arg transcript "$transcript" --arg sha "$sha" --arg model "$model" \
+    --arg excerpt "$(printf '%s' "$reply" | head -c 400 | iconv -c -f UTF-8 -t UTF-8 2>/dev/null | tr '\n' ' ' | cut -c1-200)" '
+    (.out.options // []) as $o | ($o | length) as $n
+    | (if .error then {status:"error", error:.error}
+       elif $n == 0 and ((.out.skip_reason // "") != "") then {status:"skipped", skip_reason:.out.skip_reason}
+       elif $n < 2 or $n > 4 then {status:"error", error:"model returned \($n) options, want 2-4"}
+       elif any($o[]; (.label == "") or (.text == "")) then {status:"error", error:"model returned an empty label or text"}
+       else {status:"ready"} end) as $st
+    | {v:1, status:$st.status, agent:$agent, session:$session, title:null, cwd:$cwd, transcript:$transcript,
+       reply_sha:$sha, reply_excerpt:$excerpt, created_at:(now | todate), model:$model, ms:.ms, stale:false,
+       error:($st.error // null), skip_reason:($st.skip_reason // null),
+       options:(if $st.status == "ready"
+         then [$o | to_entries[] | {id:"o\(.key + 1)", category:.value.category,
+               color:($colors[.value.category] // "gray"), label:.value.label, text:.value.text}]
+         else [] end)}' | write_state "$file"
+  st="$(jq -r '"\(.status) \(.error // "")"' "$file")" || die "unreadable $file"
+  case "$st" in error*) die "generate $agent-$session: ${st#error }" ;; esac
+}
+
+# Chat title, or empty: Claude desktop session store, or Codex's thread table.
+title_of() {
+  case "$1" in
+    claude) grep -rlF --include='local_*.json' "$2" "$HOME/Library/Application Support/Claude/claude-code-sessions" 2>/dev/null |
+      while IFS= read -r f; do jq -r --arg id "$2" 'select(.cliSessionId == $id) | .title // empty' "$f"; done | head -n 1 ;;
+    codex) sqlite3 -readonly "$HOME/.codex/state_5.sqlite" \
+      "select coalesce(nullif(name,''), nullif(title,'')) from threads where id='$2'" 2>/dev/null ;;
+  esac
+}
+
+# Stale = a user line in the transcript newer than created_at: Rio already
+# answered. Reads newest-first and stops at the first line older than that.
+is_stale() {
+  [ -f "$2" ] || { echo false; return; }
+  tail -r "$2" | jq -n --arg c "$1" 'first(inputs | select(.timestamp? and (
+      (.timestamp < $c) or (.type == "user" and (.isMeta // false | not))
+      or (.type == "response_item" and .payload.role? == "user"))))
+    | .timestamp >= $c' 2>/dev/null | grep -qx true && echo true || echo false
+}
+
+# State file plus get-time fields (title, stale).
+annotate() {
+  a="$(jq -r '"\(.agent)\t\(.session)\t\(.created_at)\t\(.transcript)"' "$1")" || die "unreadable $1"
+  IFS='	' read -r ag se ca tr <<EOF
+$a
+EOF
+  jq -c --arg t "$(title_of "$ag" "$se")" --argjson s "$(is_stale "$ca" "$tr")" \
+    '.title = (if $t == "" then null else $t end) | .stale = $s' "$1"
+}
+
+# Last assistant text in a transcript (lazy --generate path).
+last_reply() {
+  tail -r "$1" | jq -rn 'first(inputs | (
+      if .type == "assistant" then [.message.content[]? | select(.type == "text") | .text]
+      elif .type == "response_item" and .payload.role? == "assistant" then [.payload.content[]? | select(.type == "output_text") | .text]
+      else [] end | join("\n")) | select(. != ""))'
+}
+
+# Regenerate one session from its transcript. $1 state file or empty, $2 session.
+regen() {
+  if [ -f "${1:-}" ]; then
+    ag="$(jq -r .agent "$1")"; tr="$(jq -r .transcript "$1")"; cw="$(jq -r .cwd "$1")"
+  elif tr="$(ls "$HOME"/.claude/projects/*/"$2".jsonl 2>/dev/null | head -n 1)" && [ -n "$tr" ]; then
+    ag=claude; cw="$(tail -r "$tr" | jq -rn 'first(inputs | .cwd // empty)')"
+  else
+    ag=codex
+    row="$(sqlite3 -readonly -separator '	' "$HOME/.codex/state_5.sqlite" "select rollout_path, cwd from threads where id='$2'" 2>/dev/null)"
+    [ -n "$row" ] || die "no Claude or Codex transcript for session $2"
+    tr="${row%%	*}"; cw="${row#*	}"
+  fi
+  [ -f "$tr" ] || die "transcript missing: $tr"
+  last_reply "$tr" | cmd_generate --agent "$ag" --session "$2" --cwd "$cw" --transcript "$tr" ${force:+--force} || exit 1
+}
+
+cmd_get() {
+  mode="" sid="" n=5 gen="" force=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --latest) mode=latest; shift ;; --session) mode=session; sid="$2"; shift 2 ;;
+      --recent) mode=recent; shift; case "${1:-}" in [0-9]*) n="$1"; shift ;; esac ;;
+      --generate) gen=1; shift ;; --force) force=1; gen=1; shift ;; *) die "get: unknown arg $1" ;;
+    esac
+  done
+  case "$mode" in
+    recent)
+      k=0
+      ls -t "$dir"/*.json 2>/dev/null | while IFS= read -r f; do
+        [ -n "$(find "$f" -mtime -1)" ] || break
+        o="$(annotate "$f")"; [ "$(printf '%s' "$o" | jq .stale)" = false ] || continue
+        printf '%s\n' "$o"; k=$((k + 1)); [ "$k" -lt "$n" ] || break
+      done | jq -sc .
+      return ;;
+    latest) f="$(ls -t "$dir"/*.json 2>/dev/null | head -n 1)"; [ -n "$f" ] || die "no reply options yet"
+      sid="$(jq -r .session "$f")" ;;
+    session) case "$sid" in ''|*[!A-Za-z0-9_-]*) die "get: bad --session '$sid'" ;; esac
+      f="$(ls "$dir"/*-"$sid".json 2>/dev/null | head -n 1)" ;;
+    *) usage >&2; exit 2 ;;
+  esac
+  if [ -n "$gen" ]; then
+    if [ -n "$force" ] || [ ! -f "$f" ] || [ "$(annotate "$f" | jq -r '.stale or .status == "error"')" = true ]; then
+      regen "$f" "$sid"; f="$(ls "$dir"/*-"$sid".json | head -n 1)"
+    fi
+  fi
+  [ -f "$f" ] || die "no reply options for session $sid (add --generate)"
+  annotate "$f"
+}
+
+case "${1:-}" in
+  generate) shift; cmd_generate "$@" ;;
+  get) shift; cmd_get "$@" ;;
+  -h|--help|help) usage ;;
+  *) usage >&2; exit 2 ;;
+esac

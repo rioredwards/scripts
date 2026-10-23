@@ -6,13 +6,14 @@
 # today's counter; past the cap the libs return an error instead of calling,
 # which the hooks report loudly.
 #
-#   OPENAI_DAILY_CALL_CAP   calls per API per day (default 1500). Raise it on
-#                           purpose for a replay or eval: OPENAI_DAILY_CALL_CAP=20000
+#   OPENAI_DAILY_CALL_CAP   calls per API per day (default 1500; reply-options,
+#                           an eager per-turn feature, defaults to 400). Raise it
+#                           on purpose for a replay or eval: OPENAI_DAILY_CALL_CAP=20000
 #   OPENAI_CALL_COUNT_DIR   where the counters live (default ~/.cache/openai-calls);
 #                           tests point it at a temp dir
 #
 # call_budget_take API
-#   Records one call to API (decisions, responses). Prints nothing and returns 0
+#   Records one call to API (decisions, responses, reply-options). Prints nothing and returns 0
 #   under the cap; past it, prints why and returns 1. The call is recorded
 #   either way, so the counter shows how far over the day went. Each line names
 #   the calling script, so the next spike can be attributed from the counter.
@@ -20,7 +21,8 @@ set -u
 
 call_budget_take() {
   _cb_dir="${OPENAI_CALL_COUNT_DIR:-$HOME/.cache/openai-calls}"
-  _cb_cap="${OPENAI_DAILY_CALL_CAP:-1500}"
+  case "$1" in reply-options) _cb_def=400 ;; *) _cb_def=1500 ;; esac
+  _cb_cap="${OPENAI_DAILY_CALL_CAP:-$_cb_def}"
   _cb_file="$_cb_dir/$(date -u +%Y-%m-%d).$1"
   mkdir -p "$_cb_dir" 2>/dev/null || { echo "cannot write call counter dir $_cb_dir"; return 1; }
   find "$_cb_dir" -maxdepth 1 -type f -mtime +14 -delete 2>/dev/null

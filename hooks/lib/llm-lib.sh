@@ -9,8 +9,9 @@
 #   Every call counts against the daily cap in call-budget-lib.sh; past it the
 #   call is not made and the result is an error naming the cap.
 #
-# llm_json MODEL INSTRUCTIONS INPUT PROPS_JSON [MAX_SECS]
+# llm_json MODEL INSTRUCTIONS INPUT PROPS_JSON [MAX_SECS] [BUCKET]
 #   PROPS_JSON: {name: json-schema, ...}; every property is required.
+#   BUCKET: the call-budget counter to charge (default responses).
 #   Prints one JSON line: {"ms":N,"out":{...}} or {"ms":N,"error":"why"}.
 set -u
 
@@ -23,7 +24,7 @@ _llm_ms() { perl -MTime::HiRes=time -e 'printf "%d", time*1000'; }
 llm_json() {
   _l_start="$(_llm_ms)"
   _l_err() { jq -nc --arg e "$1" --argjson ms "$(( $(_llm_ms) - _l_start ))" '{ms:$ms, error:$e}'; }
-  _l_over="$(call_budget_take responses)" || { _l_err "$_l_over"; return; }
+  _l_over="$(call_budget_take "${6:-responses}")" || { _l_err "$_l_over"; return; }
   _l_key="$(keyfor OPENAI_API_KEY 2>/dev/null)" || { _l_err "keyfor OPENAI_API_KEY failed"; return; }
   _l_body="$(jq -n --arg m "$1" --arg s "$2" --arg i "$3" --argjson p "$4" '
     {model:$m, instructions:$s, input:$i, max_output_tokens:1000, reasoning:{effort:"none"},

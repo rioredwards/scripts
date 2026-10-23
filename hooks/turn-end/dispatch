@@ -41,6 +41,19 @@ if [ -n "${AGENT_DELEGATE:-}" ] ||
   exit 0
 fi
 
+# Reply options for the Raycast picker (reply-options.md): detached, own stdio,
+# ahead of narration, so it never delays or breaks the surfaces below.
+AGENT_REPLY_OPTIONS="${AGENT_REPLY_OPTIONS:-on}"
+case "$AGENT_REPLY_OPTIONS:${HOOK_AGENT:-}" in
+  on:claude|on:codex|1:claude|1:codex|true:claude|true:codex|yes:claude|yes:codex)
+    ro_log="$HOME/.cache/reply-options/generate.log"
+    mkdir -p "${ro_log%/*}"
+    printf '%s' "$text" | "$scripts_root/reply-options" generate --agent "$HOOK_AGENT" \
+      --session "${HOOK_SESSION_ID:-}" --cwd "${HOOK_CWD:-}" --transcript "${HOOK_TRANSCRIPT_PATH:-}" \
+      >>"$ro_log" 2>&1 &
+    ;;
+esac
+
 # Perf markers. One line per stage into perf.log, seconds since the turn ended,
 # so the wait between Rio reading the reply and the audio/page landing can be
 # attributed instead of guessed at. Exported so the detached audio and webview

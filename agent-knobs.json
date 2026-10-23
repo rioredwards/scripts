@@ -7,6 +7,7 @@
     { "name": "speak", "key": "AGENT_SPEAK", "kind": "toggle", "doc": "speak reply aloud on this mac (say)" },
     { "name": "write-guard", "aliases": ["guard"], "key": "AGY_WRITE_GUARD", "kind": "toggle", "doc": "block risky writes (SAFETY RAIL)" },
     { "name": "auto-cue", "aliases": ["cue"], "key": "AGENT_AUTOMATION_CUE", "kind": "toggle", "doc": "fullscreen \"hands off\" cue while an agent drives the GUI" },
+    { "name": "reply-options", "key": "AGENT_REPLY_OPTIONS", "kind": "toggle", "doc": "suggested replies per turn for the Raycast picker (paid call)" },
     { "name": "loc-budget", "aliases": ["budget"], "key": "AGENT_LOC_BUDGET", "kind": "toggle", "doc": "enforce `agent-budget` LOC gates" },
 
     { "name": "narrate-depth", "aliases": ["depth"], "key": "AGENT_NARRATE_DEPTH", "kind": "value", "doc": "brief | balanced | deep" },
