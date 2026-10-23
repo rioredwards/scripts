@@ -1,6 +1,6 @@
 # reply-options
 
-When a Claude or Codex chat finishes a turn, this engine writes 2-4 categorized replies Rio could
+When a Claude or Codex chat finishes a turn, this engine writes 1-4 categorized replies Rio could
 send back. UIs (the Raycast picker) only call this CLI and read its JSON; nothing is sent to any app.
 
 ## How it runs
@@ -52,9 +52,9 @@ atomically (tmp + mv).
 }
 ```
 
-- `options` is non-empty only when `status` is `ready` (2-4 items, ids `o1`..`oN` in model order).
+- `options` is non-empty only when `status` is `ready` (1-4 items, ids `o1`..`oN` in model order).
   `skipped` means the model judged the reply a pure report and gave a `skip_reason`. `error`
-  carries `error` (API failure, spent cap, or not 2-4 options). `ms` is the model call's latency.
+  carries `error` (API failure, spent cap, or not 1-4 options; 0 needs a skip_reason). `ms` is the model call's latency.
 - `category` and its fixed `color` token:
 
   | category | color | meaning |

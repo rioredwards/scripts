@@ -29,15 +29,17 @@ gen "Ship the cache fix?" s1; [ "$(calls)" = 1 ] || fail "same reply called the 
 gen '{"suggestion":"Can we?"}' s2 2>/dev/null; [ "$(calls)" = 1 ] && [ ! -e "$tmp/state/claude-s2.json" ] || fail "suggestion reached the model"
 
 answer '{"options":[{"category":"accept","label":"Ok","text":"ok"}],"skip_reason":null}'
-if gen "one option" s3 2>"$tmp/err"; then fail "one option should fail"; fi
-grep -q "1 options" "$tmp/err" && [ "$(jq -r .status "$tmp/state/claude-s3.json")" = error ] || fail "bad answer not an error file"
+gen "one option" s5 && [ "$(jq -r .status "$tmp/state/claude-s5.json")" = ready ] || fail "one option should be ready"
+answer '{"options":[],"skip_reason":null}'
+if gen "no options, no reason" s3 2>"$tmp/err"; then fail "zero options without a skip_reason should fail"; fi
+grep -q "0 options" "$tmp/err" && [ "$(jq -r .status "$tmp/state/claude-s3.json")" = error ] || fail "bad answer not an error file"
 
 answer '{"options":[],"skip_reason":"pure report"}'
 gen "Done, all green." s4 && [ "$(jq -r .status "$tmp/state/claude-s4.json")" = skipped ] || fail "skip not recorded"
 
 out="$("$repo/reply-options" get --session s1)"
 [ "$(printf '%s' "$out" | jq -c '[.title, .stale]')" = '[null,false]' ] || fail "get: $out"
-[ "$("$repo/reply-options" get --recent 2 | jq length)" = 2 ] || fail "recent count"
+[ "$("$repo/reply-options" get --recent 3 | jq length)" = 3 ] || fail "recent count"
 printf '{"type":"user","timestamp":"2999-01-01T00:00:00Z","message":{"content":"yes"}}\n' >> "$t"
 [ "$("$repo/reply-options" get --session s1 | jq .stale)" = true ] || fail "Rio's newer reply not stale"
 [ "$("$repo/reply-options" get --recent | jq length)" = 0 ] || fail "recent kept stale sessions"

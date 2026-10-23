@@ -1,5 +1,5 @@
 #!/bin/sh
-# reply-options: 2-4 categorized replies Rio could send back to an agent that
+# reply-options: 1-4 categorized replies Rio could send back to an agent that
 # just finished a turn. Engine only; UIs read its JSON. Contract: reply-options.md
 #
 #   reply-options generate --agent claude|codex --session ID --cwd DIR --transcript PATH [--force] < reply
@@ -21,7 +21,7 @@ mkdir -p "$dir" || die "cannot create $dir"
 # Fixed by the engine, never by the model. UIs render unknown ones gray.
 COLORS='{"accept":"green","reject":"red","redirect":"orange","narrow":"yellow","explain":"blue","clarify":"blue","verify":"purple","defer":"gray"}'
 
-INSTR='Rio, a solo developer, steers AI coding agents. An agent just finished its turn and waits on him. Write 2 to 4 messages RIO types back TO THE AGENT, each a distinct real next move for this reply.
+INSTR='Rio, a solo developer, steers AI coding agents. An agent just finished its turn and waits on him. Write 1 to 4 messages RIO types back TO THE AGENT, each a distinct real next move for this reply (one is fine when only one reply is obvious).
 Every text is the human talking to the agent: an instruction or question to "you". Never the agent speaking, never a to-do note, never a promise ("I will..."): when the agent asked Rio to do something himself, write him reporting back after doing it ("Done, ...") or asking about it. Plain words, aim under 15, never over 30. No greetings, thanks, filler or em dashes. Name the concrete thing.
 label: a 2 to 4 word button name ("Ship it", "Park #319", "Prove Node 22").
 Categories (only ones that fit; one may repeat, e.g. two accepts "go with A" and "go with B"): accept = yes, go ahead or done; reject = no, do not; redirect = different approach or goal; narrow = smaller scope; explain = say it plainer or why; clarify = pointed question about one point; verify = prove a claim first; defer = not now, park it.
@@ -85,7 +85,7 @@ $tail_reply"
     (.out.options // []) as $o | ($o | length) as $n
     | (if .error then {status:"error", error:.error}
        elif $n == 0 and ((.out.skip_reason // "") != "") then {status:"skipped", skip_reason:.out.skip_reason}
-       elif $n < 2 or $n > 4 then {status:"error", error:"model returned \($n) options, want 2-4"}
+       elif $n < 1 or $n > 4 then {status:"error", error:"model returned \($n) options, want 1-4"}
        elif any($o[]; (.label == "") or (.text == "")) then {status:"error", error:"model returned an empty label or text"}
        else {status:"ready"} end) as $st
     | {v:1, status:$st.status, agent:$agent, session:$session, title:(if $title == "" then null else $title end), cwd:$cwd, transcript:$transcript,
