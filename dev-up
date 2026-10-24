@@ -60,6 +60,29 @@ else
   [[ ${#CMD[@]} -gt 0 ]] || die "no start script found (looked for skeleton/scripts/start_dev.sh, scripts/start_dev.sh, scripts/dev, bin/dev, a package.json dev script). Check RUNBOOK.md, or run: dev-up -- <command>"
 fi
 
+# My Controls is a resident Electron app with its own pm2 owner and health
+# channel. Its renderer is not a browser preview and must not get a portless copy.
+if [[ -f package.json ]] && python3 -c 'import json,sys; sys.exit(json.load(open("package.json")).get("name") != "my-controls")'; then
+  command -v pm2 >/dev/null || die "pm2 not found; cannot check the resident desktop app"
+  resident="$(pm2 jlist)" || die "pm2 jlist failed; cannot check the resident desktop app"
+  if ! printf '%s' "$resident" | python3 -c '
+import json,os,sys
+rows=[p for p in json.load(sys.stdin) if p.get("name") == "my-controls"]
+sys.exit(not (len(rows) == 1 and os.path.realpath(rows[0]["pm2_env"].get("pm_cwd", "")) == os.path.realpath(sys.argv[1])
+             and rows[0]["pm2_env"].get("status") == "online"))' "$ROOT"; then
+    say "dev-up: My Controls is not online from this checkout. Inspect pm2 logs my-controls and scripts/ensure-running.sh."
+    exit 1
+  fi
+  health="http://127.0.0.1:${MC_CONTROL_PORT:-7357}/health"
+  if ! curl -fsS --max-time 2 "$health" | python3 -c 'import json,sys; sys.exit(json.load(sys.stdin).get("ok") is not True)' 2>/dev/null; then
+    say "dev-up: resident My Controls is unhealthy at $health. Not restarting it automatically."
+    exit 1
+  fi
+  say "dev-up: resident My Controls desktop app is healthy ($health); browser preview is separate."
+  printf 'mycontrols-dev://tools/rios-day pm2=my-controls lease=untracked reused\n'
+  exit 0
+fi
+
 # Tailscale's CLI lives in /usr/local/bin, which ssh's non-interactive PATH lacks.
 command -v tailscale >/dev/null || PATH="$PATH:/usr/local/bin"
 command -v tailscale >/dev/null || die "tailscale not found on PATH ($PATH). Install Tailscale (https://tailscale.com/download), then rerun: dev-up"

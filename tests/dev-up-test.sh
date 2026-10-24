@@ -68,4 +68,27 @@ run
 [ "$rc" -eq 2 ] || fail "portless list failure: exit $rc, want 2 ($out)"
 case "$out" in *"portless list failed"*) ;; *) fail "portless list failure: unclear message ($out)" ;; esac
 
+# Resident Electron app has its own pm2 owner and readiness channel, no web route.
+printf '{"name":"my-controls","scripts":{"dev":"electron-vite dev"}}' > "$repo/package.json"
+cat > "$tmp/bin/pm2" <<'STUB'
+#!/bin/sh
+[ "$1" = jlist ] || exit 99
+printf '[{"name":"my-controls","pm2_env":{"pm_cwd":"%s","status":"online"}}]' "$DESKTOP_CWD"
+STUB
+cat > "$tmp/bin/curl" <<'STUB'
+#!/bin/sh
+printf '%s' "$DESKTOP_HEALTH"
+STUB
+chmod +x "$tmp/bin/pm2" "$tmp/bin/curl"
+export DESKTOP_CWD="$repo" DESKTOP_HEALTH='{"ok":true}'
+run
+[ "$rc" -eq 0 ] || fail "desktop reuse: exit $rc ($out)"
+case "$out" in *"mycontrols-dev://tools/rios-day pm2=my-controls lease=untracked reused"*) ;; *) fail "desktop reuse: missing desktop link ($out)" ;; esac
+export DESKTOP_HEALTH='{"ok":false}'
+run
+[ "$rc" -eq 1 ] || fail "unhealthy desktop: exit $rc ($out)"
+export DESKTOP_HEALTH='{"ok":true}' DESKTOP_CWD="$tmp/other-checkout"
+run
+[ "$rc" -eq 1 ] || fail "different desktop checkout: exit $rc ($out)"
+
 echo "dev-up tests: ok"
