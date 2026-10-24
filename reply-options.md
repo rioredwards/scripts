@@ -101,7 +101,11 @@ prompt quality and the category set are drafts (`SPIKE:` comments mark shortcuts
   `hammerspoon://reply-option?category=<category>` (Hammerspoon `features/replyRing.lua`). It
   copies the top `--recent` chat's first option in that category and shows it in an alert; a
   missing category says which ones the chat has. Labels are fixed per bubble: Options+ can't
-  render live labels without a Logi SDK plugin. Bubble setup in Options+ is manual.
+  render live labels without a Logi SDK plugin. Set up by hand in Options+ (2026-10-23): a
+  "Reply" folder of 8 Web Page bubbles in the global ring (replacing its Easy-Switch slot, which
+  now sits inside the folder) and in the Vizhi for ChatGPT ring, which replaces the global one
+  while ChatGPT is in front. Stored in each ring's `ProfileInfo.json` under
+  `~/Library/Application Support/Logi/LogiPluginService/Applications/Loupedeck72/`.
 - Not built yet: injection into Claude (`$.prompt.fill` mod) or Codex; MacBook picker (the hook
   also generates there once `~/scripts` pulls; `agent-toggle reply-options off` stops it).
 - Unverified by a human: the Hyper+Z press, Enter-to-copy HUD, Cmd+R in the UI, and Raycast's
