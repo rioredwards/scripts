@@ -106,6 +106,17 @@ prompt quality and the category set are drafts (`SPIKE:` comments mark shortcuts
   now sits inside the folder) and in the Vizhi for ChatGPT ring, which replaces the global one
   while ChatGPT is in front. Stored in each ring's `ProfileInfo.json` under
   `~/Library/Application Support/Logi/LogiPluginService/Applications/Loupedeck72/`.
+  A bubble's hover label is its macro's `displayName` there; its face is
+  `ActionIcons/$@Generic___@Macro___<name>.ict` (the Edit Icon text defaults to a tiny font
+  under the globe, unreadable in the ring). Accept is fixed by hand (globe hidden, bold text,
+  `displayName` "Accept"); the other 7 still read "Web Page". Edit with LogiPluginService
+  quit, then reopen it.
+- Mouse ring brief (2026-10-23): goal is a ring where Rio sees what each bubble does, ideally
+  the live reply label, before pressing. Rio's rule: one tracer piece he tries before widening.
+  Live labels need a C# Logi Actions SDK plugin (`GetCommandImage` + `ActionImageChanged`;
+  the Node SDK can't change labels). Proven on the MX Creative Keypad, unproven on the ring;
+  editing a plugin bubble's icon in Options+ freezes it. Gate: a ~30 min spike with one bubble
+  whose text changes on a timer. Real plugin after that: about 3-5 h.
 - Not built yet: injection into Claude (`$.prompt.fill` mod) or Codex; MacBook picker (the hook
   also generates there once `~/scripts` pulls; `agent-toggle reply-options off` stops it).
 - Unverified by a human: the Hyper+Z press, Enter-to-copy HUD, Cmd+R in the UI, and Raycast's
