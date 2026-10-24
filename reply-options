@@ -166,25 +166,25 @@ cmd_get() {
   done
   case "$mode" in
     recent)
-      # The focused session (Hammerspoon's focused-session.json) leads, whatever its age.
-      ff=""
+      # Hammerspoon's focused-session.json: the chat on screen leads, then the rest
+      # by when Rio last focused them (its `recent` history), else when the reply landed.
+      focus='{}'
       if [ -f "$focus_file" ]; then
-        ff="$(jq -r '"\(.agent // "")-\(.session // "")"' "$focus_file")" || die "unreadable $focus_file"
-        case "$ff" in -*|*-) ff="" ;; *) ff="$dir/$ff.json"; [ -f "$ff" ] || ff="" ;; esac
+        focus="$(jq -c '{key: "\(.agent // "")-\(.session // "")",
+          times: ([.recent[]? | {key: "\(.agent)-\(.session)", value: .focused_at}] | from_entries)}' "$focus_file")" ||
+          die "unreadable $focus_file"
       fi
-      {
-        k=0
-        if [ -n "$ff" ]; then
-          o="$(annotate "$ff")"
-          [ "$(printf '%s' "$o" | jq .stale)" = false ] && { printf '%s' "$o" | jq -c '.focused = true'; k=1; }
-        fi
-        [ "$k" -lt "$n" ] && ls -t "$dir"/*.json 2>/dev/null | while IFS= read -r f; do
-          [ -n "$(find "$f" -mtime -1)" ] || break
-          [ "$f" = "$ff" ] && continue
-          o="$(annotate "$f")"; [ "$(printf '%s' "$o" | jq .stale)" = false ] || continue
-          printf '%s' "$o" | jq -c '.focused = false'; k=$((k + 1)); [ "$k" -lt "$n" ] || break
-        done
-      } | jq -sc .
+      for f in "$dir"/*.json; do
+        [ -f "$f" ] || continue
+        # Past the 24h window only when focused since (the history is capped at 30).
+        [ -n "$(find "$f" -mtime -1)" ] ||
+          printf '%s' "$focus" | jq -e --arg k "$(basename "$f" .json)" '.key == $k or .times[$k] != null' >/dev/null ||
+          continue
+        annotate "$f"
+      done | jq -sc --argjson fo "$focus" --argjson n "$n" '
+        map(select(.stale | not) | "\(.agent)-\(.session)" as $k
+          | .focused = ($k == $fo.key) | .focused_at = ($fo.times[$k] // null))
+        | sort_by([.focused, (.focused_at // .created_at)]) | reverse | .[:$n]'
       return ;;
     latest) f="$(ls -t "$dir"/*.json 2>/dev/null | head -n 1)"; [ -n "$f" ] || die "no reply options yet"
       sid="$(jq -r .session "$f")" ;;

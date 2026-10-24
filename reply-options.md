@@ -28,12 +28,15 @@ reply-options get --recent [N]
   (session, reply hash): the same reply again makes no call unless the last try failed or
   `--force` is given. Prunes state files older than 3 days.
 - `get` prints one state object as compact JSON, with `title` and `stale` filled in.
-  `--recent [N]` prints a JSON array of up to N (default 5) non-stale sessions from the last 24 h,
-  newest first, any status. The session Rio last had on screen leads whatever its age, marked
-  `"focused": true` (every other entry `false`). It comes from `~/.cache/focused-session.json`
-  (override: `FOCUSED_SESSION_FILE`), written by Hammerspoon's `focusedSession` feature on each
-  focus change: `{v, agent, session, title, frontmost, focused_at, updated_at}`; it keeps the
-  last agent session when another app (such as Raycast) takes focus. `--force` implies
+  `--recent [N]` prints a JSON array of up to N (default 5) non-stale sessions, any status, in
+  display order: the session Rio last had on screen first (`"focused": true`, every other entry
+  `false`), then by when he last focused each one (`focused_at`, null if never seen), else by
+  `created_at`. It covers state files from the last 24 h plus older ones he focused since. Focus
+  comes from `~/.cache/focused-session.json` (override: `FOCUSED_SESSION_FILE`), written by
+  Hammerspoon's `focusedSession` feature on each focus change:
+  `{v, agent, session, title, frontmost, focused_at, updated_at, recent}`, where `recent` is
+  `[{agent, session, focused_at}]`, newest first, capped at 30. It keeps the last agent session
+  when another app (such as Raycast) takes focus. UIs keep this order. `--force` implies
   `--generate` and always regenerates.
 - Failures exit 1 with one line on stderr (`reply-options: ...`); usage errors exit 2.
 

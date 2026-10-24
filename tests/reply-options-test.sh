@@ -47,6 +47,8 @@ echo '{"v":1,"agent":"claude","session":"s4","frontmost":false}' > "$tmp/focus.j
 [ "$("$repo/reply-options" get --recent 2 | jq -c '[.[0].session, .[].focused]')" = '["s4",true,false]' ] || fail "focused session (even old) should lead: $("$repo/reply-options" get --recent 2)"
 echo '{"v":1,"agent":"codex","session":"gone"}' > "$tmp/focus.json"
 [ "$("$repo/reply-options" get --recent 1 | jq -c '[.[].focused]')" = '[false]' ] || fail "focus on a session without options"
+echo '{"v":1,"agent":"claude","session":"s3","recent":[{"agent":"claude","session":"s1","focused_at":"2999-01-02T00:00:00Z"},{"agent":"claude","session":"s4","focused_at":"2999-01-01T00:00:00Z"}]}' > "$tmp/focus.json"
+[ "$("$repo/reply-options" get --recent 4 | jq -c '[.[0:3][] | .session]')" = '["s3","s1","s4"]' ] || fail "focused, then by last focus (old s4 kept): $("$repo/reply-options" get --recent 4 | jq -c '[.[] | [.session, .focused_at]]')"
 printf '{"type":"user","timestamp":"2999-01-01T00:00:00Z","message":{"content":"yes"}}\n' >> "$t"
 [ "$("$repo/reply-options" get --session s1 | jq .stale)" = true ] || fail "Rio's newer reply not stale"
 [ "$("$repo/reply-options" get --recent | jq length)" = 0 ] || fail "recent kept stale sessions"
