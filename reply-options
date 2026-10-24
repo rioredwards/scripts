@@ -14,6 +14,7 @@ lib="$HOME/scripts/hooks/lib"
 
 dir="${REPLY_OPTIONS_DIR:-$HOME/.cache/reply-options}"
 model="${REPLY_OPTIONS_MODEL:-gpt-6-luna}"
+focus_file="${FOCUSED_SESSION_FILE:-$HOME/.cache/focused-session.json}"
 die() { echo "reply-options: $*" >&2; exit 1; }
 usage() { sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; }
 mkdir -p "$dir" || die "cannot create $dir"
@@ -165,12 +166,25 @@ cmd_get() {
   done
   case "$mode" in
     recent)
-      k=0
-      ls -t "$dir"/*.json 2>/dev/null | while IFS= read -r f; do
-        [ -n "$(find "$f" -mtime -1)" ] || break
-        o="$(annotate "$f")"; [ "$(printf '%s' "$o" | jq .stale)" = false ] || continue
-        printf '%s\n' "$o"; k=$((k + 1)); [ "$k" -lt "$n" ] || break
-      done | jq -sc .
+      # The focused session (Hammerspoon's focused-session.json) leads, whatever its age.
+      ff=""
+      if [ -f "$focus_file" ]; then
+        ff="$(jq -r '"\(.agent // "")-\(.session // "")"' "$focus_file")" || die "unreadable $focus_file"
+        case "$ff" in -*|*-) ff="" ;; *) ff="$dir/$ff.json"; [ -f "$ff" ] || ff="" ;; esac
+      fi
+      {
+        k=0
+        if [ -n "$ff" ]; then
+          o="$(annotate "$ff")"
+          [ "$(printf '%s' "$o" | jq .stale)" = false ] && { printf '%s' "$o" | jq -c '.focused = true'; k=1; }
+        fi
+        [ "$k" -lt "$n" ] && ls -t "$dir"/*.json 2>/dev/null | while IFS= read -r f; do
+          [ -n "$(find "$f" -mtime -1)" ] || break
+          [ "$f" = "$ff" ] && continue
+          o="$(annotate "$f")"; [ "$(printf '%s' "$o" | jq .stale)" = false ] || continue
+          printf '%s' "$o" | jq -c '.focused = false'; k=$((k + 1)); [ "$k" -lt "$n" ] || break
+        done
+      } | jq -sc .
       return ;;
     latest) f="$(ls -t "$dir"/*.json 2>/dev/null | head -n 1)"; [ -n "$f" ] || die "no reply options yet"
       sid="$(jq -r .session "$f")" ;;

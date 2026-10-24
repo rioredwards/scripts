@@ -29,7 +29,12 @@ reply-options get --recent [N]
   `--force` is given. Prunes state files older than 3 days.
 - `get` prints one state object as compact JSON, with `title` and `stale` filled in.
   `--recent [N]` prints a JSON array of up to N (default 5) non-stale sessions from the last 24 h,
-  newest first, any status. `--force` implies `--generate` and always regenerates.
+  newest first, any status. The session Rio last had on screen leads whatever its age, marked
+  `"focused": true` (every other entry `false`). It comes from `~/.cache/focused-session.json`
+  (override: `FOCUSED_SESSION_FILE`), written by Hammerspoon's `focusedSession` feature on each
+  focus change: `{v, agent, session, title, frontmost, focused_at, updated_at}`; it keeps the
+  last agent session when another app (such as Raycast) takes focus. `--force` implies
+  `--generate` and always regenerates.
 - Failures exit 1 with one line on stderr (`reply-options: ...`); usage errors exit 2.
 
 ## State
