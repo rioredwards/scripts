@@ -1,7 +1,7 @@
 # reply-options
 
 When a Claude or Codex chat finishes a turn, this engine writes 1-4 categorized replies Rio could
-send back. UIs (the Raycast picker) only call this CLI and read its JSON; nothing is sent to any app.
+send back. UIs (the Raycast picker, the Actions Ring) only call this CLI and read its JSON; nothing is sent to any app.
 
 ## How it runs
 
@@ -97,10 +97,13 @@ prompt quality and the category set are drafts (`SPIKE:` comments mark shortcuts
 - UI V1: Raycast "Reply Options" in `~/dev/rio-raycast-toolbox`, opened by Hyper+Z
   (`hammerspoon://replyoptions`). Enter copies the reply, Cmd+R regenerates. Nothing is sent
   into any app.
-- Not built yet: Actions Ring (plan: fixed category bubbles that send a chord or open
-  `hammerspoon://replyoptions`, since Options+ can't render live labels without a Logi SDK
-  plugin); injection into Claude (`$.prompt.fill` mod) or Codex; MacBook picker (the hook also
-  generates there once `~/scripts` pulls; `agent-toggle reply-options off` stops it).
+- Mouse UI: Actions Ring bubbles, one per category, each opening
+  `hammerspoon://reply-option?category=<category>` (Hammerspoon `features/replyRing.lua`). It
+  copies the top `--recent` chat's first option in that category and shows it in an alert; a
+  missing category says which ones the chat has. Labels are fixed per bubble: Options+ can't
+  render live labels without a Logi SDK plugin. Bubble setup in Options+ is manual.
+- Not built yet: injection into Claude (`$.prompt.fill` mod) or Codex; MacBook picker (the hook
+  also generates there once `~/scripts` pulls; `agent-toggle reply-options off` stops it).
 - Unverified by a human: the Hyper+Z press, Enter-to-copy HUD, Cmd+R in the UI, and Raycast's
   one-time "Always Open Command" prompt.
 - Known limit: a brand-new Claude chat may store `title: null` until its next turn.
