@@ -45,6 +45,7 @@ reply-options | reply-options --help
 sc | sc --help
 text-phone-summary | text-phone-summary --help
 tool-check | tool-check --help
+usage-pace | sh "$HOME/scripts/tests/usage-pace-test.sh"
 validate-recent-projects.sh | validate-recent-projects.sh
 
 # --- ~/scripts: parse-only (running them acts: commits, installs, sends, talks to the GUI, or calls an LLM)

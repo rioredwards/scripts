@@ -1,4 +1,8 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# requires-python = ">=3.12"
+# dependencies = ["Pillow==11.1.0"]
+# ///
 """annotate: mark up an image with arrows, callouts, boxes, circles and blur.
 
 Built for agents: point at a screenshot, describe the marks in coordinates, get a
@@ -38,10 +42,7 @@ import math
 import os
 import sys
 
-try:
-    from PIL import Image, ImageDraw, ImageFilter, ImageFont
-except ImportError:
-    sys.exit("❌ Pillow is missing. Install it: pip3 install --user Pillow")
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 COLORS = {
     "red": (255, 59, 48),
