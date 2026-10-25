@@ -31,7 +31,8 @@ check allowed 'git commit -m "guard: ignore quoted gh issue create mentions"'
 check allowed 'gh issue view 12'
 
 touch "/tmp/claude-issue-skill-$sid"
-check allowed 'gh issue create --title x --body y'
+check allowed "gh issue create -R owner/repo --title x --label P2 --body 'y
+Priority source: agent (P2). Session: $sid'"
 rm -f "/tmp/claude-issue-skill-$sid"
 
 echo "issue-skill-guard: $pass passed, $fail failed"
