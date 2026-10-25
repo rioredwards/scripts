@@ -20,6 +20,59 @@ class RulesTests(unittest.TestCase):
             input=json.dumps(payload), text=True, capture_output=True, env=env,
         )
 
+    def test_issue_plans_and_work_comments_have_no_length_cap(self):
+        body = "execution detail " * 120
+        commands = [
+            f"gh issue create --repo owner/repo --body '{body}'",
+            f"gh issue edit 1 --repo owner/repo --add-label Ready --body '{body}'",
+            f"gh issue comment 1 --repo owner/repo --body '{body}'",
+            "gh issue edit 1 --repo owner/repo --body-file /tmp/plan.md",
+            "gh issue create --repo owner/repo -F /tmp/seed.md",
+            "gh issue comment 1 --repo owner/repo --body-file /tmp/evidence.md",
+            f"gh pr comment 1 --body '{body}'",
+            "gh pr comment 1 --body-file /tmp/review.md",
+            f"gh pr review 1 --comment --body '{body}'",
+            f"gh api repos/owner/repo/issues -f body='{body}'",
+            f"gh api repos/owner/repo/issues/1 -X PATCH -f body='{body}'",
+            f"gh api repos/owner/repo/issues/1/comments -f body='{body}'",
+            f"gh api repos/owner/repo/pulls/1/comments -f body='{body}'",
+            f"gh api repos/owner/repo/pulls/1/reviews -f body='{body}'",
+            f"gh issue edit 1 --body '{body}' && gh issue edit 2 --body '{body}'",
+        ]
+        for agent, tool, key in (("claude", "Bash", "command"),
+                                 ("codex", "exec_command", "cmd"),
+                                 ("codex", "shell", "command")):
+            for command in commands:
+                with self.subTest(agent=agent, command=command):
+                    result = self.run_hook("tool", {"tool_name": tool, "tool_input": {key: command}}, agent)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertNotIn('"permissionDecision": "deny"', result.stdout)
+
+    def test_pr_summaries_keep_the_length_cap_and_override(self):
+        body = "summary detail " * 120
+        commands = [
+            f"gh pr create --body '{body}'",
+            f"gh pr edit 1 --body '{body}'",
+            f"gh api repos/owner/repo/pulls -f body='{body}'",
+            f"gh api --method PATCH repos/owner/repo/pulls/1 -f body='{body}'",
+            f"gh api 'repos/owner/repo/pulls/1' -X PATCH -f body='{body}'",
+            "gh pr create --body-file /tmp/summary.md",
+            "gh pr edit 1 -F /tmp/summary.md",
+        ]
+        for agent, tool, key in (("claude", "Bash", "command"),
+                                 ("codex", "exec_command", "cmd"),
+                                 ("codex", "shell", "command")):
+            for command in commands:
+                with self.subTest(agent=agent, command=command):
+                    payload = {"tool_name": tool, "tool_input": {key: command}}
+                    result = self.run_hook("tool", payload, agent)
+                    self.assertEqual(json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
+                    self.assertIn("pr-body", result.stdout)
+                    payload["tool_input"][key] = "RIO_LONG_OK=1 " + command
+                    self.assertNotIn('"permissionDecision": "deny"', self.run_hook("tool", payload, agent).stdout)
+            result = self.run_hook("tool", {"tool_name": tool, "tool_input": {key: "gh pr edit 1 --body 'Fix the import. Local checks pass.'"}}, agent)
+            self.assertNotIn('"permissionDecision": "deny"', result.stdout)
+
     def test_ui_launches_require_verified_safety(self):
         # Only submit hook payloads. These commands are never executed.
         commands = [

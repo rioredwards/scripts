@@ -86,26 +86,26 @@
       "text": "This shell command writes a hardcoded home path into a file (heredoc, redirect, or in-place edit). The command runs, but the file it leaves behind is broken on Rio's other Mac, two machines, two usernames (`rioredwards`, `rioedwards`). Write `$HOME`, `~`, or a dir handle ($DEV, $SCRIPTS, $DOTFILES, $SKILLS) into the file instead. Keep the literal path only if it must name one specific machine, and say why."
     },
     {
-      "id": "gh-body-cap",
+      "id": "pr-body-cap",
       "on": "tool",
       "match": {
-        "tool": "^Bash$",
-        "input": "(?s)gh[[:space:]]+(pr|issue|api)[[:space:]].*(--body|--comment|body=)[=[:space:]\"']*(\\S+[[:space:]]+){200,}"
+        "tool": "^(Bash|exec_command|shell)$",
+        "input": "(?s)gh[[:space:]]+(pr[[:space:]]+(create|edit)[[:space:]]|api[[:space:]]+(?=[^\\n]*repos/[^/[:space:]\"']+/[^/[:space:]\"']+/pulls(/[0-9]+)?([[:space:]\"']|$))).*(--body|body=)[=[:space:]\"']*(\\S+[[:space:]]+){200,}"
       },
       "unless": "RIO_LONG_OK=1",
       "do": "deny",
-      "text": "BLOCKED: this writes 200+ words to GitHub. A PR body, issue body, or review comment is something Rio has to read, and length there costs him exactly what a long chat reply does, the same 200-word ceiling applies. Scale it to the diff: a two-line docs change gets two sentences, not a document. Keep what changed, why, and anything he must decide, in plain English he can skim without opening the code. Fit the cap by CUTTING content (narration, rejected options, validation detail, minutiae live in the issue), never by compressing sentences into dense jargon fragments: a short body Rio can't read is worse than a long one. Do not route around this with --body-file. If the length is genuinely earned, re-run prefixed with `RIO_LONG_OK=1 ` and say in your reply why it was."
+      "text": "BLOCKED: this PR summary exceeds 200 words. Keep what changed, why, and any decision in plain English; put execution detail in the issue. Cut repetition instead of compressing sentences into jargon. Issue plans and agent work comments have no fixed word cap. If a longer PR summary is justified, re-run prefixed with `RIO_LONG_OK=1 ` and explain why in your reply."
     },
     {
-      "id": "gh-body-file-cap",
+      "id": "pr-body-file-cap",
       "on": "tool",
       "match": {
-        "tool": "^Bash$",
-        "input": "gh[[:space:]]+(pr|issue)[[:space:]].*(--body-file|[[:space:]]-F[[:space:]])"
+        "tool": "^(Bash|exec_command|shell)$",
+        "input": "gh[[:space:]]+pr[[:space:]]+(create|edit)[[:space:]].*(--body-file|[[:space:]]-F[[:space:]])"
       },
       "unless": "RIO_LONG_OK=1",
       "do": "deny",
-      "text": "BLOCKED: --body-file hides the body from the 200-word gh-body-cap. Pass it inline instead: --body \"$(cat <<'EOF' ... EOF)\" so the cap can count it. If the length is genuinely earned, re-run prefixed with `RIO_LONG_OK=1 ` and say in your reply why."
+      "text": "BLOCKED: the PR summary file cannot be counted by the 200-word PR cap. Inspect its length, then re-run prefixed with `RIO_LONG_OK=1 `; explain any justified excess in your reply. Issue bodies and agent work comments may use --body-file without this override."
     },
     {
       "id": "pr-loc-table",
