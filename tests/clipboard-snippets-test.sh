@@ -13,6 +13,10 @@ cat > "$fixture/bin/curl" <<'CURL'
 #!/bin/sh
 cat > "$REQUEST_FILE"
 [ "${MOCK_TIMEOUT:-}" != 1 ] || exit 28
+if [ "${MOCK_REFUSAL:-}" = 1 ]; then
+  printf '%s\n200\n' '{"output":[{"type":"message","content":[{"type":"refusal","refusal":"declined"}]}]}'
+  exit 0
+fi
 printf '%s\n200\n' '{"output":[{"type":"message","content":[{"type":"output_text","text":"{\"snippets\":[\"Cedar\",\"LIME-42\"]}"}]}]}'
 CURL
 chmod +x "$fixture/bin/keyfor" "$fixture/bin/curl"
@@ -28,4 +32,8 @@ printf '' | "$root/clipboard-snippets" | jq -e '.snippets == []' >/dev/null
 
 if printf fixture | MOCK_TIMEOUT=1 "$root/clipboard-snippets" >/dev/null 2>&1; then
   echo "request failure unexpectedly succeeded" >&2; exit 1
+fi
+
+if printf fixture | MOCK_REFUSAL=1 "$root/clipboard-snippets" >/dev/null 2>&1; then
+  echo "refusal unexpectedly succeeded" >&2; exit 1
 fi
