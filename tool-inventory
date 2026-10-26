@@ -106,3 +106,5 @@ apple | "$HOME/dev/shortcuts-workshop/bin/apple" version
 pm2 | pm2 --version
 codex | [20s] codex --version
 claude | [20s] claude --version
+
+clipboard-snippets | syntax

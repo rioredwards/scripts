@@ -9,9 +9,10 @@
 #   Every call counts against the daily cap in call-budget-lib.sh; past it the
 #   call is not made and the result is an error naming the cap.
 #
-# llm_json MODEL INSTRUCTIONS INPUT PROPS_JSON [MAX_SECS] [BUCKET]
+# llm_json MODEL INSTRUCTIONS INPUT PROPS_JSON [MAX_SECS] [BUCKET] [STORE]
 #   PROPS_JSON: {name: json-schema, ...}; every property is required.
 #   BUCKET: the call-budget counter to charge (default responses).
+#   STORE: optional false to disable API storage; omitted retains API default.
 #   Prints one JSON line: {"ms":N,"out":{...}} or {"ms":N,"error":"why"}.
 set -u
 
@@ -26,10 +27,11 @@ llm_json() {
   _l_err() { jq -nc --arg e "$1" --argjson ms "$(( $(_llm_ms) - _l_start ))" '{ms:$ms, error:$e}'; }
   _l_over="$(call_budget_take "${6:-responses}")" || { _l_err "$_l_over"; return; }
   _l_key="$(keyfor OPENAI_API_KEY 2>/dev/null)" || { _l_err "keyfor OPENAI_API_KEY failed"; return; }
-  _l_body="$(jq -n --arg m "$1" --arg s "$2" --arg i "$3" --argjson p "$4" '
+  _l_body="$(jq -n --arg m "$1" --arg s "$2" --arg i "$3" --argjson p "$4" --arg store "${7:-}" '
     {model:$m, instructions:$s, input:$i, max_output_tokens:1000, reasoning:{effort:"none"},
      text:{format:{type:"json_schema", name:"answer", strict:true,
-       schema:{type:"object", additionalProperties:false, required:($p | keys_unsorted), properties:$p}}}}')"
+       schema:{type:"object", additionalProperties:false, required:($p | keys_unsorted), properties:$p}}}}
+    | if $store == "false" then .store = false else . end')"
   _l_resp="$(printf '%s' "$_l_body" | curl -sS --max-time "${5:-8}" -w '\n%{http_code}' "$LLM_URL" \
     -H "Authorization: Bearer $_l_key" -H 'Content-Type: application/json' -d @- 2>&1)" || {
     _l_err "$(printf '%s' "$_l_resp" | head -n 1 | cut -c1-120)"; return; }
