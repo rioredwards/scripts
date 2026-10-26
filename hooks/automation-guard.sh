@@ -5,18 +5,20 @@
 # Rio can't tell, from across the room or from his phone, whether the mouse
 # moving and windows opening is him or an agent. `~/scripts/automation-cue.sh`
 # already draws that cue (Hammerspoon overlay), but until now every caller had
-# to remember to wrap itself. This hook makes it automatic for agent Bash calls.
+# to remember to wrap itself. This hook covers shell and native computer-control
+# calls automatically.
 #
 # NON-BLOCKING by design: it never prompts and never denies (that would fight
 # Rio's global bypassPermissions mode). It only makes GUI automation *visible*.
 #
 # Wiring: same script on four events, dispatching on hook_event_name:
-#   PreToolUse  (matcher Bash) → cue up   if the command drives the GUI
-#   PostToolUse (matcher Bash) → cue down when the last such command finishes
+#   PreToolUse  (matcher *) → cue up   if the command drives the GUI
+#   PostToolUse (matcher *) → cue down when the last such command finishes
 #   Stop / SessionEnd          → cue down unconditionally (crash safety net)
 #
-# In-flight tracking: parallel Bash calls mean pre/post can interleave, so each
-# matched command drops a marker file (hash of the command) and the cue only
+# In-flight tracking: parallel tool calls mean pre/post can interleave, so each
+# matched call drops a marker file (tool-use ID, or command hash without an ID).
+# The cue only
 # comes down when the marker dir is empty. Markers older than the stale window
 # are swept on every event. The cue also expires without another hook event.
 #
@@ -44,7 +46,9 @@ stale_min="${AGENT_AUTOMATION_CUE_STALE:-5}"
 
 INPUT="$(cat)"
 EVENT="$(printf '%s' "$INPUT" | jq -r '.hook_event_name // empty' 2>/dev/null)"
-CMD="$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)"
+CMD="$(printf '%s' "$INPUT" | jq -r '.tool_input.command // .tool_input.cmd // empty' 2>/dev/null)"
+TOOL="$(printf '%s' "$INPUT" | jq -r '.tool_name // empty' 2>/dev/null)"
+CALL_ID="$(printf '%s' "$INPUT" | jq -r '.tool_use_id // .tool_call_id // empty' 2>/dev/null)"
 
 # A stranded overlay is worse than a missing one, so sweep on every event.
 mkdir -p "$inflight"
@@ -62,8 +66,6 @@ cue_down() {
 case "$EVENT" in
   Stop | SessionEnd | SubagentStop) cue_down ;;
 esac
-
-[ -n "$CMD" ] || exit 0
 
 # Does this command move the pointer, press keys, read the screen, or bring an
 # app forward? Biased to over-match: a spurious overlay flash is cheap, an
@@ -94,9 +96,20 @@ drives_gui() {
   return 1
 }
 
-drives_gui "$CMD" || exit 0
+# Native CUA input is JavaScript, not a shell command. Classify by the tool
+# name so every native call raises the cue before the tool executes.
+case "$TOOL" in
+  mcp__cua_repl.js | mcp__cua_repl__js)
+    CMD="$(printf '%s' "$INPUT" | jq -c '.tool_input // {}')"
+    ;;
+  *) [ -n "$CMD" ] && drives_gui "$CMD" || exit 0 ;;
+esac
 
-marker="$inflight/$(printf '%s' "$CMD" | md5 -q 2>/dev/null || printf '%s' "$CMD" | md5sum | cut -d' ' -f1)"
+# IDs distinguish overlapping identical calls. Older hook payloads without an
+# ID retain the command-based key used by the original guard.
+key="${CALL_ID:+call:$CALL_ID}"
+[ -n "$key" ] || key="command:$CMD"
+marker="$inflight/$(printf '%s' "$key" | md5 -q 2>/dev/null || printf '%s' "$key" | md5sum | cut -d' ' -f1)"
 
 case "$EVENT" in
   PreToolUse)

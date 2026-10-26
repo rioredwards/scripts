@@ -23,10 +23,11 @@ with tempfile.TemporaryDirectory() as directory:
     calls = home / 'calls'
     markers = home / '.cache/automation-guard/inflight'
 
-    def hook(event, command=''):
+    def hook(event, command='', *, tool='Bash', field='command', call_id=None):
         subprocess.run(['bash', str(root / 'hooks/automation-guard.sh')],
-                       input=json.dumps({'hook_event_name': event,
-                                         'tool_input': {'command': command}}),
+                       input=json.dumps({'hook_event_name': event, 'tool_name': tool,
+                                         'tool_use_id': call_id,
+                                         'tool_input': {field: command}}),
                        text=True, env=env, check=True)
 
     for command in [
@@ -55,6 +56,37 @@ with tempfile.TemporaryDirectory() as directory:
         assert calls.read_text().splitlines()[-1] == 'start 300'
         hook('PostToolUse', command)
         assert not list(markers.iterdir()), command
+        assert calls.read_text().splitlines()[-1] == 'stop'
+
+    # Native CUA calls are GUI automation even without shell-like code.
+    for tool in ['mcp__cua_repl.js', 'mcp__cua_repl__js']:
+        hook('PreToolUse', 'await cua.getState();', tool=tool, field='code')
+        assert len(list(markers.iterdir())) == 1
+        assert calls.read_text().splitlines()[-1] == 'start 300'
+        hook('PostToolUse', 'await cua.getState();', tool=tool, field='code')
+        assert not list(markers.iterdir())
+        assert calls.read_text().splitlines()[-1] == 'stop'
+
+    # Codex shell payloads use cmd, and identical overlapping calls stay separate.
+    for call_id in ['first', 'second']:
+        hook('PreToolUse', 'open -a Safari', tool='exec_command', field='cmd', call_id=call_id)
+    assert len(list(markers.iterdir())) == 2
+    before = calls.read_text()
+    hook('PostToolUse', 'open -a Safari', tool='exec_command', field='cmd', call_id='first')
+    assert len(list(markers.iterdir())) == 1
+    assert calls.read_text() == before
+    hook('PostToolUse', 'open -a Safari', tool='exec_command', field='cmd', call_id='second')
+    assert not list(markers.iterdir())
+    assert calls.read_text().splitlines()[-1] == 'stop'
+
+    # Arbitrary code is not treated as a shell command or a native CUA call.
+    before = calls.read_text()
+    hook('PreToolUse', 'open -a Safari', tool='other_tool', field='code')
+    assert calls.read_text() == before
+    for event in ['Stop', 'SessionEnd', 'SubagentStop']:
+        hook('PreToolUse', 'open -a Safari')
+        hook(event)
+        assert not list(markers.iterdir())
         assert calls.read_text().splitlines()[-1] == 'stop'
 
     # A denied command has no PostToolUse. Any later event sweeps and hides it.
