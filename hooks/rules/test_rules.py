@@ -7,6 +7,16 @@ import unittest
 
 ROOT = Path(__file__).resolve().parent
 DASH = chr(0x2014)
+# A heredoc note that was denied once (Oct 2026): `build(vercel):` read as a CLI call.
+PROD_GUARD_NOTE = """cat > /tmp/note.md <<'EOF'
+- Agents can no longer connect to any `.neon.tech` host, pull Vercel env, deploy, or call Neon/Vercel write APIs.
+- The prod URL lives only in Vercel Production env.
+- Main's `apps/web/vercel.json` hard-fails every preview build.
+- Rules: `neon-direct-connection`, `neon-cli-read-only`, `vercel-cli-read-only`, `vercel-api-read-only`, `vercel-mcp-read-only`.
+- Rio does its one-time Vercel/Neon setup on the Neon branch (neon cleanup after).
+- Vercel shows a red check on every PR push.
+- https://github.com/straightaway-cocktails/straightaway-next/pull/499 "build(vercel): previews build only on a named throwaway Neon branch"
+EOF"""
 
 
 class RulesTests(unittest.TestCase):
@@ -531,6 +541,9 @@ class RulesTests(unittest.TestCase):
             (cli, "Bash", "neonctl projects list && neonctl branches delete br-1"),
             (cli, "Bash", "neonctl --api-key x branches delete br-1"),
             (cli, "Bash", "keyfor --run NEON_API_KEY -- neonctl branches delete br-1"),
+            (cli, "Bash", "if true; then neonctl branches delete br-1; fi"),
+            (cli, "Bash", "(neon branches delete br-1)"),
+            (cli, "Bash", "neonctl branches delete br-1; echo done"),
             (rest, "Bash", f"curl -X DELETE -H 'Authorization: Bearer k' {api}/br-1"),
             (rest, "Bash", f"curl -sS --request POST {api}"),
             (rest, "Bash", f"curl -s -d '{{}}' {api}"),
@@ -584,6 +597,13 @@ class RulesTests(unittest.TestCase):
             ("mcp__neon__describe_branch", {}),
             ("mcp__neon__get_database_tables", {}),
             ("Bash", "python3 - <<'PY'\nneon = 2\nPY"),
+            # prose: neon as a word, not a command token; neon.tech without a host shape
+            ("Bash", PROD_GUARD_NOTE),
+            ("Bash", "echo 'connect to any .neon.tech host' >> notes.md"),
+            ("Bash", "echo \"the Neon branch (neon cleanup) is done\""),
+            ("Bash", "git commit -m \"fix(neon): cleanup\""),
+            ("Bash", "grep -E \"neon|vercel\" notes.md"),
+            ("Bash", "grep -c \"neonctl branches delete\" notes.md"),
         ]
         self.assert_prod_guard(blocked, allowed)
 
@@ -610,6 +630,12 @@ class RulesTests(unittest.TestCase):
             "VERCEL_ORG_ID=x vercel deploy", "x=$(vercel env pull)",
             "vercel --scope straightaway deploy", "bash <<'EOF'\nvercel deploy\nEOF",
             "vc", "vc deploy", "vc --prod", "vc env pull", "npx vc deploy",
+            "vc deploy --prod", "cd apps/web && vercel --prod", "npx vercel deploy",
+            "pnpm dlx vercel pull", "pnpm exec vercel env pull", "vercel; echo done",
+            "if true; then vercel deploy; fi", "for d in a; do vercel deploy; done",
+            "(cd apps/web && vercel deploy)", "(vercel deploy)", "true && { vercel deploy; }",
+            "cat <(vercel env pull /dev/stdout)", "/bin/zsh -c \"vercel env pull\"",
+            "bash --norc -c 'vercel deploy'",
         )] + [(api, "Bash", cmd) for cmd in (
             "curl -s -H \"Authorization: Bearer $VERCEL_TOKEN\" 'https://api.vercel.com/v9/projects/prj_x/env?decrypt=true'",
             "curl https://api.vercel.com/v10/projects/prj_x/env/env_1",
@@ -640,6 +666,13 @@ class RulesTests(unittest.TestCase):
             "curl -s -H \"Authorization: Bearer $VERCEL_TOKEN\" https://api.vercel.com/v9/projects",
             "curl 'https://api.vercel.com/v6/deployments?projectId=prj_x&limit=5'",
             "grep -rn api.vercel.com docs",
+            # prose and arguments: vercel/vc is a word here, not a command token
+            PROD_GUARD_NOTE, "git commit -m \"docs: vercel env notes\"",
+            "git commit -m \"build(vercel): previews\"", "grep -r \"vercel env pull\" docs/",
+            "echo \"run vercel deploy later\" >> notes.md", "pnpm --filter web build",
+            "echo \"the CLI (vercel deploy) is blocked\"", "grep -c \"vercel env pull\" notes.md",
+            "jq '.rules[] | select(.id | test(\"neon|vercel|railway\"))' rules.json",
+            "ls node_modules/vercel/", "grep vc: notes.md", "echo vercel-cli-read-only",
         )] + [
             ("mcp__vercel__list_deployments", {}),
             ("mcp__vercel__get_deployment_build_logs", {}),

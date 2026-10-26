@@ -107,11 +107,14 @@ with no override. The MCP rules allow
 only Neon `list_`/`get_`/`describe_` (not `get_connection_string`) and Vercel
 `list_`/`get_`/`search_`/`fetch_`/`web_fetch`.
 
-CLI checks run at command positions (start, after `;`, `&&`, `|`, `$(`, `sh -c '`, `ssh host`,
-through npx/pnpm/env/keyfor wrappers), so `grep vercel` and commit messages pass while
-`vercel ls && vercel env pull` denies. Misses: hosts or methods built at runtime, a script file
-run later. False denies: a prose heredoc line starting with lowercase `vercel`, `vc` or `neon`,
-and a shell command that merely mentions an API host with a credential path (`connection_uri`,
+CLI checks match an invocation, not a word: the lowercase token must sit at a command position
+(start, after `;`, `&&`, `|`, newline, backtick, `$(`/`<(`, a subshell `(` or `{`, `then`/`do`,
+a shell's `-c '`, `ssh host`, through npx/pnpm/env/keyfor wrappers) and end at whitespace, `;`,
+`&` or the end. So `grep vercel`, `build(vercel):`, `"neon|vercel"` and commit messages pass
+while `vercel ls && vercel env pull` denies. Misses: hosts or methods built at runtime, a script
+file run later. False denies: heredoc prose that holds a CLI call at a command position (a line
+starting with lowercase `vercel`, `vc` or `neon` plus a word, a backticked call, a markdown table
+cell), and a shell command that merely mentions an API host with a credential path (`connection_uri`,
 `/env`, `decrypt`). Edit such docs with the file tools.
 Ledger: L-0114.
 
