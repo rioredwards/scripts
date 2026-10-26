@@ -475,6 +475,179 @@ class RulesTests(unittest.TestCase):
                 result = self.run_hook("tool", {"tool_name": tool, "tool_input": inp})
                 self.assertNotIn("deny", result.stdout)
 
+    def assert_prod_guard(self, blocked, allowed):
+        """blocked: (rule id, tool, command or MCP input); allowed: (tool, command or MCP input)."""
+        def payload(tool, cmd):
+            if isinstance(cmd, dict):
+                return {"tool_name": tool, "tool_input": cmd}
+            return {"tool_name": tool, "tool_input": {"cmd" if tool == "exec_command" else "command": cmd}}
+        for rule, tool, cmd in blocked:
+            with self.subTest(blocked=(tool, cmd)):
+                out = json.loads(self.run_hook("tool", payload(tool, cmd)).stdout)["hookSpecificOutput"]
+                self.assertEqual(out["permissionDecision"], "deny")
+                self.assertIn(f"[rule: {rule}]", out["permissionDecisionReason"])
+        for tool, cmd in allowed:
+            with self.subTest(allowed=(tool, cmd)):
+                self.assertNotIn("deny", self.run_hook("tool", payload(tool, cmd)).stdout)
+
+    def test_neon_prod_is_out_of_reach(self):
+        """Agents never connect to Neon; its CLI, API and MCP stay read-only (Oct 2026 prod wipe)."""
+        host = "ep-cool-darkness-a1b2c3d4.us-east-2.aws.neon.tech"
+        pooler = "ep-cool-darkness-a1b2c3d4-pooler.c-2.us-east-2.aws.neon.tech"
+        api = "https://console.neon.tech/api/v2/projects/p-1/branches"
+        py = "keyfor --run NEON_API_KEY -- python3 - <<'PY'\nimport json, urllib.request\n%s\nPY"
+        get = py % ("req = urllib.request.Request('%s', headers={'Authorization': 'Bearer k'})\n"
+                    "data = json.load(urllib.request.urlopen(req))\nneon = data['branches']" % api)
+        delete = py % ("import requests\nrequests.delete('%s/br-1')" % api)
+        direct, cli, rest, mcp = ("neon-direct-connection", "neon-cli-read-only",
+                                  "neon-api-read-only", "neon-mcp-read-only")
+        blocked = [
+            (direct, "Bash", f"psql -h {host} -U neondb_owner neondb"),
+            (direct, "Bash", f"psql 'postgresql://u:p@{pooler}/neondb?sslmode=require'"),
+            (direct, "Bash", f"pg_dump -h {host} -d neondb > x.dump"),
+            (direct, "Bash", f"pg_restore -d 'postgres://u:p@{host}/neondb' x.dump"),
+            (direct, "Bash", f"pgcli postgres://u:p@{host}/neondb"),
+            (direct, "Bash", f"DATABASE_URL=postgres://u:p@{host}/neondb pnpm db:migrate"),
+            (direct, "Bash", f"PGHOST={host} psql neondb"),
+            (direct, "Bash", "psql \"host=db.neon.tech dbname=neondb\""),
+            (direct, "Bash", "psql --host=db.neon.tech neondb"),
+            (direct, "exec_command", f"psql -h {host} neondb"),
+            (direct, "mcp__postgres__query", {"url": f"postgres://u:p@{host}/neondb"}),
+            (cli, "Bash", "neonctl connection-string"),
+            (cli, "Bash", "neonctl cs main --project-id p-1"),
+            (cli, "Bash", "neonctl branches create --name x"),
+            (cli, "Bash", "neonctl branches delete br-1"),
+            (cli, "Bash", "neonctl branches rename a b"),
+            (cli, "Bash", "neonctl branches restore main ^self@2026-10-25"),
+            (cli, "Bash", "neonctl branches set-default br-1"),
+            (cli, "Bash", "neonctl branches set-primary br-1"),
+            (cli, "Bash", "neonctl databases list"),
+            (cli, "Bash", "neonctl roles list"),
+            (cli, "Bash", "neonctl set-context --project-id p-1"),
+            (cli, "Bash", "neonctl auth"),
+            (cli, "Bash", "neonctl ip-allow add 1.2.3.4"),
+            (cli, "Bash", "neon branches delete br-1"),
+            (cli, "Bash", "npx neonctl@latest branches delete br-1"),
+            (cli, "Bash", "neonctl projects list && neonctl branches delete br-1"),
+            (cli, "Bash", "neonctl --api-key x branches delete br-1"),
+            (cli, "Bash", "keyfor --run NEON_API_KEY -- neonctl branches delete br-1"),
+            (rest, "Bash", f"curl -X DELETE -H 'Authorization: Bearer k' {api}/br-1"),
+            (rest, "Bash", f"curl -sS --request POST {api}"),
+            (rest, "Bash", f"curl -s -d '{{}}' {api}"),
+            (rest, "Bash", f"curl --json '{{}}' {api}"),
+            (rest, "Bash", f"curl -s \\\n  -X PATCH \\\n  {api}/br-1"),
+            (rest, "Bash", "curl https://console.neon.tech/api/v2/projects/p-1/connection_uri?role_name=x"),
+            (rest, "Bash", f"curl {api}/b/roles/r/reveal_password"),
+            (rest, "Bash", "RIO_NEON_WRITE_OK=1 curl https://console.neon.tech/api/v2/projects/p-1/connection_uri"),
+            (rest, "Bash", delete),
+            (rest, "Bash", py % f"urllib.request.Request('{api}/b', method=\"DELETE\")"),
+            (rest, "Bash", f"node -e \"fetch('{api}', {{method: 'POST'}})\""),
+            (mcp, "mcp__neon__run_sql", {"sql": "drop table x"}),
+            (mcp, "mcp__neon__get_connection_string", {}),
+            (mcp, "mcp__neon__run_sql_transaction", {}),
+            (mcp, "mcp__neon__prepare_database_migration", {}),
+            (mcp, "mcp__neon__complete_database_migration", {}),
+            (mcp, "mcp__neon__provision_neon_auth", {}),
+            (mcp, "mcp__neon__delete_branch", {}),
+            (mcp, "mcp__plugin_neon_neon__run_sql", {}),
+        ]
+        allowed = [
+            ("Bash", "grep neon.tech"),
+            ("Bash", "grep -rh neon.tech docs"),
+            ("Bash", "git commit -m \"neon cleanup\""),
+            ("Bash", "gh pr view 448"),
+            ("Bash", "echo 'see https://neon.tech/docs/connect'"),
+            ("Bash", "psql postgres://localhost/straightaway_next_dev"),
+            ("Bash", "psql -h 127.0.0.1 straightaway_next_test"),
+            ("Bash", "pnpm db:migrate"),
+            ("Bash", "createdb x"),
+            ("Bash", "pg_restore -d straightaway_next_recovery_check file.dump"),
+            ("Bash", "neonctl projects list"),
+            ("Bash", "neonctl projects get p-1"),
+            ("Bash", "neonctl branches list --project-id p-1 -o json"),
+            ("Bash", "neonctl -o json branches get main"),
+            ("Bash", "neonctl me"),
+            ("Bash", "neonctl orgs list"),
+            ("Bash", "neonctl operations list --project-id p-1"),
+            ("Bash", "neonctl --help"),
+            ("Bash", "neonctl --version"),
+            ("Bash", "neonctl branches --help"),
+            ("Bash", "neon projects list"),
+            ("Bash", "keyfor --run NEON_API_KEY -- neonctl branches list"),
+            ("Bash", f"curl -s -H 'Authorization: Bearer k' {api}"),
+            ("Bash", f"curl -s {api} | jq . | cut -d ' ' -f1"),
+            ("Bash", get),
+            # Rio's explicit yes for that call: the documented write override
+            ("Bash", f"RIO_NEON_WRITE_OK=1 curl -X DELETE {api}/br-1"),
+            ("Bash", "RIO_NEON_WRITE_OK=1 " + delete),
+            ("mcp__neon__list_projects", {}),
+            ("mcp__neon__describe_branch", {}),
+            ("mcp__neon__get_database_tables", {}),
+            ("Bash", "python3 - <<'PY'\nneon = 2\nPY"),
+        ]
+        self.assert_prod_guard(blocked, allowed)
+
+    def test_vercel_is_read_only(self):
+        """Deploys and anything that loads Vercel-held secrets are Rio's; status and logs stay open."""
+        cli, mcp, api = "vercel-cli-read-only", "vercel-mcp-read-only", "vercel-api-read-only"
+        blocked = [(cli, "Bash", cmd) for cmd in (
+            "vercel", "vercel --debug", "vercel .", "vercel apps/web", "vercel deploy",
+            "vercel --prod", "vercel deploy --prod", "vercel build", "vercel build --prod",
+            "vercel build --target production", "vercel dev", "vercel redeploy dpl_1",
+            "vercel promote dpl_1", "vercel rollback", "vercel rm dpl_1", "vercel remove x",
+            "vercel alias set a b", "vercel domains ls", "vercel dns ls", "vercel certs ls",
+            "vercel pull --environment=production", "vercel link --yes", "vercel git connect",
+            "vercel integration add neon", "vercel teams switch x", "vercel api /v9/projects",
+            "vercel secrets ls", "vercel rolling-release start", "vercel project rm x",
+            "vercel project add x", "vercel env pull .env.prod", "vercel env add X production",
+            "vercel env rm X", "vercel blob del x", "vercel ls --prod",
+            "vercel ls && vercel env pull", "vercel ls; vercel deploy",
+            "cd apps/web && vercel --prod --yes", "npx vercel@latest deploy",
+            "npx --yes vercel env pull", "pnpm dlx vercel deploy",
+            "pnpm -C apps/web exec vercel deploy", "/opt/homebrew/bin/vercel deploy",
+            "sh -c 'vercel deploy'", "bash -lc \"vercel env pull\"",
+            "ssh mini 'cd x && vercel deploy'", "ssh mini vercel deploy",
+            "VERCEL_ORG_ID=x vercel deploy", "x=$(vercel env pull)",
+            "vercel --scope straightaway deploy", "bash <<'EOF'\nvercel deploy\nEOF",
+            "vc", "vc deploy", "vc --prod", "vc env pull", "npx vc deploy",
+        )] + [(api, "Bash", cmd) for cmd in (
+            "curl -s -H \"Authorization: Bearer $VERCEL_TOKEN\" 'https://api.vercel.com/v9/projects/prj_x/env?decrypt=true'",
+            "curl https://api.vercel.com/v10/projects/prj_x/env/env_1",
+            "curl -X POST https://api.vercel.com/v13/deployments -d @body.json",
+            "curl -X DELETE https://api.vercel.com/v9/projects/prj_x",
+            "curl --request PATCH https://api.vercel.com/v9/projects/prj_x",
+            "curl -X POST https://api.vercel.com/v1/integrations/deploy/prj_x/abc",
+            "python3 -c \"import requests; requests.post('https://api.vercel.com/v13/deployments', json={})\"",
+        )] + [
+            (cli, "exec_command", "vercel env pull"),
+            (cli, "shell", "vercel deploy"),
+            (mcp, "mcp__vercel__deploy_to_vercel", {}),
+            (mcp, "mcp__vercel__buy_domain", {}),
+            (mcp, "mcp__plugin_vercel_vercel__deploy_to_vercel", {}),
+        ]
+        allowed = [("Bash", cmd) for cmd in (
+            "vercel ls", "vercel list", "vercel inspect https://x.vercel.app --logs",
+            "vercel logs https://x.vercel.app --json", "vercel whoami", "vercel env ls",
+            "vercel env ls production", "vercel project ls", "vercel project inspect x",
+            "vercel help deploy", "vercel --version", "vercel -v", "vercel --help",
+            "vercel --scope straightaway ls", "vercel -S straightaway logs x",
+            "npx vercel@latest ls", "x=$(vercel ls)", "cd apps/web && vercel ls",
+            "grep vercel README.md", "cat apps/web/vercel.json",
+            "git commit -m \"fix vercel deploy notes\"", "pnpm add -D vercel",
+            "npm i -g vercel@latest", "which vercel neonctl", "pnpm build",
+            "python3 - <<'PY'\nvercel = 1\nPY",
+            "vc ls", "vc logs https://x.vercel.app", "which vc",
+            "curl -s -H \"Authorization: Bearer $VERCEL_TOKEN\" https://api.vercel.com/v9/projects",
+            "curl 'https://api.vercel.com/v6/deployments?projectId=prj_x&limit=5'",
+            "grep -rn api.vercel.com docs",
+        )] + [
+            ("mcp__vercel__list_deployments", {}),
+            ("mcp__vercel__get_deployment_build_logs", {}),
+            ("mcp__vercel__search_vercel_documentation", {}),
+            ("mcp__vercel__web_fetch_vercel_url", {}),
+        ]
+        self.assert_prod_guard(blocked, allowed)
+
     def test_plugin_snapshots_are_read_only(self):
         """Installed snapshots reject writes; the source repo and reads stay open."""
         snap = "/Users/x/.cl" + "aude/rem" + "ote/plugins/h1/skills/triage/SKILL.md"

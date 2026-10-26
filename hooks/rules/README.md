@@ -39,7 +39,7 @@ Regexes are Oniguruma (jq): `(?i)` for case-insensitive, `[[:space:]]` classes w
 
 | Rule kind | Claude event | Registered |
 |---|---|---|
-| `tool` | `PreToolUse`, matcher `*` | ✅ in `.dotfiles/.claude/settings.json` |
+| `tool` | `PreToolUse`, matcher `*` | Claude settings and Codex hooks.json (`run.sh tool codex`) |
 | `response` | `Stop` | Claude settings and Codex hooks.json |
 | `response`, scope all | `SubagentStop` | Claude settings |
 
@@ -89,6 +89,31 @@ plus `list-variables`, so values never reach a transcript. `railway-cli-read-onl
 `run`, `shell`, `ssh`, `connect`, `api`, and the rest); `status`, `logs`, `metrics`, `list`,
 `deployment list`, `service list`, `domain list`, `docs` stay open. Deny list, not allow
 list, so `railway logs && railway up` cannot slip through. Ledger: L-0114.
+
+## Neon and Vercel
+
+Agents never touch the production database (Oct 2026: a preview build seeded production Neon).
+`neon-direct-connection` denies any shell or MCP call carrying a Neon endpoint host or connection
+string (`ep-*.neon.tech`, `postgres://...neon.tech`, `-h`/`PGHOST=`/`host=` with a `.neon.tech`
+host); no read exception. `neon-cli-read-only` allows only `neonctl` projects/branches list|get,
+`me`, orgs list, operations list, help, version. `neon-api-read-only` keeps `console.neon.tech/api`
+GET-only and never fetches `connection_uri` or `reveal_password`; a write Rio approved in chat for
+that exact call passes with a `RIO_NEON_WRITE_OK=1 ` prefix, credential paths still blocked.
+`vercel-cli-read-only` (also the `vc` alias) allows ls, inspect, logs, whoami, env ls, project
+ls|inspect, help, version. Everything else denies, including bare `vercel` (deploys), `--prod`,
+`pull`, and `build`/`dev`, which load Vercel-held env (`build` runs the seed or migrate).
+`vercel-api-read-only` keeps `api.vercel.com` GET-only and denies any `/env` or `decrypt` read,
+with no override. The MCP rules allow
+only Neon `list_`/`get_`/`describe_` (not `get_connection_string`) and Vercel
+`list_`/`get_`/`search_`/`fetch_`/`web_fetch`.
+
+CLI checks run at command positions (start, after `;`, `&&`, `|`, `$(`, `sh -c '`, `ssh host`,
+through npx/pnpm/env/keyfor wrappers), so `grep vercel` and commit messages pass while
+`vercel ls && vercel env pull` denies. Misses: hosts or methods built at runtime, a script file
+run later. False denies: a prose heredoc line starting with lowercase `vercel`, `vc` or `neon`,
+and a shell command that merely mentions an API host with a credential path (`connection_uri`,
+`/env`, `decrypt`). Edit such docs with the file tools.
+Ledger: L-0114.
 
 ## UI tests
 

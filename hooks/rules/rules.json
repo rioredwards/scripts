@@ -315,6 +315,75 @@
       "text": "BLOCKED: railway CLI is read-only for agents. Writes, deploys, and anything that exposes variables (variables, run, shell, ssh, connect, api) are Rio's. Allowed: railway status, logs, metrics, list, deployment list, service list, domain list, docs."
     },
     {
+      "id": "neon-direct-connection",
+      "on": "tool",
+      "match": {
+        "tool": "^(Bash|exec_command|shell|mcp__.*)$",
+        "input": "(?i)(?:(?:^|[^a-z0-9-])ep-[a-z0-9-]+(?:\\.[a-z0-9-]+)*\\.neon\\.tech|postgres(?:ql)?(?:\\+[a-z0-9]+)?://[^[:space:]'\\\"]*neon\\.tech|(?:(?:^|[[:space:]])(?:-h|--host)(?:[[:space:]]+|=)['\\\"]?|(?:pghost|host)[[:space:]]*=[[:space:]]*['\\\"]?)[a-z0-9.-]*\\.neon\\.tech)"
+      },
+      "do": "deny",
+      "text": "BLOCKED: agents never connect to a Neon database. Production lives there, and a seed run against it wiped production in Oct 2026. No read exception. Work against the local databases (straightaway_next_dev, _test, _e2e, or a restored dump); if a task needs production data, ask Rio to run the query himself."
+    },
+    {
+      "id": "neon-cli-read-only",
+      "on": "tool",
+      "match": {
+        "tool": "^(Bash|exec_command|shell)$",
+        "input": "(?:^|[;&|({\\n`]|\\$\\(|(?:^|[[:space:]])-[A-Za-z]*c[[:space:]]+['\\\"]|(?:^|[[:space:];&|(])ssh(?:[[:space:]]+-[^[:space:]]+(?:[[:space:]]+[^-[:space:]][^[:space:]]*)?)*[[:space:]]+[^-[:space:];&|][^[:space:];&|]*[[:space:]]+['\\\"]?)[[:space:]]*(?:[A-Za-z_][A-Za-z0-9_]*=(?:'[^']*'|\\\"[^\\\"]*\\\"|[^[:space:];&|]*)[[:space:]]+|(?:sudo|command|builtin|exec|nohup|time|env|xargs|npx|bunx|pnpx|timeout(?:[[:space:]]+-[^[:space:]]+)*[[:space:]]+[0-9][0-9.]*[smhd]?|keyfor[[:space:]]+--run[[:space:]]+[^[:space:]]+[[:space:]]+--|(?:pnpm|yarn|npm|bun)(?:[[:space:]]+-[^[:space:]]+(?:[[:space:]]+[^-[:space:]][^[:space:]]*)?)*(?:[[:space:]]+(?:dlx|exec|x|run))?)(?:[[:space:]]+-[^[:space:]]+)*[[:space:]]+)*(?:[^[:space:];&|'\\\"=()]*/)?neon(?:ctl)?(?:@[^[:space:];&|)'\\\"]*)?(?=[[:space:];&|)'\\\"]|$)(?![[:space:]]+[=+*/%<>!:,])(?!(?>[[:space:]]+(?:(?:--(?:api-key|output|config-dir|context-file|org-id|project-id)|-o)(?:=[^[:space:]]+|[[:space:]]+[^[:space:]]+)|-(?!(?:h|v|-help|-version)(?=[[:space:];&|)'\\\"]|$))[^[:space:]]+))*+(?:[[:space:]]+(?:(?:projects?|branch(?:es)?)[[:space:]]+(?:list|ls|get)|me|orgs?[[:space:]]+(?:list|ls)|operations?[[:space:]]+(?:list|ls)|help|-h|--help|-v|--version|[a-z-]+[[:space:]]+(?:-h|--help))(?=[[:space:];&|)'\\\"]|$)|[[:space:]]*(?:$|[;&|)'\\\"\\n])))"
+      },
+      "do": "deny",
+      "text": "BLOCKED: the Neon CLI is read-only for agents. Allowed: projects list|get, branches list|get, me, orgs list, operations list, --help, --version. Connection strings, branch create/delete/restore, databases, roles, auth, ip-allow and set-context are Rio's; ask him to run them."
+    },
+    {
+      "id": "neon-api-read-only",
+      "on": "tool",
+      "match": {
+        "tool": "^(Bash|exec_command|shell)$",
+        "input": "(?s)^(?=.*console\\.neon\\.tech/api)(?=.*(?:connection_uri|reveal_password|(?:curl|wget)(?:[^|;&\\n]|\\\\\\n)*[[:space:]](?:-[a-zA-Z]*X[[:space:]]*['\\\"]?(?i:POST|PUT|PATCH|DELETE)\\b|--request(?:[[:space:]]+|=)['\\\"]?(?i:POST|PUT|PATCH|DELETE)\\b|(?:-[a-zA-Z]*[dFT]|--data(?:-[a-z]+)?|--json|--form(?:-string)?|--upload-file|--post-data|--post-file|--body-data|--body-file|--method)(?:[[:space:]=]|$))|(?:^|[[:space:]])(?:http|https|xh)[[:space:]]+(?:-[^[:space:]]+[[:space:]]+)*(?i:POST|PUT|PATCH|DELETE)[[:space:]]|method['\\\"]?[[:space:]]*[:=][[:space:]]*['\\\"](?i:POST|PUT|PATCH|DELETE)['\\\"]|\\.(?:post|put|patch|delete)\\(|\\.request\\([[:space:]]*['\\\"](?i:POST|PUT|PATCH|DELETE)['\\\"]|(?:Request|urlopen)\\([^)]*data[[:space:]]*=))"
+      },
+      "unless": "(?s)^(?!.*(?:connection_uri|reveal_password)).*RIO_NEON_WRITE_OK=1",
+      "do": "deny",
+      "text": "BLOCKED: the Neon API is GET-only for agents, and connection_uri and reveal_password are never fetched. Reads of projects, branches and consumption stay open. A write (for example deleting a recovery branch) needs Rio's explicit yes in this conversation for that exact call; only then re-run it prefixed with `RIO_NEON_WRITE_OK=1 `. Credential reads stay blocked even then. This is an automated gate, not a denial from Rio."
+    },
+    {
+      "id": "neon-mcp-read-only",
+      "on": "tool",
+      "match": {
+        "tool": "^mcp__(?:neon|plugin_neon_[a-z0-9_-]+?)__(?!(?:list_|get_(?!connection_string)|describe_))"
+      },
+      "do": "deny",
+      "text": "BLOCKED: the Neon MCP is read-only for agents. Only list_, get_ and describe_ tools run; connection strings, SQL, migrations, and project or branch changes are Rio's. Ask him."
+    },
+    {
+      "id": "vercel-cli-read-only",
+      "on": "tool",
+      "match": {
+        "tool": "^(Bash|exec_command|shell)$",
+        "input": "(?:^|[;&|({\\n`]|\\$\\(|(?:^|[[:space:]])-[A-Za-z]*c[[:space:]]+['\\\"]|(?:^|[[:space:];&|(])ssh(?:[[:space:]]+-[^[:space:]]+(?:[[:space:]]+[^-[:space:]][^[:space:]]*)?)*[[:space:]]+[^-[:space:];&|][^[:space:];&|]*[[:space:]]+['\\\"]?)[[:space:]]*(?:[A-Za-z_][A-Za-z0-9_]*=(?:'[^']*'|\\\"[^\\\"]*\\\"|[^[:space:];&|]*)[[:space:]]+|(?:sudo|command|builtin|exec|nohup|time|env|xargs|npx|bunx|pnpx|timeout(?:[[:space:]]+-[^[:space:]]+)*[[:space:]]+[0-9][0-9.]*[smhd]?|keyfor[[:space:]]+--run[[:space:]]+[^[:space:]]+[[:space:]]+--|(?:pnpm|yarn|npm|bun)(?:[[:space:]]+-[^[:space:]]+(?:[[:space:]]+[^-[:space:]][^[:space:]]*)?)*(?:[[:space:]]+(?:dlx|exec|x|run))?)(?:[[:space:]]+-[^[:space:]]+)*[[:space:]]+)*(?:[^[:space:];&|'\\\"=()]*/)?(?:vercel|vc)(?:@[^[:space:];&|)'\\\"]*)?(?=[[:space:];&|)'\\\"]|$)(?![[:space:]]+[=+*/%<>!:,])(?:(?!(?>[[:space:]]+(?:(?:--(?:scope|cwd|token|team|local-config|global-config)|-[SAtQT])(?:=[^[:space:]]+|[[:space:]]+[^[:space:]]+)|-(?!(?:h|v|-help|-version)(?=[[:space:];&|)'\\\"]|$))[^[:space:]]+))*+[[:space:]]+(?:ls|list|inspect|logs|whoami|help|-h|--help|-v|--version|env[[:space:]]+(?:ls|list)|projects?[[:space:]]+(?:ls|list|inspect))(?=[[:space:];&|)'\\\"]|$))|(?=(?:[^;&|\\n]|\\\\\\n)*[[:space:]](?:--prod|--target(?:=|[[:space:]]+)production)(?=[[:space:];&|)'\\\"]|$)))"
+      },
+      "do": "deny",
+      "text": "BLOCKED: the vercel CLI is read-only for agents. Bare `vercel` deploys; --prod, pull, env (except ls), build and dev deploy or load Vercel-held secrets, including the production database URL. Allowed: vercel ls, inspect, logs, whoami, env ls, project ls|inspect, help, --version. Build and run locally with `pnpm build` or `dev-up`; ask Rio for deploys, env and project changes."
+    },
+    {
+      "id": "vercel-api-read-only",
+      "on": "tool",
+      "match": {
+        "tool": "^(Bash|exec_command|shell)$",
+        "input": "(?s)^(?=.*(?:api\\.vercel\\.com|vercel\\.com/api))(?=.*(?:/env(?:[/?#'\\\"[:space:]]|$)|decrypt|(?:curl|wget)(?:[^|;&\\n]|\\\\\\n)*[[:space:]](?:-[a-zA-Z]*X[[:space:]]*['\\\"]?(?i:POST|PUT|PATCH|DELETE)\\b|--request(?:[[:space:]]+|=)['\\\"]?(?i:POST|PUT|PATCH|DELETE)\\b|(?:-[a-zA-Z]*[dFT]|--data(?:-[a-z]+)?|--json|--form(?:-string)?|--upload-file|--post-data|--post-file|--body-data|--body-file|--method)(?:[[:space:]=]|$))|(?:^|[[:space:]])(?:http|https|xh)[[:space:]]+(?:-[^[:space:]]+[[:space:]]+)*(?i:POST|PUT|PATCH|DELETE)[[:space:]]|method['\\\"]?[[:space:]]*[:=][[:space:]]*['\\\"](?i:POST|PUT|PATCH|DELETE)['\\\"]|\\.(?:post|put|patch|delete)\\(|\\.request\\([[:space:]]*['\\\"](?i:POST|PUT|PATCH|DELETE)['\\\"]|(?:Request|urlopen)\\([^)]*data[[:space:]]*=))"
+      },
+      "do": "deny",
+      "text": "BLOCKED: the Vercel REST API is GET-only for agents, and env reads (/env, decrypt) are never made: they return production secrets. Use vercel ls, inspect, logs or env ls instead; ask Rio for deploys, env and project changes."
+    },
+    {
+      "id": "vercel-mcp-read-only",
+      "on": "tool",
+      "match": {
+        "tool": "^mcp__(?:vercel|plugin_vercel_[a-z0-9_-]+?)__(?!(?:list_|get_|search_|fetch_|web_fetch))"
+      },
+      "do": "deny",
+      "text": "BLOCKED: the Vercel MCP is read-only for agents. Only list_, get_, search_, fetch_ and web_fetch tools run; deploys, domain purchases and other changes are Rio's. Ask him."
+    },
+    {
       "id": "no-writing-raw-tabs",
       "on": "tool",
       "match": {
