@@ -159,6 +159,8 @@ class RulesTests(unittest.TestCase):
     def test_asks_must_name_step_5(self):
         for text, code in (("❓ Your call on the key: keep or remove?", 2),
                            ("❓ Merge to prod?\nWhy you: it ships to customers.", 0),
+                           ("Should I go ahead?\nWhy you: this plan needs your yes before work starts.", 0),
+                           ("Should I go ahead?", 2),
                            ("Want me to make that edit in agent-skills?", 2),
                            ('Build the age gate?', 2),
                            ('▶️ Next card: #445?', 2),
@@ -172,6 +174,11 @@ class RulesTests(unittest.TestCase):
             with self.subTest(text=text):
                 result = self.run_hook("response", {"last_assistant_message": text})
                 self.assertEqual(result.returncode, code, result.stderr)
+
+    def test_bounce_is_never_approval(self):
+        rules = {r["id"]: r for r in json.loads((ROOT / "rules.json").read_text())["rules"]}
+        self.assertIn("never his yes", rules["ask-needs-step-5"]["text"])
+        self.assertIn("never treat silence as approval", rules["away-no-questions"]["text"])
 
     def test_away_bounces_every_question(self):
         """attention=away: nobody answers, so even a step-5 ask bounces."""
