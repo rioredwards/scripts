@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """SSH preflight: wake the MacBook on the verified home LAN, then wait briefly."""
+
+WAKE_WAIT_SECONDS = 90
 import json
 import os
 from pathlib import Path
@@ -95,7 +97,8 @@ def main(args):
         network = home_network(config)
         send_wake(network, config)
         print('MacBook unreachable; sent home-network wake signal.', file=sys.stderr)
-        deadline = time.monotonic() + 30
+        # Deep-idle DarkWake plus Tailscale takes 30-60 s (pmset log, 2026-10-27).
+        deadline = time.monotonic() + WAKE_WAIT_SECONDS
         while time.monotonic() < deadline:
             if reachable(host, port):
                 return 0
@@ -103,7 +106,7 @@ def main(args):
             # Wi-Fi broadcasts can be lost; repeat only inside this bounded attempt.
             if time.monotonic() < deadline:
                 send_wake(network, config)
-        raise RuntimeError('MacBook still unreachable after 30 seconds')
+        raise RuntimeError(f'MacBook still unreachable after {WAKE_WAIT_SECONDS} seconds')
     except (OSError, ValueError, KeyError, AttributeError, RuntimeError, subprocess.SubprocessError) as error:
         print(f'MacBook wake: {error}', file=sys.stderr)
         return 1

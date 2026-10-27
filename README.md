@@ -85,7 +85,8 @@ Archived or old one-off scripts live in `archive/`.
 
 The Mini's SSH config runs `macbook-wake HOST PORT` before connecting to `macbook`
 or its MagicDNS name. Unreachable hosts get the tested home-LAN wake packet and
-up to 30 seconds to respond; authentication and commands still run once in SSH.
+up to 90 seconds to respond (deep-idle wake plus Tailscale takes 30-60 s); authentication
+and commands still run once in SSH.
 `ssh -G` and control requests do not wake it. Python 3, nc, route, arp and ifconfig
 are macOS dependencies, verified on both Macs.
 

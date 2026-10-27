@@ -75,11 +75,11 @@ class WakeTest(unittest.TestCase):
              patch.object(wake, 'home_network', return_value=('ip', 'broadcast')), \
              patch.object(wake, 'settings', return_value={}), \
              patch.object(wake, 'send_wake'), patch.object(wake.time, 'sleep'), \
-             patch.object(wake.time, 'monotonic', side_effect=[0, 1, 31, 31]):
+             patch.object(wake.time, 'monotonic', side_effect=[0, 1, 91, 91]):
             err = io.StringIO()
             with contextlib.redirect_stderr(err):
                 self.assertEqual(wake.main(['host', '22']), 1)
-            self.assertIn('30 seconds', err.getvalue())
+            self.assertIn('90 seconds', err.getvalue())
 
     def test_packet_contains_the_target_mac_sixteen_times(self):
         sock = Mock()
