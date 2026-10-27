@@ -28,7 +28,7 @@ _judge_questions() {
   jq -n '[
     {name:"needless_ask", instructions:"True if the AGENT REPLY asks Rio to decide or answer something the agent could settle itself (an obvious, standard, or easily reversed engineering call it could look up or just make) or could safely defer. False if it asks nothing, or the decision is genuinely his: hard to undo, risky (merging, losing work, spending money, production data), or a product or taste call with no standard answer."},
     {name:"unclear", instructions:"True if a busy reader skimming the AGENT REPLY once would struggle to tell what happened and what, if anything, they must do: jargon where plain words would do, file, branch, or function names instead of what they mean, a decision buried mid-text, or vague about what matters (how big, what changes for him). False if it is plain and the point comes first."},
-    {name:"noise", instructions:"True if a meaningful part of the AGENT REPLY spends his attention on things he does not need: restating his own request back, narrating steps taken, listing options considered and rejected, or tacking on offers, ideas, or next tasks he did not ask for. False if nearly every sentence carries the outcome, what he would notice, or a decision he must make."}
+    {name:"noise", instructions:"True if a meaningful part of the AGENT REPLY spends his attention on things he does not need: restating his own request back, narrating steps taken, listing options considered and rejected, or tacking on offers, ideas, or next tasks he did not ask for. A one-line flag of a bug, risk, or design problem the agent noticed is not noise. False if nearly every sentence carries the outcome, what he would notice, a decision he must make, or a noticed problem flagged in one line."}
   ]'
 }
 
