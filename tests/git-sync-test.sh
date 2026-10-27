@@ -50,3 +50,31 @@ for scenario in duplicate ahead conflict; do
   fi
   echo "PASS: $scenario"
 done
+
+# Regression (.dotfiles#49): a rebase that succeeds but leaves the submodule
+# pointer dirty is transient (exit 3), not a "Rebasing failed" stall.
+root="$tmp/submodule-flip"
+mkdir -p "$root"
+git init -q --bare -b main "$root/remote"
+git init -q -b main "$root/sub"
+git -C "$root/sub" commit -qm s1 --allow-empty
+git clone -q "$root/remote" "$root/local" 2>/dev/null
+cd "$root/local"
+git -c protocol.file.allow=always submodule add -q "$root/sub" sub
+git commit -qm seed
+git push -q -u origin main
+git config branch.main.sync true
+git clone -q "$root/remote" "$root/other" 2>/dev/null
+git -C "$root/sub" commit -qm s2 --allow-empty
+git -C "$root/other" update-index --cacheinfo "160000,$(git -C "$root/sub" rev-parse HEAD),sub"
+git -C "$root/other" commit -qm "bump sub"
+git -C "$root/other" push -q
+echo local > note
+git add note
+git commit -qm local
+rc=0
+bash "$sync_script" sync > "$root/output" 2>&1 || rc=$?
+[ "$rc" -eq 3 ] || { cat "$root/output"; fail "submodule-flip expected exit 3, got $rc"; }
+[ ! -d .git/rebase-merge ] || fail "submodule-flip left a rebase in progress"
+grep -q "Rebase succeeded" "$root/output" || { cat "$root/output"; fail "submodule-flip missing transient message"; }
+echo "PASS: submodule-flip"
