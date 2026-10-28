@@ -127,7 +127,8 @@ class SharedHooks(unittest.TestCase):
         r = self.run_hook('task-start.sh', {'session_id': 's', 'prompt': 'fix the header'})
         c = json.loads(r.stdout)['hookSpecificOutput']['additionalContext']
         self.assertIn('load the `utils:sesh` skill', c)
-        self.assertIn('`--topic <task> --light` mode', c)
+        self.assertIn('`--topic <task>` mode', c)
+        self.assertNotIn('--light', c)
         self.assertIn('skill name, not a shell command', c)
         self.assertIn('`session-handoff`', c)
         self.assertIn('/core:loop', c)

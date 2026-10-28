@@ -14,5 +14,5 @@ hook_is_delegate "$INPUT" && exit 0
 # Background events (task notifications, reminders) arrive as prompts too; they start nothing.
 case "$(printf '%s' "$INPUT" | jq -r '.prompt // ""' 2>/dev/null)" in '<task-notification'*|'<system-reminder'*) exit 0 ;; esac
 
-jq -nc --arg c "If this message starts a task (not a reply or a pure question about this session): load the \`utils:sesh\` skill and use its \`--topic <task> --light\` mode before other work, since how it was last done beats docs, defaults, and guesses. \`utils:sesh\` is a skill name, not a shell command; its CLI is \`session-handoff\`. Non-trivial task: suggest \`/core:loop\` first." \
+jq -nc --arg c "If this message starts a task (not a reply or a pure question about this session): load the \`utils:sesh\` skill and use its \`--topic <task>\` mode before other work; follow the skill's reading depth, since how it was last done beats docs, defaults, and guesses. \`utils:sesh\` is a skill name, not a shell command; its CLI is \`session-handoff\`. Non-trivial task: suggest \`/core:loop\` first." \
   '{hookSpecificOutput:{hookEventName:"UserPromptSubmit",additionalContext:$c}}'
