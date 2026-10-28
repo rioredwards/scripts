@@ -126,7 +126,10 @@ class SharedHooks(unittest.TestCase):
         sessions first and offer core:loop. Delegates get their task from an agent."""
         r = self.run_hook('task-start.sh', {'session_id': 's', 'prompt': 'fix the header'})
         c = json.loads(r.stdout)['hookSpecificOutput']['additionalContext']
-        self.assertIn('utils:sesh --topic', c)
+        self.assertIn('load the `utils:sesh` skill', c)
+        self.assertIn('`--topic <task> --light` mode', c)
+        self.assertIn('skill name, not a shell command', c)
+        self.assertIn('`session-handoff`', c)
         self.assertIn('/core:loop', c)
         r = self.run_hook('task-start.sh', {'session_id': 's', 'prompt': 'x', 'agent_id': 'sub'})
         self.assertEqual(r.stdout, '')
