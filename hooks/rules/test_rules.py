@@ -608,8 +608,8 @@ class RulesTests(unittest.TestCase):
         ]
         self.assert_prod_guard(blocked, allowed)
 
-    def test_vercel_is_read_only(self):
-        """Deploys and anything that loads Vercel-held secrets are Rio's; status and logs stay open."""
+    def test_vercel_blocks_credentials_not_ordinary_operations(self):
+        """Vercel operations stay available; credential exports and direct DB access do not."""
         cli, mcp, api = "vercel-cli-read-only", "vercel-mcp-read-only", "vercel-api-read-only"
         blocked = [(cli, "Bash", cmd) for cmd in (
             "vercel", "vercel --debug", "vercel .", "vercel apps/web", "vercel deploy",
@@ -682,6 +682,19 @@ class RulesTests(unittest.TestCase):
             ("mcp__vercel__search_vercel_documentation", {}),
             ("mcp__vercel__web_fetch_vercel_url", {}),
         ]
+        # Reclassify the former blanket-denied operations; retain every wrapper case.
+        credential_cases = [case for case in blocked if any(token in str(case[2])
+            for token in (" pull", "/env", "decrypt"))]
+        allowed += [(tool, value) for _, tool, value in blocked if (_, tool, value) not in credential_cases]
+        blocked = credential_cases + [(cli, "Bash", value) for value in (
+            "vercel login && vc env get DATABASE_URL", "vercel env --environment production pull",
+            "vercel env run -- printenv", "vercel --scope team pull",
+            "vercel api --method GET /v9/projects/prod/env?decrypt=true",
+        )] + [(mcp, name, {}) for name in (
+            "mcp__vercel__get_environment_variables", "mcp__vercel__decrypt_environment_variable",
+            "mcp__plugin_vercel_tools__export_secrets",
+        )]
+        allowed += [("Bash", "vercel login"), ("Bash", "vercel env add FLAG preview")]
         self.assert_prod_guard(blocked, allowed)
 
     def test_plugin_snapshots_are_read_only(self):

@@ -359,29 +359,29 @@
       "on": "tool",
       "match": {
         "tool": "^(Bash|exec_command|shell)$",
-        "input": "(?:^|[;&|\\n`]|[$<>]\\(|(?:^|[[:space:];&|(/])(?:ba|da|k|z|fi)?sh(?:[[:space:]]+-[^[:space:]]+)*?[[:space:]]+-[A-Za-z]*c[[:space:]]+['\\\"]|(?:^|[[:space:];&|(])ssh(?:[[:space:]]+-[^[:space:]]+(?:[[:space:]]+[^-[:space:]][^[:space:]]*)?)*[[:space:]]+[^-[:space:];&|][^[:space:];&|]*[[:space:]]+['\\\"]?)(?:[[:space:]]*[({])*[[:space:]]*(?:[A-Za-z_][A-Za-z0-9_]*=(?:'[^']*'|\\\"[^\\\"]*\\\"|[^[:space:];&|]*)[[:space:]]+|(?:sudo|command|builtin|exec|nohup|time|env|xargs|npx|bunx|pnpx|then|do|else|elif|if|while|until|!|timeout(?:[[:space:]]+-[^[:space:]]+)*[[:space:]]+[0-9][0-9.]*[smhd]?|keyfor[[:space:]]+--run[[:space:]]+[^[:space:]]+[[:space:]]+--|(?:pnpm|yarn|npm|bun)(?:[[:space:]]+-[^[:space:]]+(?:[[:space:]]+[^-[:space:]][^[:space:]]*)?)*(?:[[:space:]]+(?:dlx|exec|x|run))?)(?:[[:space:]]+-[^[:space:]]+)*[[:space:]]+)*(?:[^[:space:];&|'\\\"=()]*/)?(?:vercel|vc)(?:@[^[:space:];&|)'\\\"]*)?(?=[[:space:];&]|$)(?![[:space:]]+[=+*/%<>!:,])(?:(?!(?>[[:space:]]+(?:(?:--(?:scope|cwd|token|team|local-config|global-config)|-[SAtQT])(?:=[^[:space:]]+|[[:space:]]+[^[:space:]]+)|-(?!(?:h|v|-help|-version)(?=[[:space:];&|)'\\\"]|$))[^[:space:]]+))*+[[:space:]]+(?:ls|list|inspect|logs|whoami|logout|help|-h|--help|-v|--version|env[[:space:]]+(?:ls|list)|projects?[[:space:]]+(?:ls|list|inspect))(?=[[:space:];&|)'\\\"]|$))|(?=(?:[^;&|\\n]|\\\\\\n)*[[:space:]](?:--prod|--target(?:=|[[:space:]]+)production)(?=[[:space:];&|)'\\\"]|$)))"
+        "input": "(?:^|[;&|\\n`]|[$<>]\\(|(?:^|[[:space:];&|(/])(?:ba|da|k|z|fi)?sh(?:[[:space:]]+-[^[:space:]]+)*?[[:space:]]+-[A-Za-z]*c[[:space:]]+['\\\"]|(?:^|[[:space:];&|(])ssh(?:[[:space:]]+-[^[:space:]]+(?:[[:space:]]+[^-[:space:]][^[:space:]]*)?)*[[:space:]]+[^-[:space:];&|][^[:space:];&|]*[[:space:]]+['\\\"]?)(?:[[:space:]]*[({])*[[:space:]]*(?:[A-Za-z_][A-Za-z0-9_]*=(?:'[^']*'|\\\"[^\\\"]*\\\"|[^[:space:];&|]*)[[:space:]]+|(?:sudo|command|builtin|exec|nohup|time|env|xargs|npx|bunx|pnpx|then|do|else|elif|if|while|until|!|timeout(?:[[:space:]]+-[^[:space:]]+)*[[:space:]]+[0-9][0-9.]*[smhd]?|keyfor[[:space:]]+--run[[:space:]]+[^[:space:]]+[[:space:]]+--|(?:pnpm|yarn|npm|bun)(?:[[:space:]]+-[^[:space:]]+(?:[[:space:]]+[^-[:space:]][^[:space:]]*)?)*(?:[[:space:]]+(?:dlx|exec|x|run))?)(?:[[:space:]]+-[^[:space:]]+)*[[:space:]]+)*(?:[^[:space:];&|'\\\"=()]*/)?(?:vercel|vc)(?:@[^[:space:];&|)'\\\"]*)?(?=[[:space:];&]|$)(?![[:space:]]+[=+*/%<>!:,])(?>[[:space:]]+(?:(?:--(?:scope|cwd|token|team|local-config|global-config|environment|target)|-[SAtQT])(?:=[^[:space:]]+|[[:space:]]+[^[:space:]]+)|-(?!(?:h|v|-help|-version)(?=[[:space:];&|)'\\\"]|$))[^[:space:]]+))*+[[:space:]]+(?:pull|env(?>[[:space:]]+(?:(?:--(?:scope|cwd|token|team|local-config|global-config|environment|target)|-[SAtQT])(?:=[^[:space:]]+|[[:space:]]+[^[:space:]]+)|-(?!(?:h|v|-help|-version)(?=[[:space:];&|)'\\\"]|$))[^[:space:]]+))*+[[:space:]]+(?:pull|get|run)|api(?=[[:space:]])[^;&|\\n]*(?:/envs?(?:[/?#'\"[:space:]]|$)|decrypt|connection_uri|reveal_password)[^;&|\\n]*)(?=[[:space:];&|)'\"]|$)"
       },
       "do": "deny",
-      "text": "BLOCKED: the vercel CLI is read-only for agents. Bare `vercel` deploys; --prod, pull, env (except ls), build and dev deploy or load Vercel-held secrets, including the production database URL. Allowed: vercel ls, inspect, logs, whoami, logout, env ls, project ls|inspect, help, --version. Build and run locally with `pnpm build` or `dev-up`; ask Rio for deploys, env and project changes. Only writing prose that names the command (a heredoc note or message body)? Write it with the file tools."
+      "text": "BLOCKED: Vercel bulk environment export and secret retrieval are not allowed. Use env ls for metadata and keep production DB credentials in provider-managed Secret variables; ask Rio to supply dev-only credentials. Ordinary Vercel operations are allowed, subject to existing approval rules for production deploys, spend and destructive changes."
     },
     {
       "id": "vercel-api-read-only",
       "on": "tool",
       "match": {
         "tool": "^(Bash|exec_command|shell)$",
-        "input": "(?s)^(?=.*(?:api\\.vercel\\.com|vercel\\.com/api))(?=.*(?:/env(?:[/?#'\\\"[:space:]]|$)|decrypt|(?:curl|wget)(?:[^|;&\\n]|\\\\\\n)*[[:space:]](?:-[a-zA-Z]*X[[:space:]]*['\\\"]?(?i:POST|PUT|PATCH|DELETE)\\b|--request(?:[[:space:]]+|=)['\\\"]?(?i:POST|PUT|PATCH|DELETE)\\b|(?:-[a-zA-Z]*[dFT]|--data(?:-[a-z]+)?|--json|--form(?:-string)?|--upload-file|--post-data|--post-file|--body-data|--body-file|--method)(?:[[:space:]=]|$))|(?:^|[[:space:]])(?:http|https|xh)[[:space:]]+(?:-[^[:space:]]+[[:space:]]+)*(?i:POST|PUT|PATCH|DELETE)[[:space:]]|method['\\\"]?[[:space:]]*[:=][[:space:]]*['\\\"](?i:POST|PUT|PATCH|DELETE)['\\\"]|\\.(?:post|put|patch|delete)\\(|\\.request\\([[:space:]]*['\\\"](?i:POST|PUT|PATCH|DELETE)['\\\"]|(?:Request|urlopen)\\([^)]*data[[:space:]]*=))"
+        "input": "(?s)^(?=.*(?:api\\.vercel\\.com|vercel\\.com/api))(?=.*(?:decrypt|connection_uri|reveal_password|/envs?(?:[/?#'\"[:space:]]|$)))"
       },
       "do": "deny",
-      "text": "BLOCKED: the Vercel REST API is GET-only for agents, and env reads (/env, decrypt) are never made: they return production secrets. Use vercel ls, inspect, logs or env ls instead; ask Rio for deploys, env and project changes."
+      "text": "BLOCKED: Vercel environment export, decryption and database credential retrieval are not allowed. Use CLI env ls for metadata; ordinary Vercel API operations remain available. Ask Rio for dev-only credentials."
     },
     {
       "id": "vercel-mcp-read-only",
       "on": "tool",
       "match": {
-        "tool": "^mcp__(?:vercel|plugin_vercel_[a-z0-9_-]+?)__(?!(?:list_|get_|search_|fetch_|web_fetch))"
+        "tool": "(?i)^mcp__(?:vercel|plugin_vercel_[a-z0-9_-]+?)__.*(?:(?:get|list|read|export|pull|decrypt|reveal).*?(?:env|secret|connection|password)|(?:env|secret).*?(?:export|pull|decrypt|reveal))"
       },
       "do": "deny",
-      "text": "BLOCKED: the Vercel MCP is read-only for agents. Only list_, get_, search_, fetch_ and web_fetch tools run; deploys, domain purchases and other changes are Rio's. Ask him."
+      "text": "BLOCKED: Vercel MCP environment export, decryption and credential retrieval are not allowed. Use deployment/project metadata tools; ordinary Vercel operations remain available under existing production, spend and destructive-action approval rules."
     },
     {
       "id": "no-writing-raw-tabs",

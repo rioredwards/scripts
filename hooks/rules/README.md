@@ -98,11 +98,12 @@ inspect executed script files, resolve runtime-built hosts, isolate browser sess
 stop an unrestricted user from changing the hooks. The runner also fails open on missing
 dependencies or invalid configuration. Passing hook tests proves matching,
 not absence of production access. Revoke production-capable credentials at the provider;
-removing a local file alone leaves its other copies valid. A hard boundary requires an
-isolated agent identity with only development access, including Git deployment authority.
+removing a local file alone leaves its other copies valid. Vercel access remains available for normal app operations. A production deployment can run
+code with database authority even when its credentials are hidden; these hooks do not
+claim to isolate that authority.
 
-Credential containment and remaining identity isolation are tracked in
-[remove agent access to production cloud credentials](https://github.com/rioredwards/scripts/issues/36).
+Production DB credential protection is tracked in
+[keep production DB credentials restricted while allowing Vercel operations](https://github.com/rioredwards/scripts/issues/36).
 
 `neon-direct-connection` denies any shell or MCP call carrying a Neon endpoint host or connection
 string (`ep-*.neon.tech`, `postgres://...neon.tech`, `-h`/`PGHOST=`/`host=` with a `.neon.tech`
@@ -110,13 +111,13 @@ host); no read exception. `neon-cli-read-only` allows only `neonctl` projects/br
 `me`, orgs list, operations list, help, version. `neon-api-read-only` keeps `console.neon.tech/api`
 GET-only and never fetches `connection_uri` or `reveal_password`; a write Rio approved in chat for
 that exact call passes with a `RIO_NEON_WRITE_OK=1 ` prefix, credential paths still blocked.
-`vercel-cli-read-only` (also the `vc` alias) allows ls, inspect, logs, whoami, logout, env ls, project
-ls|inspect, help, version. Everything else denies, including bare `vercel` (deploys), `--prod`,
-`pull`, and `build`/`dev`, which load Vercel-held env (`build` runs the seed or migrate).
-`vercel-api-read-only` keeps `api.vercel.com` GET-only and denies any `/env` or `decrypt` read,
-with no override. The MCP rules allow
-only Neon `list_`/`get_`/`describe_` (not `get_connection_string`) and Vercel
-`list_`/`get_`/`search_`/`fetch_`/`web_fetch`.
+The three Vercel rules retain their historical `read-only` IDs but now guard credential
+retrieval: CLI `pull`, `env pull|get|run`, and API environment/decrypt/connection paths; MCP
+environment, secret and connection retrieval tools. Ordinary CLI/API/MCP operations, including
+login, build, dev, preview deploys and project changes, are permitted. Existing global approval
+rules still apply to production deployment, production configuration, merging, spending and destructive actions.
+Production database access remains prohibited. Provider-side Secret types and duplicate
+credential locations still need verification; hook matching alone does not prove protection.
 
 CLI checks match an invocation, not a word: the lowercase token must sit at a command position
 (start, after `;`, `&&`, `|`, newline, backtick, `$(`/`<(`, a subshell `(` or `{`, `then`/`do`,
