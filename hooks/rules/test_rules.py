@@ -875,6 +875,37 @@ class RulesTests(unittest.TestCase):
                     spawn("read this url", "web-fetch")):
             self.assertNotIn("deny", out.stdout)
 
+    def test_partial_session_reads_get_the_full_read_rule(self):
+        """Oct 29: a captain answered "what did I ask for?" from `show | awk` user turns only.
+        Partial reads get the full-read rule in Claude and Codex; full reads and search stay quiet."""
+        partial = [
+            "session-handoff show codex:a 2>/dev/null | awk '/^### user/{p=1;print;next} p' | head -120",
+            "session-handoff show codex:a --format json | python3 -c 'import json'",
+            "session-handoff show codex:a 2>&1 | sed -n '/please add/,$p'",
+            "session-handoff show claude:a > t.md; grep -n -i fix t.md",
+            "session-handoff show claude:a --human-only",
+            "session-handoff peek claude:a --overview",
+            "~/.dotfiles/.agents/bin/session-handoff peek codex:a --tokens 4000",
+        ]
+        full = [
+            "session-handoff show claude:a",
+            "session-handoff show claude:a > \"$TMPDIR/a.md\" 2>&1; wc -l \"$TMPDIR/a.md\"",
+            "session-handoff search \"full transcript\" --limit 40 | head -50",
+            "session-handoff search awk --session claude:a",
+            "session-handoff path claude:a",
+            "python3 - <<'EOF'\nrep(S, \"Read with `session-handoff peek <id>`\", \"x\")\nEOF",
+        ]
+        for agent, tool, key in (("claude", "Bash", "command"), ("codex", "exec_command", "cmd")):
+            for cmd in partial:
+                with self.subTest(agent=agent, partial=cmd):
+                    out = self.run_hook("tool", {"tool_name": tool, "tool_input": {key: cmd}}, agent).stdout
+                    self.assertIn("session-read-partial", out)
+                    self.assertNotIn('"deny"', out)
+            for cmd in full:
+                with self.subTest(agent=agent, full=cmd):
+                    out = self.run_hook("tool", {"tool_name": tool, "tool_input": {key: cmd}}, agent).stdout
+                    self.assertNotIn("session-read-partial", out)
+
 
 if __name__ == "__main__":
     unittest.main()

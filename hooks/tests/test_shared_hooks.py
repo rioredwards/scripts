@@ -128,6 +128,9 @@ class SharedHooks(unittest.TestCase):
         c = json.loads(r.stdout)['hookSpecificOutput']['additionalContext']
         self.assertIn('load the `utils:sesh` skill', c)
         self.assertIn('`--topic <task>` mode', c)
+        # Oct 29: a mid-conversation "what did I ask for?" skipped sesh; questions count too.
+        self.assertIn('asks about work in other sessions', c)
+        self.assertIn('follow-ups too', c)
         self.assertNotIn('--light', c)
         self.assertIn('skill name, not a shell command', c)
         self.assertIn('`session-handoff`', c)
