@@ -116,8 +116,11 @@ retrieval: CLI `pull`, `env pull|get|run`, and API environment/decrypt/connectio
 environment, secret and connection retrieval tools. Ordinary CLI/API/MCP operations, including
 login, build, dev, preview deploys and project changes, are permitted. Existing global approval
 rules still apply to production deployment, production configuration, merging, spending and destructive actions.
-Production database access remains prohibited. Provider-side Secret types and duplicate
-credential locations still need verification; hook matching alone does not prove protection.
+Production DB command/API access and credential retrieval remain prohibited. On 2026-10-29,
+all 18 Neon variables in the existing Vercel console were verified Secret and Production-only,
+with no Shared variables linked. This snapshot does not prove every credential location is protected.
+Browser access is outside this guard scope; no browser isolation, separate Mac login/VM, or
+new-token experiment is required.
 
 CLI checks match an invocation, not a word: the lowercase token must sit at a command position
 (start, after `;`, `&&`, `|`, newline, backtick, `$(`/`<(`, a subshell `(` or `{`, `then`/`do`,

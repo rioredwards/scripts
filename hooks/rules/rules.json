@@ -362,7 +362,7 @@
         "input": "(?:^|[;&|\\n`]|[$<>]\\(|(?:^|[[:space:];&|(/])(?:ba|da|k|z|fi)?sh(?:[[:space:]]+-[^[:space:]]+)*?[[:space:]]+-[A-Za-z]*c[[:space:]]+['\\\"]|(?:^|[[:space:];&|(])ssh(?:[[:space:]]+-[^[:space:]]+(?:[[:space:]]+[^-[:space:]][^[:space:]]*)?)*[[:space:]]+[^-[:space:];&|][^[:space:];&|]*[[:space:]]+['\\\"]?)(?:[[:space:]]*[({])*[[:space:]]*(?:[A-Za-z_][A-Za-z0-9_]*=(?:'[^']*'|\\\"[^\\\"]*\\\"|[^[:space:];&|]*)[[:space:]]+|(?:sudo|command|builtin|exec|nohup|time|env|xargs|npx|bunx|pnpx|then|do|else|elif|if|while|until|!|timeout(?:[[:space:]]+-[^[:space:]]+)*[[:space:]]+[0-9][0-9.]*[smhd]?|keyfor[[:space:]]+--run[[:space:]]+[^[:space:]]+[[:space:]]+--|(?:pnpm|yarn|npm|bun)(?:[[:space:]]+-[^[:space:]]+(?:[[:space:]]+[^-[:space:]][^[:space:]]*)?)*(?:[[:space:]]+(?:dlx|exec|x|run))?)(?:[[:space:]]+-[^[:space:]]+)*[[:space:]]+)*(?:[^[:space:];&|'\\\"=()]*/)?(?:vercel|vc)(?:@[^[:space:];&|)'\\\"]*)?(?=[[:space:];&]|$)(?![[:space:]]+[=+*/%<>!:,])(?>[[:space:]]+(?:(?:--(?:scope|cwd|token|team|local-config|global-config|environment|target)|-[SAtQT])(?:=[^[:space:]]+|[[:space:]]+[^[:space:]]+)|-(?!(?:h|v|-help|-version)(?=[[:space:];&|)'\\\"]|$))[^[:space:]]+))*+[[:space:]]+(?:pull|env(?>[[:space:]]+(?:(?:--(?:scope|cwd|token|team|local-config|global-config|environment|target)|-[SAtQT])(?:=[^[:space:]]+|[[:space:]]+[^[:space:]]+)|-(?!(?:h|v|-help|-version)(?=[[:space:];&|)'\\\"]|$))[^[:space:]]+))*+[[:space:]]+(?:pull|get|run)|api(?=[[:space:]])[^;&|\\n]*(?:/envs?(?:[/?#'\"[:space:]]|$)|decrypt|connection_uri|reveal_password)[^;&|\\n]*)(?=[[:space:];&|)'\"]|$)"
       },
       "do": "deny",
-      "text": "BLOCKED: Vercel bulk environment export and secret retrieval are not allowed. Use env ls for metadata and keep production DB credentials in provider-managed Secret variables; ask Rio to supply dev-only credentials. Ordinary Vercel operations are allowed, subject to existing approval rules for production deploys, spend and destructive changes."
+      "text": "BLOCKED: Vercel bulk environment export and secret retrieval are not allowed. Keep production DB credentials in provider-managed Secret variables; ask Rio to supply dev-only credentials. Ordinary Vercel operations are allowed, subject to existing approval rules for production deploys, spend and destructive changes."
     },
     {
       "id": "vercel-api-read-only",
@@ -372,7 +372,7 @@
         "input": "(?s)^(?=.*(?:api\\.vercel\\.com|vercel\\.com/api))(?=.*(?:decrypt|connection_uri|reveal_password|/envs?(?:[/?#'\"[:space:]]|$)))"
       },
       "do": "deny",
-      "text": "BLOCKED: Vercel environment export, decryption and database credential retrieval are not allowed. Use CLI env ls for metadata; ordinary Vercel API operations remain available. Ask Rio for dev-only credentials."
+      "text": "BLOCKED: Vercel environment export, decryption and database credential retrieval are not allowed. Ordinary Vercel API operations remain available. Ask Rio for dev-only credentials."
     },
     {
       "id": "vercel-mcp-read-only",
