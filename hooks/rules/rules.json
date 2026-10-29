@@ -495,6 +495,16 @@
       "unless": "\"prompt\":\"[[:space:]]*(?i:skill):|\"subagent_type\":\"(web-fetch|claude-code-guide|statusline-setup)\"",
       "do": "deny",
       "text": "BLOCKED: subagent briefs open with a `Skill:` line. If a skill covers this task or part of it, write `Skill: <plugin:name> (<path to its SKILL.md>). Load it first: Skill tool, else read the file.` Paraphrasing a skill loses it. If none fits, write `Skill: none`. Then re-send."
+    },
+    {
+      "id": "rio-only-action-needs-a-task",
+      "on": "response",
+      "match": {
+        "text": "(?i)\\bsudo\\b"
+      },
+      "unless": "(?i)(my tasks|task #[0-9]|assign(ed|ing)?[^.\\n]{0,24}task|no sudo|without sudo|sudo (is|was)n.t|already (ran|installed|applied))",
+      "do": "remind",
+      "text": "Your reply hands Rio a sudo command. He cannot act on something buried at the end of a long reply: the maxfiles fix sat ready in his dotfiles from Oct 10 to Oct 29 because two sessions did exactly that. File it as a task that stays in front of him, with the `assign_task` tool (kind `do`, plus a `done_when` line), or as a PM inbox `- ask:` line when headless. Keep the command in your reply as well, but file the task first. Already run, or not actually needed? Say so plainly."
     }
   ]
 }
