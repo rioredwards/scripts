@@ -29,7 +29,7 @@
       "on": "tool",
       "match": {
         "tool": "^(Bash|exec_command|shell)$",
-        "input": "(?m)^[ \\t]*(?=[^\\n]*(--headed\\b|\\bPWDEBUG\\s*=\\s*[1-9]|\\bheadless\\s*:\\s*(false|False)|\\bheadless\\s*=\\s*False|\\b_?electron\\s*\\.\\s*launch\\s*\\(|\\bplaywright\\s+test\\b[^;&|\\n]*--(ui|debug)\\b|\\bcypress\\s+open\\b))(?:(?:env\\s+)?[A-Za-z_]\\w*=[^\\s;&|]+\\s+)*(?:(?:cd|pushd)[ \\t]+[^;\\n&|]+[ \\t]*(?:&&|;)[ \\t]*)?(?:(?:env\\s+)?[A-Za-z_]\\w*=[^\\s;&|]+\\s+)*(?:(?:ssh|timeout|gtimeout)\\s+[^;\\n&|]*?\\s+[\\x22\\x27]?)?(?:[^\\s;&|]*/)?(npx|pnpm|npm|yarn|bun|bunx|node|python3?|playwright|cypress)\\b"
+        "input": "(?m)^[ \\t]*(?=[^\\n]*(--headed\\b|\\bPWDEBUG\\s*=\\s*[1-9]|\\bheadless\\s*:\\s*(false|False)|\\bheadless\\s*=\\s*False|\\b_?electron\\s*\\.\\s*launch\\s*\\(|\\bplaywright\\s+test\\b[^;&|\\n]*--(ui|debug)\\b|\\bcypress\\s+open\\b))(?:(?:env\\s+)?[A-Za-z_]\\w*=[^\\s;&|]+\\s+)*(?:(?:cd|pushd)[ \\t]+[^;\\n&|]+[ \\t]*(?:&&|;)[ \\t]*)?(?:(?:env\\s+)?[A-Za-z_]\\w*=[^\\s;&|]+\\s+)*(?:(?:ssh|timeout|gtimeout)\\s+[^;\\n&|]*?\\s+[\\x22\\x27]?)?(?:[^\\s;&|]*/)?(npx|pnpm|npm|yarn|bun|bunx|node|python3?|playwright|cypress|agent-browser)\\b"
       },
       "unless": "(^|[\\s;\"\\x27])(env\\s+)?RIO_UI_TEST_MODE=(approved|isolated)(?=[\\s;\"\\x27]|$)",
       "do": "deny",

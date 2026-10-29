@@ -124,6 +124,7 @@ class RulesTests(unittest.TestCase):
             "npx cypress open", "cypress open",
             "npx playwright test && npx cypress open",
             "cd /tmp && npx playwright test --headed",
+            "agent-browser --headed open http://example.test",
         ]
         for agent, tool, key in (("claude", "Bash", "command"),
                                  ("codex", "exec_command", "cmd")):
