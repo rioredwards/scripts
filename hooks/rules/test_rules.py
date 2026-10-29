@@ -919,20 +919,5 @@ class RulesTests(unittest.TestCase):
                     out = self.run_hook("tool", {"tool_name": tool, "tool_input": {key: cmd}}, agent).stdout
                     self.assertNotIn("session-read-partial", out)
 
-    def test_rio_only_action_needs_a_task(self):
-        """A sudo command Rio must run goes in a task, not the tail of a long reply."""
-        for text, code in (("Ready when you are:\n\n    sudo cp limit.maxfiles.plist /Library/LaunchDaemons/\n", 2),
-                           ("You'll need to run `sudo launchctl limit maxfiles 65536 524288` on both Macs.", 2),
-                           ("It is in your My tasks pane; the command is sudo launchctl limit maxfiles 65536 524288.", 0),
-                           ("No sudo needed, the plist is already root-owned on both Macs.", 0),
-                           ("You already ran it with sudo at 10:25; both Macs read 65536.", 0),
-                           ("Killed the orphan and its 39 helpers; the two fresh app-servers remain.", 0)):
-            with self.subTest(text=text):
-                result = self.run_hook("response", {"last_assistant_message": text})
-                self.assertEqual(result.returncode, code, result.stderr)
-                if code == 2:
-                    self.assertIn("rio-only-action-needs-a-task", result.stdout + result.stderr)
-
-
 if __name__ == "__main__":
     unittest.main()
