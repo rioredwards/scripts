@@ -501,8 +501,8 @@ class RulesTests(unittest.TestCase):
             with self.subTest(allowed=(tool, cmd)):
                 self.assertNotIn("deny", self.run_hook("tool", payload(tool, cmd)).stdout)
 
-    def test_neon_prod_is_out_of_reach(self):
-        """Agents never connect to Neon; its CLI, API and MCP stay read-only (Oct 2026 prod wipe)."""
+    def test_neon_command_guards(self):
+        """Text guards block known calls; they do not prove absence of production authority."""
         host = "ep-cool-darkness-a1b2c3d4.us-east-2.aws.neon.tech"
         pooler = "ep-cool-darkness-a1b2c3d4-pooler.c-2.us-east-2.aws.neon.tech"
         api = "https://console.neon.tech/api/v2/projects/p-1/branches"
@@ -623,6 +623,7 @@ class RulesTests(unittest.TestCase):
             "vercel project add x", "vercel env pull .env.prod", "vercel env add X production",
             "vercel env rm X", "vercel blob del x", "vercel ls --prod",
             "vercel ls && vercel env pull", "vercel ls; vercel deploy",
+            "vercel logout && vercel env pull", "vc logout; vc deploy",
             "cd apps/web && vercel --prod --yes", "npx vercel@latest deploy",
             "npx --yes vercel env pull", "pnpm dlx vercel deploy",
             "pnpm -C apps/web exec vercel deploy", "/opt/homebrew/bin/vercel deploy",
@@ -664,6 +665,7 @@ class RulesTests(unittest.TestCase):
             "npm i -g vercel@latest", "which vercel neonctl", "pnpm build",
             "python3 - <<'PY'\nvercel = 1\nPY",
             "vc ls", "vc logs https://x.vercel.app", "which vc",
+            "vercel logout", "vc logout",
             "curl -s -H \"Authorization: Bearer $VERCEL_TOKEN\" https://api.vercel.com/v9/projects",
             "curl 'https://api.vercel.com/v6/deployments?projectId=prj_x&limit=5'",
             "grep -rn api.vercel.com docs",

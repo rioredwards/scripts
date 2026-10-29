@@ -92,14 +92,25 @@ list, so `railway logs && railway up` cannot slip through. Ledger: L-0114.
 
 ## Neon and Vercel
 
-Agents never touch the production database (Oct 2026: a preview build seeded production Neon).
+Agents must not touch the production database (Oct 2026: a preview build seeded production Neon).
+These hooks inspect tool input text, not the authority held by the OS user. They do not
+inspect executed script files, resolve runtime-built hosts, isolate browser sessions, or
+stop an unrestricted user from changing the hooks. The runner also fails open on missing
+dependencies or invalid configuration. Passing hook tests proves matching,
+not absence of production access. Revoke production-capable credentials at the provider;
+removing a local file alone leaves its other copies valid. A hard boundary requires an
+isolated agent identity with only development access, including Git deployment authority.
+
+Credential containment and remaining identity isolation are tracked in
+[remove agent access to production cloud credentials](https://github.com/rioredwards/scripts/issues/36).
+
 `neon-direct-connection` denies any shell or MCP call carrying a Neon endpoint host or connection
 string (`ep-*.neon.tech`, `postgres://...neon.tech`, `-h`/`PGHOST=`/`host=` with a `.neon.tech`
 host); no read exception. `neon-cli-read-only` allows only `neonctl` projects/branches list|get,
 `me`, orgs list, operations list, help, version. `neon-api-read-only` keeps `console.neon.tech/api`
 GET-only and never fetches `connection_uri` or `reveal_password`; a write Rio approved in chat for
 that exact call passes with a `RIO_NEON_WRITE_OK=1 ` prefix, credential paths still blocked.
-`vercel-cli-read-only` (also the `vc` alias) allows ls, inspect, logs, whoami, env ls, project
+`vercel-cli-read-only` (also the `vc` alias) allows ls, inspect, logs, whoami, logout, env ls, project
 ls|inspect, help, version. Everything else denies, including bare `vercel` (deploys), `--prod`,
 `pull`, and `build`/`dev`, which load Vercel-held env (`build` runs the seed or migrate).
 `vercel-api-read-only` keeps `api.vercel.com` GET-only and denies any `/env` or `decrypt` read,
