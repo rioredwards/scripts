@@ -204,7 +204,7 @@
       "on": "tool",
       "match": {
         "tool": "^(Bash|Monitor|exec_command|shell|mcp__.*)$",
-        "input": "(?i)\\bslack\\.com(:443)?/api/.{0,2}(chat\\.|files\\.(upload|completeUploadExternal|remote\\.(add|share))|reminders\\.add)|\\bhooks\\.slack\\.com|\\.chat[._](postMessage|postEphemeral|scheduleMessage|meMessage|update)\\(|slack_sdk|slack_bolt|@slack/|tell app(lication)? .{0,2}Slack|destination_type\\W+slack"
+        "input": "(?i)\\bslack\\.com(:443)?/api/.{0,2}(chat\\.|files\\.(upload|completeUploadExternal|remote\\.(add|share))|reminders\\.add)|/api/chat\\.(postMessage|postEphemeral|scheduleMessage|meMessage)\\b|\\bhooks\\.slack\\.com|\\.chat[._](postMessage|postEphemeral|scheduleMessage|meMessage|update)\\(|slack_sdk|slack_bolt|@slack/|tell app(lication)? .{0,2}Slack|destination_type\\W+slack|slack_team_id"
       },
       "do": "deny",
       "text": "BLOCKED: agents never send Slack messages, including through Slack's API or webhooks. Rio sends every one himself, with no exception and no approval path. Put the draft in your reply or use the Slack draft tool, and don't offer to send it. This is an automated gate, not a denial from Rio."

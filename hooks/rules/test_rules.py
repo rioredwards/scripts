@@ -87,7 +87,13 @@ class RulesTests(unittest.TestCase):
         for tool, tool_input in (("Monitor", {"command": blocked[0]}),
                                  ("Monitor", {"command": "gh pr merge 5"}),
                                  ("mcp__codex_apps__codex_security_cloud__defense_factory_monitoring_create",
-                                  {"destination_type": "slack"})):
+                                  {"destination_type": "slack"}),
+                                 ("mcp__codex_apps__codex_security_cloud__defense_factory_monitoring_create",
+                                  {"requestBody": {"destinations": [{"slack_team_id": "T1", "channel_id": "C1"}]}}),
+                                 ("mcp__codex_apps__codex_security_cloud__defense_factory_monitoring_update",
+                                  {"requestBody": {"destinations": [{"slack_team_id": "T1", "channel_id": "C1"}]}}),
+                                 ("mcp__claude-in-chrome__javascript_tool",
+                                  {"text": "fetch('/api/chat.postMessage', {method: 'POST'})"})):
             with self.subTest(blocked=tool):
                 out = self.run_hook("tool", {"tool_name": tool, "tool_input": tool_input}).stdout
                 self.assertIn('"deny"', out)
