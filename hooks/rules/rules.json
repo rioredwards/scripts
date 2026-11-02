@@ -173,7 +173,7 @@
       "id": "never-merge-pr",
       "on": "tool",
       "match": {
-        "tool": "^(Bash|exec_command|shell)$",
+        "tool": "^(Bash|Monitor|exec_command|shell)$",
         "input": "(^|\"cmd\":\"|[\\n;&|(){}`[:space:]])gh[[:space:]]+pr[[:space:]]+merge"
       },
       "unless": "RIO_MERGE_OK=1",
@@ -189,6 +189,25 @@
       },
       "do": "deny",
       "text": "BLOCKED: Rio never lets an agent merge a PR (or turn on auto-merge) without his explicit, in-conversation permission. Ask him in your reply. Only if he says yes, merge with `RIO_MERGE_OK=1 gh pr merge ...` instead. This is an automated gate, not a denial from Rio."
+    },
+    {
+      "id": "no-slack-send-mcp",
+      "on": "tool",
+      "match": {
+        "tool": "(?i)^mcp__(?!.*(__(slack[_-])?(read|get|list|search)[_-]|(create|update)_(canvas|list)$|(add|update)_list_record$|add_reaction$|send_message_draft$|authenticat(e|ion)$)).*slack|defense_factory(_workspace)?_notifications_test"
+      },
+      "do": "deny",
+      "text": "BLOCKED: agents never send Slack messages. Rio sends every one himself, with no exception and no approval path. Put the draft in your reply or use the Slack draft tool, and don't offer to send it. This is an automated gate, not a denial from Rio."
+    },
+    {
+      "id": "no-slack-send-shell",
+      "on": "tool",
+      "match": {
+        "tool": "^(Bash|Monitor|exec_command|shell|mcp__.*)$",
+        "input": "(?i)\\bslack\\.com(:443)?/api/.{0,2}(chat\\.|files\\.(upload|completeUploadExternal|remote\\.(add|share))|reminders\\.add)|\\bhooks\\.slack\\.com|\\.chat[._](postMessage|postEphemeral|scheduleMessage|meMessage|update)\\(|slack_sdk|slack_bolt|@slack/|tell app(lication)? .{0,2}Slack|destination_type\\W+slack"
+      },
+      "do": "deny",
+      "text": "BLOCKED: agents never send Slack messages, including through Slack's API or webhooks. Rio sends every one himself, with no exception and no approval path. Put the draft in your reply or use the Slack draft tool, and don't offer to send it. This is an automated gate, not a denial from Rio."
     },
     {
       "id": "automations-on-mini",
@@ -318,7 +337,7 @@
       "id": "neon-direct-connection",
       "on": "tool",
       "match": {
-        "tool": "^(Bash|exec_command|shell|mcp__.*)$",
+        "tool": "^(Bash|Monitor|exec_command|shell|mcp__.*)$",
         "input": "(?i)(?:(?:^|[^a-z0-9-])ep-[a-z0-9-]+(?:\\.[a-z0-9-]+)*\\.neon\\.tech|postgres(?:ql)?(?:\\+[a-z0-9]+)?://[^[:space:]'\\\"]*neon\\.tech|(?:(?:^|[[:space:]])(?:-h|--host)(?:[[:space:]]+|=)['\\\"]?|(?:pghost|host)[[:space:]]*=[[:space:]]*['\\\"]?)[a-z0-9.-]*\\.neon\\.tech)"
       },
       "do": "deny",
@@ -328,7 +347,7 @@
       "id": "neon-cli-read-only",
       "on": "tool",
       "match": {
-        "tool": "^(Bash|exec_command|shell)$",
+        "tool": "^(Bash|Monitor|exec_command|shell)$",
         "input": "(?:^|[;&|\\n`]|[$<>]\\(|(?:^|[[:space:];&|(/])(?:ba|da|k|z|fi)?sh(?:[[:space:]]+-[^[:space:]]+)*?[[:space:]]+-[A-Za-z]*c[[:space:]]+['\\\"]|(?:^|[[:space:];&|(])ssh(?:[[:space:]]+-[^[:space:]]+(?:[[:space:]]+[^-[:space:]][^[:space:]]*)?)*[[:space:]]+[^-[:space:];&|][^[:space:];&|]*[[:space:]]+['\\\"]?)(?:[[:space:]]*[({])*[[:space:]]*(?:[A-Za-z_][A-Za-z0-9_]*=(?:'[^']*'|\\\"[^\\\"]*\\\"|[^[:space:];&|]*)[[:space:]]+|(?:sudo|command|builtin|exec|nohup|time|env|xargs|npx|bunx|pnpx|then|do|else|elif|if|while|until|!|timeout(?:[[:space:]]+-[^[:space:]]+)*[[:space:]]+[0-9][0-9.]*[smhd]?|keyfor[[:space:]]+--run[[:space:]]+[^[:space:]]+[[:space:]]+--|(?:pnpm|yarn|npm|bun)(?:[[:space:]]+-[^[:space:]]+(?:[[:space:]]+[^-[:space:]][^[:space:]]*)?)*(?:[[:space:]]+(?:dlx|exec|x|run))?)(?:[[:space:]]+-[^[:space:]]+)*[[:space:]]+)*(?:[^[:space:];&|'\\\"=()]*/)?neon(?:ctl)?(?:@[^[:space:];&|)'\\\"]*)?(?=[[:space:];&]|$)(?![[:space:]]+[=+*/%<>!:,])(?!(?>[[:space:]]+(?:(?:--(?:api-key|output|config-dir|context-file|org-id|project-id)|-o)(?:=[^[:space:]]+|[[:space:]]+[^[:space:]]+)|-(?!(?:h|v|-help|-version)(?=[[:space:];&|)'\\\"]|$))[^[:space:]]+))*+(?:[[:space:]]+(?:(?:projects?|branch(?:es)?)[[:space:]]+(?:list|ls|get)|me|orgs?[[:space:]]+(?:list|ls)|operations?[[:space:]]+(?:list|ls)|help|-h|--help|-v|--version|[a-z-]+[[:space:]]+(?:-h|--help))(?=[[:space:];&|)'\\\"]|$)|[[:space:]]*(?:$|[;&|)'\\\"\\n])))"
       },
       "do": "deny",
@@ -338,7 +357,7 @@
       "id": "neon-api-read-only",
       "on": "tool",
       "match": {
-        "tool": "^(Bash|exec_command|shell)$",
+        "tool": "^(Bash|Monitor|exec_command|shell)$",
         "input": "(?s)^(?=.*console\\.neon\\.tech/api)(?=.*(?:connection_uri|reveal_password|(?:curl|wget)(?:[^|;&\\n]|\\\\\\n)*[[:space:]](?:-[a-zA-Z]*X[[:space:]]*['\\\"]?(?i:POST|PUT|PATCH|DELETE)\\b|--request(?:[[:space:]]+|=)['\\\"]?(?i:POST|PUT|PATCH|DELETE)\\b|(?:-[a-zA-Z]*[dFT]|--data(?:-[a-z]+)?|--json|--form(?:-string)?|--upload-file|--post-data|--post-file|--body-data|--body-file|--method)(?:[[:space:]=]|$))|(?:^|[[:space:]])(?:http|https|xh)[[:space:]]+(?:-[^[:space:]]+[[:space:]]+)*(?i:POST|PUT|PATCH|DELETE)[[:space:]]|method['\\\"]?[[:space:]]*[:=][[:space:]]*['\\\"](?i:POST|PUT|PATCH|DELETE)['\\\"]|\\.(?:post|put|patch|delete)\\(|\\.request\\([[:space:]]*['\\\"](?i:POST|PUT|PATCH|DELETE)['\\\"]|(?:Request|urlopen)\\([^)]*data[[:space:]]*=))"
       },
       "unless": "(?s)^(?!.*(?:connection_uri|reveal_password)).*RIO_NEON_WRITE_OK=1",
@@ -358,7 +377,7 @@
       "id": "vercel-cli-read-only",
       "on": "tool",
       "match": {
-        "tool": "^(Bash|exec_command|shell)$",
+        "tool": "^(Bash|Monitor|exec_command|shell)$",
         "input": "(?:^|[;&|\\n`]|[$<>]\\(|(?:^|[[:space:];&|(/])(?:ba|da|k|z|fi)?sh(?:[[:space:]]+-[^[:space:]]+)*?[[:space:]]+-[A-Za-z]*c[[:space:]]+['\\\"]|(?:^|[[:space:];&|(])ssh(?:[[:space:]]+-[^[:space:]]+(?:[[:space:]]+[^-[:space:]][^[:space:]]*)?)*[[:space:]]+[^-[:space:];&|][^[:space:];&|]*[[:space:]]+['\\\"]?)(?:[[:space:]]*[({])*[[:space:]]*(?:[A-Za-z_][A-Za-z0-9_]*=(?:'[^']*'|\\\"[^\\\"]*\\\"|[^[:space:];&|]*)[[:space:]]+|(?:sudo|command|builtin|exec|nohup|time|env|xargs|npx|bunx|pnpx|then|do|else|elif|if|while|until|!|timeout(?:[[:space:]]+-[^[:space:]]+)*[[:space:]]+[0-9][0-9.]*[smhd]?|keyfor[[:space:]]+--run[[:space:]]+[^[:space:]]+[[:space:]]+--|(?:pnpm|yarn|npm|bun)(?:[[:space:]]+-[^[:space:]]+(?:[[:space:]]+[^-[:space:]][^[:space:]]*)?)*(?:[[:space:]]+(?:dlx|exec|x|run))?)(?:[[:space:]]+-[^[:space:]]+)*[[:space:]]+)*(?:[^[:space:];&|'\\\"=()]*/)?(?:vercel|vc)(?:@[^[:space:];&|)'\\\"]*)?(?=[[:space:];&]|$)(?![[:space:]]+[=+*/%<>!:,])(?>[[:space:]]+(?:(?:--(?:scope|cwd|token|team|local-config|global-config|environment|target)|-[SAtQT])(?:=[^[:space:]]+|[[:space:]]+[^[:space:]]+)|-(?!(?:h|v|-help|-version)(?=[[:space:];&|)'\\\"]|$))[^[:space:]]+))*+[[:space:]]+(?:pull|env(?>[[:space:]]+(?:(?:--(?:scope|cwd|token|team|local-config|global-config|environment|target)|-[SAtQT])(?:=[^[:space:]]+|[[:space:]]+[^[:space:]]+)|-(?!(?:h|v|-help|-version)(?=[[:space:];&|)'\\\"]|$))[^[:space:]]+))*+[[:space:]]+(?:pull|get|run)|api(?=[[:space:]])[^;&|\\n]*(?:/envs?(?:[/?#'\"[:space:]]|$)|decrypt|connection_uri|reveal_password)[^;&|\\n]*)(?=[[:space:];&|)'\"]|$)"
       },
       "do": "deny",
@@ -368,7 +387,7 @@
       "id": "vercel-api-read-only",
       "on": "tool",
       "match": {
-        "tool": "^(Bash|exec_command|shell)$",
+        "tool": "^(Bash|Monitor|exec_command|shell)$",
         "input": "(?s)^(?=.*(?:api\\.vercel\\.com|vercel\\.com/api))(?=.*(?:decrypt|connection_uri|reveal_password|/envs?(?:[/?#'\"[:space:]]|$)))"
       },
       "do": "deny",
@@ -387,7 +406,7 @@
       "id": "no-writing-raw-tabs",
       "on": "tool",
       "match": {
-        "tool": "^(Bash|exec_command|shell|Write|Edit|MultiEdit|NotebookEdit)$|apply_patch$",
+        "tool": "^(Bash|Monitor|exec_command|shell|Write|Edit|MultiEdit|NotebookEdit)$|apply_patch$",
         "content": "(?s)(?=.*[A-Za-z]-Raw(?![A-Za-z0-9]))(?i:.*(appendCells|updateCells|pasteData|copyPaste|values(\\(\\))?[.[:space:]:/]+(update|append|clear|batchUpdate|batchClear)|:(append|clear)([^a-z]|$)|batch_?update|update_?cells?|update_acell|append_?rows?|insert_?rows?|\\+append|(^|[^a-z]|\\\\[nt])(ws|sheet|worksheet|tab)[a-z_]*\\.update\\(|(^|[^a-z]|\\\\[nt])gog\\b[^|;&]*[[:space:]](update|edit|set|batch-update|batch|batch-request|append|add|clear|copy-paste|fill|copy-range|insert|format|merge)[[:space:]]))"
       },
       "do": "deny",

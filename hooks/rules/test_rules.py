@@ -30,6 +30,68 @@ class RulesTests(unittest.TestCase):
             input=json.dumps(payload), text=True, capture_output=True, env=env,
         )
 
+    def test_agents_never_send_slack(self):
+        prefix = "mcp__3711da19-ec58-4c28-a15b-10831ef9a620__"
+        for tool in (prefix + "slack_send_message", prefix + "slack_schedule_message",
+                     prefix + "slack_complete_file_upload", "mcp__slack__slack_post_message",
+                     "mcp__codex_apps__slack_send_message", "mcp__slack__send_dm",
+                     "mcp__slack__conversations_add_message", "mcp__slack__slack_reply_to_thread",
+                     "mcp__slack__send-message", "mcp__zapier__slack_send_channel_message",
+                     "mcp__slack__slack_update_message", "mcp__slack__slack_edit_message",
+                     "mcp__slack__slack_upload_file", prefix + "slack_create_conversation",
+                     "mcp__zapier__send_slack_message", "mcp__n8n__post_to_slack",
+                     "mcp__slack__slack_send_draft", "mcp__slack__slack_share_file",
+                     "mcp__slack__slack_message_user",
+                     "mcp__codex_apps__codex_security_cloud__defense_factory_notifications_test",
+                     "mcp__codex_apps__codex_security_cloud__defense_factory_workspace_notifications_test"):
+            with self.subTest(blocked=tool):
+                out = self.run_hook("tool", {"tool_name": tool, "tool_input": {"text": "hi"}}).stdout
+                self.assertIn('"deny"', out)
+        for tool in (prefix + "slack_send_message_draft", prefix + "slack_read_channel",
+                     prefix + "slack_read_thread", prefix + "slack_search_users",
+                     prefix + "slack_get_file_upload_url", prefix + "slack_add_reaction",
+                     prefix + "slack_create_canvas", "mcp__slack__slack_list_scheduled_messages",
+                     prefix + "slack_create_list", prefix + "slack_update_list_record",
+                     "mcp__claude_ai_Slack__authenticate"):
+            with self.subTest(allowed=tool):
+                out = self.run_hook("tool", {"tool_name": tool, "tool_input": {"text": "hi"}}).stdout
+                self.assertNotIn('"deny"', out)
+        blocked = [
+            "curl -X POST https://slack.com/api/chat.postMessage -d text=hi",
+            "curl slack.com/api/chat.postMessage -d text=hi",
+            "curl https://acme.slack.com/api/chat.scheduleMessage",
+            "curl -X POST hooks.slack.com/services/x -d '{}'",
+            "curl -F file=@a.txt https://slack.com/api/files.upload",
+            "python3 -c 'client.chat_postMessage(channel=c, text=t)'",
+            "node -e 'web.chat.postMessage({channel: c})'",
+            "curl https://slack.com/api/chat.startStream",
+            "osascript -e 'tell application \"Slack\" to activate'",
+            "curl -X POST https://slack.com:443/api/chat.postMessage -d text=hi",
+            "curl -X POST https://slack.com/api/'chat.postMessage' -d text=hi",
+            "curl -X POST -d '{}' https://hooks.slack.com:443/services/x",
+            "curl https://slack.com/api/files.remote.share",
+            "curl https://slack.com/api/reminders.add",
+            "python3 -c 'from slack_sdk import WebClient'",
+            "node -e \"require('@slack/web-api')\"",
+        ]
+        allowed = ["grep -rn 'chat.postMessage' src", "curl https://slack.com/api/conversations.history"]
+        for agent, tool, key in (("claude", "Bash", "command"), ("codex", "exec_command", "cmd")):
+            for cmd in blocked:
+                with self.subTest(agent=agent, blocked=cmd):
+                    out = self.run_hook("tool", {"tool_name": tool, "tool_input": {key: cmd}}, agent).stdout
+                    self.assertIn('"deny"', out)
+            for cmd in allowed:
+                with self.subTest(agent=agent, allowed=cmd):
+                    out = self.run_hook("tool", {"tool_name": tool, "tool_input": {key: cmd}}, agent).stdout
+                    self.assertNotIn('"deny"', out)
+        for tool, tool_input in (("Monitor", {"command": blocked[0]}),
+                                 ("Monitor", {"command": "gh pr merge 5"}),
+                                 ("mcp__codex_apps__codex_security_cloud__defense_factory_monitoring_create",
+                                  {"destination_type": "slack"})):
+            with self.subTest(blocked=tool):
+                out = self.run_hook("tool", {"tool_name": tool, "tool_input": tool_input}).stdout
+                self.assertIn('"deny"', out)
+
     def test_issue_plans_and_work_comments_have_no_length_cap(self):
         body = "execution detail " * 120
         commands = [

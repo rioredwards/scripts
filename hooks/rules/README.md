@@ -90,6 +90,22 @@ plus `list-variables`, so values never reach a transcript. `railway-cli-read-onl
 `deployment list`, `service list`, `domain list`, `docs` stay open. Deny list, not allow
 list, so `railway logs && railway up` cannot slip through. Ledger: L-0114.
 
+## Slack
+
+Agents draft, Rio sends (Rio, 2026-11-02). No exception and no approval path.
+`no-slack-send-mcp` denies every Slack connector tool except reads, the message draft tool,
+reactions, canvases, lists and sign-in, so a new Slack tool is blocked by default. It also denies
+Codex's security alert test tools, which post to Slack.
+`no-slack-send-shell` denies shell, `Monitor` or MCP input naming Slack's message, file or reminder
+APIs, webhooks, its SDK packages or SDK send calls, or a Codex monitor with a Slack destination. A
+grep, commit message or draft holding one of those is denied too.
+
+These rules run only inside Claude Code and Codex, and read tool input only. They miss desktop
+chat, cloud routines, script files run later, URLs built at runtime, text typed into the Slack app
+or a browser, and input too large for the runner (about 500 KB, every rule). The global rule
+covers agents that load it. No Slack CLI or token exists in this setup (checked 2026-11-02), so
+the connector is the real route. Ledger: L-0114.
+
 ## Neon and Vercel
 
 Agents must not touch the production database (Oct 2026: a preview build seeded production Neon).
