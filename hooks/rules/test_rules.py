@@ -41,7 +41,8 @@ class RulesTests(unittest.TestCase):
                      "mcp__slack__slack_upload_file", prefix + "slack_create_conversation",
                      "mcp__zapier__send_slack_message", "mcp__n8n__post_to_slack",
                      "mcp__slack__slack_send_draft", "mcp__slack__slack_share_file",
-                     "mcp__slack__slack_message_user",
+                     "mcp__slack__slack_message_user", "mcp__slack__slack_bulk_add_reaction",
+                     "mcp__slack__slack_send_update_canvas", "mcp__slack__slack_send_add_list_record",
                      "mcp__codex_apps__codex_security_cloud__defense_factory_notifications_test",
                      "mcp__codex_apps__codex_security_cloud__defense_factory_workspace_notifications_test"):
             with self.subTest(blocked=tool):
@@ -52,7 +53,7 @@ class RulesTests(unittest.TestCase):
                      prefix + "slack_get_file_upload_url", prefix + "slack_add_reaction",
                      prefix + "slack_create_canvas", "mcp__slack__slack_list_scheduled_messages",
                      prefix + "slack_create_list", prefix + "slack_update_list_record",
-                     "mcp__claude_ai_Slack__authenticate"):
+                     "mcp__claude_ai_Slack__authenticate", "mcp__claude_ai_Slack__complete_authentication"):
             with self.subTest(allowed=tool):
                 out = self.run_hook("tool", {"tool_name": tool, "tool_input": {"text": "hi"}}).stdout
                 self.assertNotIn('"deny"', out)
@@ -73,8 +74,12 @@ class RulesTests(unittest.TestCase):
             "curl https://slack.com/api/reminders.add",
             "python3 -c 'from slack_sdk import WebClient'",
             "node -e \"require('@slack/web-api')\"",
+            "python3 -c 'client.chat_startStream(channel=c)'",
+            "python3 -c 'client.chat_stream(channel=c)'",
+            "node -e 'web.chat.startStream({channel: c})'",
         ]
-        allowed = ["grep -rn 'chat.postMessage' src", "curl https://slack.com/api/conversations.history"]
+        allowed = ["grep -rn 'chat.postMessage' src", "curl https://slack.com/api/conversations.history",
+                   "pnpm vitest run src/app/api/chat.test.ts"]
         for agent, tool, key in (("claude", "Bash", "command"), ("codex", "exec_command", "cmd")):
             for cmd in blocked:
                 with self.subTest(agent=agent, blocked=cmd):
@@ -96,6 +101,14 @@ class RulesTests(unittest.TestCase):
                                   {"text": "fetch('/api/chat.postMessage', {method: 'POST'})"})):
             with self.subTest(blocked=tool):
                 out = self.run_hook("tool", {"tool_name": tool, "tool_input": tool_input}).stdout
+                self.assertIn('"deny"', out)
+        for method in ("chat.update", "chat.startStream", "chat.appendStream", "chat.stopStream", "chat.command",
+                       "files.upload", "files.completeUploadExternal", "files.remote.share", "files.remote.add",
+                       "reminders.add"):
+            with self.subTest(browser=method):
+                tool_input = {"text": f"fetch('/api/{method}', {{method: 'POST'}})"}
+                out = self.run_hook("tool", {"tool_name": "mcp__claude-in-chrome__javascript_tool",
+                                             "tool_input": tool_input}).stdout
                 self.assertIn('"deny"', out)
 
     def test_issue_plans_and_work_comments_have_no_length_cap(self):

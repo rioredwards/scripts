@@ -194,7 +194,7 @@
       "id": "no-slack-send-mcp",
       "on": "tool",
       "match": {
-        "tool": "(?i)^mcp__(?!.*(__(slack[_-])?(read|get|list|search)[_-]|(create|update)_(canvas|list)$|(add|update)_list_record$|add_reaction$|send_message_draft$|authenticat(e|ion)$)).*slack|defense_factory(_workspace)?_notifications_test"
+        "tool": "(?i)^mcp__(?!.*__(slack[_-])?((read|get|list|search)[_-]|(create|update)_(canvas|list)$|(add|update)_list_record$|add_reaction$|send_message_draft$|(complete_)?authenticat(e|ion)$)).*slack|defense_factory(_workspace)?_notifications_test"
       },
       "do": "deny",
       "text": "BLOCKED: agents never send Slack messages. Rio sends every one himself, with no exception and no approval path. Put the draft in your reply or use the Slack draft tool, and don't offer to send it. This is an automated gate, not a denial from Rio."
@@ -204,7 +204,7 @@
       "on": "tool",
       "match": {
         "tool": "^(Bash|Monitor|exec_command|shell|mcp__.*)$",
-        "input": "(?i)\\bslack\\.com(:443)?/api/.{0,2}(chat\\.|files\\.(upload|completeUploadExternal|remote\\.(add|share))|reminders\\.add)|/api/chat\\.(postMessage|postEphemeral|scheduleMessage|meMessage)\\b|\\bhooks\\.slack\\.com|\\.chat[._](postMessage|postEphemeral|scheduleMessage|meMessage|update)\\(|slack_sdk|slack_bolt|@slack/|tell app(lication)? .{0,2}Slack|destination_type\\W+slack|slack_team_id"
+        "input": "(?i)/api/.{0,2}(chat\\.(post(Message|Ephemeral)|scheduleMessage|meMessage|update|delete|command|(start|append|stop)Stream)|files\\.(upload|completeUploadExternal|remote\\.(add|share))|reminders\\.add)|\\bhooks\\.slack\\.com|\\.chat[._][a-z]+\\(|slack_sdk|slack_bolt|@slack/|tell app(lication)? .{0,2}Slack|destination_type\\W+slack|slack_team_id"
       },
       "do": "deny",
       "text": "BLOCKED: agents never send Slack messages, including through Slack's API or webhooks. Rio sends every one himself, with no exception and no approval path. Put the draft in your reply or use the Slack draft tool, and don't offer to send it. This is an automated gate, not a denial from Rio."

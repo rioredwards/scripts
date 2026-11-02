@@ -96,9 +96,10 @@ Agents draft, Rio sends (Rio, 2026-11-02). No exception and no approval path.
 `no-slack-send-mcp` denies every Slack connector tool except reads, the message draft tool,
 reactions, canvases, lists and sign-in, so a new Slack tool is blocked unless its name starts with
 get, list, read or search. It also denies Codex's security alert test tools, which post to Slack.
-`no-slack-send-shell` denies shell, `Monitor` or MCP input naming Slack's message, file or reminder
-APIs, webhooks, its SDK packages, the SDK's `chat` send calls, or a Codex monitor with a Slack
-destination. A grep, commit message or draft holding one of those is denied too.
+`no-slack-send-shell` denies shell, `Monitor` or MCP input naming an `/api/` path for Slack's
+message, file or reminder methods on any host, webhooks, its SDK packages, the SDK's `chat` calls,
+or a Codex monitor with a Slack destination. A grep, commit message or draft holding one of those
+is denied too; a bare method name passes.
 
 These rules run only inside Claude Code and Codex, and read tool input only. They miss desktop
 chat, cloud routines, script files run later, URLs built at runtime, text typed into the Slack app
