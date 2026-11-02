@@ -20,7 +20,8 @@ MODE="${1:-summary}"
 # Existing files only, oldest first.
 files() { for f in "$1.1" "$1"; do if [ -r "$f" ]; then printf '%s\n' "$f"; fi; done; }
 
-actions() { files "$LOG" | xargs cat 2>/dev/null; }
+# Concurrent appends can splice two records onto one line; skip those instead of dying.
+actions() { files "$LOG" | xargs cat 2>/dev/null | jq -R -c 'fromjson? // empty'; }
 
 # Every run, as JSON: quiet TSV rows become records that did nothing.
 events() {

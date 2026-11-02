@@ -135,4 +135,16 @@ commit "$me" mine 40; git -C "$me" push -q origin dev
 git -C "$me" reflog expire --expire=now --all
 check "on dev, pushed work still counts" "$me" 0 "within budget: 40/100"
 
+# lines already uncommitted at set are not mine; new ones and a raise behave normally
+world dirty; me="$w/me"
+lines other 200 > "$me/other"
+(cd "$me" && "$budget" set 50 >/dev/null)
+check "dirty tree at set starts at zero" "$me" 0 "within budget: 0/50"
+commit "$me" mine 30
+check "new work counts on top" "$me" 0 "within budget: 30/50"
+(cd "$me" && "$budget" set 80 >/dev/null)
+check "raise keeps the dirty baseline" "$me" 0 "within budget: 30/80"
+commit "$me" more 60
+check "new work still trips the gate" "$me" 1 "OVER BUDGET: 90/80"
+
 echo "agent-budget tests: ok"

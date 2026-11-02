@@ -23,6 +23,9 @@
 # stop counting). Branch commits made before `set` (PRE) stay excluded when a
 # rebase replays them.
 #
+# Uncommitted lines already in the tree at `set` (DIRTY) are not mine either: a shared
+# checkout often has them. Another session's edits made after `set` still count.
+#
 # Exit codes: 0 within budget · 1 over · 3 no budget set · 2 usage/infra error
 set -u
 
@@ -117,6 +120,23 @@ $list
 LIST
 }
 
+# worktree_diff <base>: sets diff, base vs the working tree, untracked files included.
+worktree_diff() {
+  # Untracked files join a scratch copy of the index as intent-to-add, so a plain
+  # `mv` pairs as a rename just like `git mv` or a commit. The real index is untouched.
+  idx="$(mktemp)" || die "mktemp failed"; trap 'rm -f "$idx"' EXIT
+  # cp -p keeps the mtime git's racy-clean check compares against. No index yet: git starts one.
+  real="$(git rev-parse --git-path index)"
+  if [ -e "$real" ]; then cp -p "$real" "$idx" || die "copying index failed"; else rm -f "$idx"; fi
+  # Whole repo (:/), so a cwd inside an ignored dir can't fail; --sparse reaches files
+  # outside the cone. The diff's pathspec below does the scoping and excluding.
+  err="$(GIT_INDEX_FILE="$idx" git add -N --sparse -- :/ 2>&1 >/dev/null)" || die "scratch index: $err"
+  # -M30%: a rename edited past git's default 50% similarity counts its edits, not the whole file.
+  # One diff serves both counts: --numstat lines for LOC, --summary "create mode" lines for new files.
+  # shellcheck disable=SC2086
+  diff="$(GIT_INDEX_FILE="$idx" git diff -M30% --numstat --summary "$1" -- . $EXCLUDES)" || die "git diff failed"
+}
+
 cmd="${1:-status}"; [ $# -gt 0 ] && shift
 
 case "$cmd" in
@@ -125,7 +145,7 @@ case "$cmd" in
     case "$loc" in ''|*[!0-9]*) die "usage: agent-budget set <loc> [--files N] [--base REF]" ;; esac
     # Raising an existing budget keeps its base: but only on the same branch;
     # a fresh budget or a branch switch measures from HEAD (stale bases gate falsely).
-    files=""; base="HEAD"; carry=0; carryfiles=0; pre=""
+    files=""; base="HEAD"; carry=0; carryfiles=0; pre=""; dirty=""; dirtyfiles=0
     branch="$(git symbolic-ref --short -q HEAD || echo detached)"
     if [ -r "$STATE" ] && [ "$(sed -n 's/^BRANCH=//p' "$STATE")" = "$branch" ]; then
       # Keep the base AND what arrived since: a new SET_AT would otherwise forget earlier pulls.
@@ -134,21 +154,23 @@ case "$cmd" in
       if git rev-parse --verify -q "$BASE^{commit}" >/dev/null; then
         resolve_base
         base="$RB"; carry="$RC"; carryfiles="$RF"; pre="$(sed -n 's/^PRE=//p' "$STATE")"
+        dirty="$(sed -n 's/^DIRTY=//p' "$STATE")"; dirtyfiles="$(sed -n 's/^DIRTY_FILES=//p' "$STATE")"
       fi
     fi
     # Kept base gone stale (rebase)? Refresh to HEAD instead of re-saving a false gate.
-    if [ "$base" != "HEAD" ] && ! git merge-base --is-ancestor "$base" HEAD 2>/dev/null; then base="HEAD"; carry=0; carryfiles=0; pre=""; fi
+    if [ "$base" != "HEAD" ] && ! git merge-base --is-ancestor "$base" HEAD 2>/dev/null; then base="HEAD"; carry=0; carryfiles=0; pre=""; dirty=""; fi
     while [ $# -gt 0 ]; do
       case "$1" in
         --files) files="${2:-}"; shift 2 ;;
-        --base)  base="${2:-}"; carry=0; carryfiles=0; pre=""; shift 2 ;;
+        --base)  base="${2:-}"; carry=0; carryfiles=0; pre=""; dirty=0; dirtyfiles=0; shift 2 ;;
         *) die "unknown flag $1" ;;
       esac
     done
     [ -n "$files" ] && case "$files" in *[!0-9]*) die "--files wants a number" ;; esac
     sha="$(git rev-parse --verify "$base^{commit}" 2>/dev/null)" || die "bad base ref: $base"
     [ -n "$pre" ] || pre="$(pre_lines "$sha")"
-    printf 'BASE=%s\nLOC=%s\nFILES=%s\nBRANCH=%s\nSET_AT=%s\nCARRY=%s\nCARRY_FILES=%s\nPRE=%s\n' "$sha" "$loc" "$files" "$branch" "$(date +%s)" "$carry" "$carryfiles" "$pre" > "$STATE"
+    if [ -z "$dirty" ]; then worktree_diff "$sha"; count_diff "$diff"; dirty="$D_LOC"; dirtyfiles="$D_NEW"; fi
+    printf 'BASE=%s\nLOC=%s\nFILES=%s\nBRANCH=%s\nSET_AT=%s\nCARRY=%s\nCARRY_FILES=%s\nPRE=%s\nDIRTY=%s\nDIRTY_FILES=%s\n' "$sha" "$loc" "$files" "$branch" "$(date +%s)" "$carry" "$carryfiles" "$pre" "$dirty" "$dirtyfiles" > "$STATE"
     rm -f "$WARNED"
     printf 'budget set: %s LOC%s, measured from %s%s%s\n' "$loc" "${files:+, $files new files}" "$(git rev-parse --short "$sha")" "$([ "$carry" -gt 0 ] && echo ", $carry LOC already counted on this branch")" "$([ "$carryfiles" -gt 0 ] && echo ", $carryfiles new files already counted on this branch")"
     ;;
@@ -181,21 +203,10 @@ case "$cmd" in
       if [ "$mb" != "$BASE" ] && git merge-base --is-ancestor "$BASE" "$mb"; then BASE="$mb"; CARRY=0; CARRY_FILES=0; fi
     done
 
-    # Untracked files join a scratch copy of the index as intent-to-add, so a plain
-    # `mv` pairs as a rename just like `git mv` or a commit. The real index is untouched.
-    idx="$(mktemp)" || die "mktemp failed"; trap 'rm -f "$idx"' EXIT
-    # cp -p keeps the mtime git's racy-clean check compares against. No index yet: git starts one.
-    real="$(git rev-parse --git-path index)"
-    if [ -e "$real" ]; then cp -p "$real" "$idx" || die "copying index failed"; else rm -f "$idx"; fi
-    # Whole repo (:/), so a cwd inside an ignored dir can't fail; --sparse reaches files
-    # outside the cone. The diff's pathspec below does the scoping and excluding.
-    err="$(GIT_INDEX_FILE="$idx" git add -N --sparse -- :/ 2>&1 >/dev/null)" || die "scratch index: $err"
-    # -M30%: a rename edited past git's default 50% similarity counts its edits, not the whole file.
-    # One diff serves both counts: --numstat lines for LOC, --summary "create mode" lines for new files.
-    # shellcheck disable=SC2086
-    diff="$(GIT_INDEX_FILE="$idx" git diff -M30% --numstat --summary "$BASE" -- . $EXCLUDES)" || die "git diff failed"
+    worktree_diff "$BASE"
     count_diff "$diff"
-    loc=$((D_LOC + CARRY)); newfiles=$((D_NEW + CARRY_FILES))
+    loc=$((D_LOC + CARRY - ${DIRTY:-0})); newfiles=$((D_NEW + CARRY_FILES - ${DIRTY_FILES:-0}))
+    [ "$loc" -ge 0 ] || loc=0; [ "$newfiles" -ge 0 ] || newfiles=0
 
     over=0
     [ "$loc" -gt "$LOC" ] && over=1
