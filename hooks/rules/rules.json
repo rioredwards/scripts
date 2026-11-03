@@ -150,6 +150,16 @@
       "text": "This shell command writes into Rio's agentic system (skills, ledger, hooks, agent rules, dotfiles). All system changes go through the `utils:system` skill, invoke it FIRST if you haven't since this session started or was last compacted (compaction drops its rules)."
     },
     {
+      "id": "global-rules-placement",
+      "on": "tool",
+      "match": {
+        "tool": "^(Edit|Write)$",
+        "content": "\"file_path\":\"/(Users|home)/[^/\"]+/(\\.dotfiles/)?\\.(agents/AGENTS|claude/CLAUDE|codex/AGENTS)\\.md\""
+      },
+      "do": "remind",
+      "text": "Global rules file: last resort, most rules belong elsewhere. Pick the layer first (utils:system ref/rule-placement.md): pattern trigger -> hook; one workflow -> that skill; one repo -> its AGENTS.md; unperceivable or late in long work -> hook-injected. Only judgment every task needs goes here, merged into an existing line (1,600-word cap)."
+    },
+    {
       "id": "no-editing-plugin-snapshots",
       "on": "tool",
       "match": {
