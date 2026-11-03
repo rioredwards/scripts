@@ -109,7 +109,8 @@ connectivity despite its idle-sleep assertion. Reliable task completion is unver
 LaunchAgent checking every 30 seconds. Only new top-level PNG/JPEG files are processed, after two
 stable observations. Existing images are excluded. Reinstalling preserves that baseline.
 
-Apple Vision (`~/dev/click-tool/ocr-json`) writes UTF-8 OCR beside each image as `image.jpg.txt`,
+Apple Vision (`~/dev/click-tool/ocr-json`) coordinates reads to download iCloud placeholders,
+then writes UTF-8 OCR beside each image as `image.jpg.txt`,
 including an empty file when no text is detected. User-written sidecars are never overwritten.
 If an image changes before processing finishes, only the worker's unchanged prior OCR is replaced.
 Decisions (`gpt-6-luna`) chooses a category and whether it needs image evidence. It gets at most
@@ -126,7 +127,7 @@ completed stages resume on retry. Failures retry after five minutes and log to
 Processed filenames are treated as complete; later edits to completed images do not refresh OCR.
 
 - `screenshot-enrich status`: counts, API input usage and outstanding errors.
-- `screenshot-enrich scan`: one scan, nonzero on processing failures.
+- `screenshot-enrich scan`: one scan, nonzero while pending processing failures remain, including retry cooldowns.
 - `screenshot-enrich initialize`: exclude existing images without installing the job.
 - `--folder PATH --state PATH`: isolated validation or a deliberately separate archive.
 - Pause: `launchctl bootout gui/$(id -u)/com.rioredwards.screenshot-enrich`.

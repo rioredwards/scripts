@@ -70,6 +70,14 @@ class WorkerTest(unittest.TestCase):
         self.assertEqual(1, self.decide.call_count)
         self.tag.assert_called_once_with(new, 'development')
 
+    def test_retry_cooldown_does_not_hide_outstanding_failure(self):
+        self.worker.initialize()
+        self.image()
+        self.ocr.side_effect = RuntimeError('cannot read image')
+        self.assertEqual(1, self.ready())
+        self.assertEqual(1, self.worker.scan())
+        self.assertEqual(1, self.ocr.call_count)
+
     def test_partial_save_waits_for_stability(self):
         self.worker.initialize()
         path = self.image()
