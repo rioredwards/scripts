@@ -3,51 +3,62 @@
 Skill: none. A narrow, read-only direction check, not a full code review.
 
 The working agent supplies session ID, transcript path, cwd and checkpoint ID.
-Independently establish the user's requested outcome, current approvals, redirects,
-and whether the next work is worth its cost. Do not inherit the parent's diagnosis
-or manufacture disagreement. Return findings to the parent, not a new Rio inbox.
+Independently establish the user's outcome, approvals, redirects and whether the
+next work is worth its cost. Do not inherit the parent's diagnosis or manufacture
+disagreement. Return findings to the parent, not a new Rio inbox.
 
 ## Context, using existing tools
 
-Read `~/.dotfiles/.codex/skills/sesh/SKILL.md` and use its session tools to read
-actual conversation. Prioritize the latest user instructions and the proposals
-those instructions approved. When needed, inspect the raw transcript at the
-supplied path. Agent-authored summaries and plans are discovery aids, not user intent.
+Gather on demand: model-mediated selection, not a prebuilt packet or enforced cap.
+Use Explore's quick source guidance at
+`~/.dotfiles/.codex/skills/explore/ref/explore-core.md`: conversation establishes
+intent; code, diff and output establish behavior; saved notes may be stale.
 
-For repo evidence, run the existing shared helper from the target repo:
+Keep custom context within 10,000 estimated tokens, including these instructions
+and source labels; automatic agent instructions are outside. Use session-handoff's
+existing estimator/optional tokenizer. Adjustable starting weights: conversation
+5,000; cached summaries 600; git/GitHub 1,500; useful tool activity 900; saved PM
+context 600; remaining 1,400 for instructions, labels and gaps. Reallocate unused
+space; no filler. If assembling a packet, count its final text including labels.
+
+Read `~/.dotfiles/.codex/skills/sesh/SKILL.md`. Current conversation comes first:
+use `session-handoff peek <provider:id> --tokens N` or the shared API's 3:2:5
+beginning/middle/end window. Within-message token slicing is allowed; retain
+clipping/omission markers. Windows are partial reads. No arbitrary per-message caps.
+
+If current chat is short, backfill its conversation allowance with actual messages
+from relevant sessions. Model relevance selects them; cached summaries/search only
+locate sources. Label session IDs/dates, prioritize newer user corrections, and
+preserve proposal/approval pairs. Agent plans are not user decisions. Retrieve
+decisive older turns by replacing lower-value context within budget. Missing
+decisive evidence means context-gap, never invented intent or a pass.
+
+From the repo being changed, reuse:
 `~/dev/agent-skills/plugins/utils/scripts/gather-context.sh --sources sessions,git,gh --budget 12000`.
-It already supplies session pointers, git, PRs and issues. Follow decisive pointers
-to actual conversation, current diff and owning sources. Do not write a new packer,
-collector, context cache or competing source of truth. In a projectless chat, use
-session history first and gather only from the repo actually being changed.
+Its budget is CHARACTERS, not tokens or the review cap. Adjust that allowance when
+useful; select within the total token budget. Follow pointers to original messages,
+current diff and owning sources. Projectless chats start with session history.
+Do not add a packer, collector, cache or dependency.
 
-Aim for about 10,000 words of relevant source context. Never clip each message to
-an arbitrary length. For longer conversations, select complete relevant messages,
-including the parent proposal paired with a user's approval. Retrieve older turns
-when a decision depends on them. Name material omissions or missing sources.
-Missing context is a context-gap, not permission to invent intent.
+Inspect the supplied raw transcript for useful recent calls paired with results,
+including relevant errors. Skip waits, skill-read noise and duplicate telemetry.
+Mark clipped payloads, omissions and unavailable sources.
 
-For cross-project priorities, consult existing `~/dev/project-manager/PLAYBOOK.md`
-and `context-pack.md`, noting their dates and verifying consequential claims against
-newer user messages. Use the PM's existing gatherer only when portfolio breadth is
-necessary. A repo checkpoint does not need a portfolio refresh.
+Use relevant saved `~/dev/project-manager/PLAYBOOK.md` and `context-pack.md`;
+label dates and verify consequential claims against newer messages/owning sources.
+No portfolio refresh by default; use the existing PM gatherer only if necessary.
 
 ## Judgment and return
 
-Spend roughly three minutes on this checkpoint. Check:
-- Is the work serving the actual requested outcome and latest direction?
-- Has another agent, PR or existing tool already covered it?
-- Are checks and ceremony proportionate to uncertainty and consequences?
-- Is the agent making progress, or extending a weak approach and drifting in scope?
+Spend roughly three minutes. Check outcome alignment, duplicate/existing work,
+proportionate ceremony, progress, weak approaches and scope drift.
 
-Report pass, concrete correction, or context-gap in at most 200 words. A correction
-needs a source pointer, the user's relevant words, observed behavior and the smallest
-useful change. Do not block over hypothetical risks, taste, or pre-launch hardening.
-No extra tests or implementation from this reviewer. Parent evaluates the result,
-acts or explains disagreement, and records a receipt including this reviewer's ID.
-Receipts are self-reported evidence, not proof of usefulness. Full reviews remain
-in native session history; the hook keeps only 120 short references and 64 counters.
+Return pass, concrete correction, or context-gap in at most 200 words. Corrections
+cite source, user words, observed behavior and smallest useful change. No blocking
+on hypothetical risks, taste or pre-launch hardening. No extra tests/implementation.
+Parent acts or explains disagreement and records a receipt with reviewer ID.
+Receipts are self-reported, not usefulness proof. Full reviews remain in native
+history; the hook retains 120 short references and 64 counters.
 
-This trial expires automatically three days after activation. Judge it from actual
-corrections, detours, missed reviews and interruptions Rio experiences. Wiring tests
-only establish delivery; synthetic scenarios do not establish real-world value.
+Trial expires automatically three days after activation. Judge actual corrections,
+detours, missed reviews and interruptions. Wiring tests prove delivery, not value.
