@@ -6,7 +6,7 @@
 # capping or nudging them starves the orchestrator of the detailed report that
 # is the delegate's whole job.
 #
-# Three signals, any one wins:
+# Delegate signals, any one wins:
 #   AGENT_DELEGATE=1  exported by whoever spawned the delegate
 #                     (agent-router delegate)
 #   agent_id          present in Claude Code hook payloads only when the tool
@@ -24,5 +24,9 @@ hook_is_delegate() {
   _t="$(printf '%s' "${1:-}" | jq -r '.transcript_path // empty' 2>/dev/null)"
   case "$_t" in *.jsonl) ;; *) return 1 ;; esac
   [ -f "$_t" ] || return 1
-  [ "$(head -n 1 "$_t" | jq -r '.payload.originator // empty' 2>/dev/null)" = "Claude Code" ]
+  head -n 1 "$_t" | jq -e '
+    .payload.originator == "Claude Code" or
+    (.payload.source | if type == "object" then
+      (.subagent.thread_spawn.parent_thread_id // "") != "" else false end)
+  ' >/dev/null 2>&1
 }
