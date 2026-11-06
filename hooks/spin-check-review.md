@@ -9,44 +9,39 @@ disagreement. Return findings to the parent, not a new Rio inbox.
 
 ## Context, using existing tools
 
-Gather on demand: model-mediated selection, not a prebuilt packet or enforced cap.
-Use Explore's quick source guidance at
-`~/.dotfiles/.codex/skills/explore/ref/explore-core.md`: conversation establishes
-intent; code, diff and output establish behavior; saved notes may be stale.
+Use the existing gatherer from the repository actually being changed. For a
+projectless chat, locate that repository from the current task or tool context;
+label omitted repositories when work spans several:
 
-Keep custom context within 10,000 estimated tokens, including these instructions
-and source labels; automatic agent instructions are outside. Use session-handoff's
-existing estimator/optional tokenizer. Adjustable starting weights: conversation
-5,000; cached summaries 600; git/GitHub 1,500; useful tool activity 900; saved PM
-context 600; remaining 1,400 for instructions, labels and gaps. Reallocate unused
-space; no filler. If assembling a packet, count its final text including labels.
+```sh
+~/dev/agent-skills/plugins/utils/scripts/gather-context.sh \
+  --session <provider:id> --token-budget 8500 --sources sessions,git,gh
+```
 
-Read `~/.dotfiles/.codex/skills/sesh/SKILL.md`. Current conversation comes first:
-use `session-handoff peek <provider:id> --tokens N` or the shared API's 3:2:5
-beginning/middle/end window. Within-message token slicing is allowed; retain
-clipping/omission markers. Windows are partial reads. No arbitrary per-message caps.
+This command reads actual messages, repository context and saved PM sources,
+then bounds the complete rendered text, including source labels and clipping
+markers, to 8,500 estimated tokens. Keep these instructions and supplied pointers
+within the remaining 1,500 of the 10,000 custom-context allowance. Automatic agent
+instructions are outside this allowance. The output names its estimator; this is
+not an exact model-token claim.
 
-If current chat is short, backfill its conversation allowance with actual messages
-from relevant sessions. Model relevance selects them; cached summaries/search only
-locate sources. Label session IDs/dates, prioritize newer user corrections, and
-preserve proposal/approval pairs. Agent plans are not user decisions. Retrieve
-decisive older turns by replacing lower-value context within budget. Missing
-decisive evidence means context-gap, never invented intent or a pass.
+Current conversation spends its roughly 5,000-token allowance first. For a short
+chat, select relevant sessions using `session-handoff search`, then add repeatable
+`--related <provider:id>` flags. Actual related messages fill only spare conversation
+space. Summaries locate sources; they do not replace user messages. Read
+`~/.dotfiles/.codex/skills/sesh/SKILL.md` for discovery commands. Prioritize newer
+user corrections and preserve proposal/approval pairs; agent plans are not decisions.
 
-From the repo being changed, reuse:
-`~/dev/agent-skills/plugins/utils/scripts/gather-context.sh --sources sessions,git,gh --budget 12000`.
-Its budget is CHARACTERS, not tokens or the review cap. Adjust that allowance when
-useful; select within the total token budget. Follow pointers to original messages,
-current diff and owning sources. Projectless chats start with session history.
-Do not add a packer, collector, cache or dependency.
+Select useful recent raw tool calls from the supplied transcript and add repeatable
+`--tool-call <ID>` flags. The command pairs selected calls and results for Codex and
+Claude; unavailable pairs are labeled gaps. Omit waits, skill reads and duplicate
+telemetry. No selected tool IDs means an explicit tool-evidence gap, not coverage.
 
-Inspect the supplied raw transcript for useful recent calls paired with results,
-including relevant errors. Skip waits, skill-read noise and duplicate telemetry.
-Mark clipped payloads, omissions and unavailable sources.
-
-Use relevant saved `~/dev/project-manager/PLAYBOOK.md` and `context-pack.md`;
-label dates and verify consequential claims against newer messages/owning sources.
-No portfolio refresh by default; use the existing PM gatherer only if necessary.
+Re-run the same bounded command with selected IDs for the final review context.
+Windows and clipped sources are partial reads. If a decisive older turn is missing,
+replace lower-value context within the allowance; unresolved decisive evidence
+means context-gap. Saved PM sources include dates and need verification against
+newer messages or owning sources. No full PM refresh, new collector or cache.
 
 ## Judgment and return
 
