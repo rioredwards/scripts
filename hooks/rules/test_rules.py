@@ -305,6 +305,7 @@ class RulesTests(unittest.TestCase):
             '[Fix label printing (#924)](https://github.com/owner/repo/pull/924)',
             '[Fix label printing (#7)](https://github.com/owner/repo/issues/7)',
             'Store #123. [Fix label printing (#924)](https://github.com/owner/repo/pull/924)',
+            'The run hit issues 46 seconds in.',
         ]
         blocked = [
             'PR #924 is ready.', 'Issue #7 is open.', 'PR 7 is ready.',
@@ -338,6 +339,7 @@ class RulesTests(unittest.TestCase):
         allowed = [
             {"recap": "What's left: the invite fix, error visibility, and number reset.", "ask": "Start them?"},
             {"recap": "Safeway Store #123 is mapped; color #123456 unchanged."},
+            {"recap": "The Civic LX at #3 now reads Worth a look."},
         ]
         for data in blocked + allowed:
             with self.subTest(data=data):
