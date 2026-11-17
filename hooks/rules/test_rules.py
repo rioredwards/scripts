@@ -1002,5 +1002,45 @@ class RulesTests(unittest.TestCase):
                     out = self.run_hook("tool", {"tool_name": tool, "tool_input": {key: cmd}}, agent).stdout
                     self.assertNotIn("session-read-partial", out)
 
+    def test_global_rules_placement_covers_claude_and_codex(self):
+        home = "/Users/rio" + "redwards/"
+        hits = [
+            ("Edit", {"file_path": home + ".claude/CLAUDE.md", "old_string": "a", "new_string": "b"}),
+            ("apply_patch", {"input": "*** Begin Patch\n*** Update File: " + home + ".dotfiles/.agents/AGENTS.md\n+- x\n*** End Patch"}),
+            ("apply_patch", "*** Begin Patch\n*** Update File: " + home + ".codex/AGENTS.md\n+- x\n*** End Patch"),
+        ]
+        misses = [("apply_patch", "*** Begin Patch\n*** Update File: " + home + "dev/x/AGENTS.md\n+- x\n*** End Patch")]
+        for agent in ("claude", "codex"):
+            for name, data in hits:
+                with self.subTest(agent=agent, hit=data):
+                    self.assertIn("Global rules file", self.run_hook("tool", {"tool_name": name, "tool_input": data}, agent).stdout)
+            for name, data in misses:
+                with self.subTest(agent=agent, miss=data):
+                    self.assertNotIn("Global rules file", self.run_hook("tool", {"tool_name": name, "tool_input": data}, agent).stdout)
+
+def run_parallel():
+    """Each case spawns real hook processes (~950 in all, ~40 ms each) and shares no state, so run
+    the cases on all cores instead of back to back: 46 s serial became the nightly suite's
+    slowest file."""
+    import sys
+    from concurrent.futures import ThreadPoolExecutor
+    cases = [c for group in unittest.defaultTestLoader.loadTestsFromTestCase(RulesTests) for c in [group]]
+
+    def run_one(case):
+        result = unittest.TestResult()
+        case.run(result)
+        return case, result
+
+    with ThreadPoolExecutor(max_workers=os.cpu_count() or 4) as pool:
+        outcomes = list(pool.map(run_one, cases))
+    bad = 0
+    for case, result in outcomes:
+        for _, trace in result.failures + result.errors:
+            bad += 1
+            print("FAIL %s\n%s" % (case.id(), trace), file=sys.stderr)
+    print("Ran %d tests, %d failed" % (len(cases), bad), file=sys.stderr)
+    sys.exit(1 if bad else 0)
+
+
 if __name__ == "__main__":
-    unittest.main()
+    run_parallel()
