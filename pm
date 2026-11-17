@@ -3,6 +3,7 @@
 #   pm [message]          talk to the PM (Claude Code in ~/dev/project-manager; memory is the repo)
 #   pm daily              run today's routine; a same-day re-run updates today in place
 #   pm daily --headless   same, print mode, no prompts, only the note comes back (needs: claude auth login)
+#   pm priorities         today's priorities check-in (what matters, what pauses, what's new)
 #   pm last               print the newest journal entry
 #   pm ends               loose-ends review: index this week's sessions, table what's hanging, triage
 set -euo pipefail
@@ -17,13 +18,14 @@ DAILY="Run the daily routine now. Read AGENTS.md, PLAYBOOK.md, then skills/daily
 OPEN="Open as the PM: read AGENTS.md and follow its Sessions contract. Then one line only: today's blocks and yesterday's score. Then wait."
 case "${1:-}" in
   "") exec claude "$OPEN" ;;
-  -h|--help) sed -n '2,7p' "$0" ;;
+  -h|--help) sed -n '2,8p' "$0" ;;
   daily)
     if [ "${2:-}" = "--headless" ]; then
       exec claude -p "$DAILY, in headless mode: never ask, never wait." --max-turns 80 \
         --allowedTools Bash Read Edit Write Glob Grep ToolSearch Artifact Agent "$CAL"
     fi
     exec claude "$DAILY." ;;
+  priorities) exec claude "/pm:priorities" ;;
   last) cat "$(ls journal/[0-9]*.md | sort | tail -1)" ;;
   ends|loose-ends) exec claude "Open as the PM: read AGENTS.md and PLAYBOOK.md, then run skills/loose-ends/SKILL.md now." ;;
   *) exec claude "$*" ;;
