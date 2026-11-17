@@ -22,7 +22,7 @@ case "${1:-}" in
   daily)
     if [ "${2:-}" = "--headless" ]; then
       exec claude -p "$DAILY, in headless mode: never ask, never wait." --max-turns 80 \
-        --allowedTools Bash Read Edit Write Glob Grep ToolSearch Artifact Agent "$CAL"
+        --allowedTools Bash Read Edit Write Glob Grep ToolSearch Agent "$CAL"
     fi
     exec claude "$DAILY." ;;
   priorities) exec claude "/pm:priorities" ;;
