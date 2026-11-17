@@ -1,0 +1,164 @@
+#!/usr/bin/env bash
+# agent-skills-publish: ship what an agent turn changed in ~/dev/agent-skills.
+#
+#   agent-skills-publish AGENT SESSION_ID TRANSCRIPT_PATH   (from turn-end/dispatch, detached)
+#   agent-skills-publish --touched AGENT TRANSCRIPT_PATH    (print attributed files; tests)
+#
+# Rio, 2026-11-16: skill edits must reach both Macs without anyone remembering to
+# publish, and only from a finished turn. This replaces the 60s auto-sync removed
+# 2026-09-09, which committed half-written edits and raced agents' pushes. Here only
+# files this session wrote ship, when its turn ends.
+#
+# 1. Attribute: dirty repo files this session's transcript wrote (Claude
+#    Edit/Write/MultiEdit/NotebookEdit; Codex apply_patch file headers). Shell
+#    writes (sed -i, >) are not attributed and stay for their session to ship.
+# 2. Bump each touched plugin's patch version (unless already bumped), validate,
+#    commit only those files, push.
+# 3. Update installs for every plugin whose version moved since this Mac last
+#    published (also catches manual commits), here and on the other Mac.
+# Failures are loud: log + one PM inbox status line. A failed remote update is
+# retried on the next run.
+set -euo pipefail
+
+REPO="${AGENT_SKILLS_REPO:-$HOME/dev/agent-skills}"
+STATE="${AGENT_SKILLS_PUBLISH_STATE:-$HOME/.cache/agent-skills-publish}"
+LOG="$STATE/publish.log"
+
+codex_rollouts() { # rollout -> it plus every descendant subagent rollout from the last 2 days
+  local queue=("$1") id r
+  while [ ${#queue[@]} -gt 0 ]; do
+    r="${queue[0]}"; queue=("${queue[@]:1}"); printf '%s\n' "$r"
+    id="$(head -1 "$r" | jq -r '.payload.id // empty' 2>/dev/null)"
+    [ -n "$id" ] || continue
+    while IFS= read -r child; do queue+=("$child"); done < <(
+      find "$(dirname "$(dirname "$(dirname "$r")")")" -name 'rollout-*.jsonl' -mtime -2 2>/dev/null |
+        xargs grep -l -m1 "\"parent_thread_id\":\"$id\"" 2>/dev/null || true)
+  done
+}
+
+touched() { # agent transcript -> repo-relative paths its own tool calls wrote, one per line
+  local agent="$1" transcript="$2"
+  [ -f "$transcript" ] || return 0
+  case "$agent" in
+    claude)
+      jq -r 'select(.type=="assistant") | .message.content[]?
+        | select(.type=="tool_use" and (.name|IN("Edit","Write","MultiEdit","NotebookEdit")))
+        | .input.file_path // .input.notebook_path // empty' "$transcript" 2>/dev/null || true ;;
+    codex) # apply_patch, called directly or from an exec script, here or in a subagent
+      # (Codex subagents fire no Stop; their rollouts name the parent thread).
+      codex_rollouts "$transcript" | while IFS= read -r r; do
+        jq -r 'select(.type=="response_item") | .payload
+          | select(.name=="apply_patch" or .name=="exec") | (.input // .arguments // empty)' "$r" 2>/dev/null
+      done |
+        grep -o '\*\*\* \(Update\|Add\|Delete\) File: [^\\"]*\|\*\*\* Move to: [^\\"]*' |
+        sed 's/^\*\*\* [A-Za-z ]*: //' || true ;;
+  esac | sed "s|^~/|$HOME/|" | while IFS= read -r p; do
+    case "$p" in "$REPO"/*) printf '%s\n' "${p#"$REPO"/}" ;; esac
+    # check-ledger.sh --coverage regenerates GOALS.md's coverage block from the ledger.
+    if [ "$p" = "$REPO/LEDGER.md" ]; then printf '%s\n' GOALS.md; fi
+  done | sort -u
+}
+
+if [ "${1:-}" = --touched ]; then touched "${2:-}" "${3:-}"; exit 0; fi
+
+agent="${1:-}" session="${2:-}" transcript="${3:-}"
+[ -d "$REPO/.git" ] || exit 0
+mkdir -p "$STATE"
+
+case "$(scutil --get LocalHostName 2>/dev/null || hostname)" in
+  *[Mm]ini*) other=macbook ;;
+  *MacBook*) other=mini ;;
+  *) other="" ;;
+esac
+other="${AGENT_SKILLS_PUBLISH_OTHER-$other}" # tests set it empty
+
+log() { printf '%s %s\n' "$(date '+%F %T')" "$*" >>"$LOG"; }
+fail() {
+  log "FAIL $*"
+  "$HOME/dev/project-manager/scripts/pm_inbox.py" add agent-skills-publish status \
+    "agent-skills publish failed on $(hostname -s): $*. Log: $LOG" >>"$LOG" 2>&1 || true
+  exit 1
+}
+
+# Fast path: nothing of this session's to commit and no pending install work.
+cd "$REPO"
+marker="$STATE/published-head"
+pending="$STATE/remote-pending"
+dirty="$(git status --porcelain --untracked-files=all | cut -c4- | sed 's/.* -> //')"
+mine=""
+[ -z "$dirty" ] || mine="$(comm -12 <(touched "$agent" "$transcript") <(printf '%s\n' "$dirty" | sort -u))"
+if [ -z "$mine" ] && [ ! -s "$pending" ] && [ "$(cat "$marker" 2>/dev/null)" = "$(git rev-parse HEAD)" ]; then
+  exit 0
+fi
+
+# One publisher at a time per Mac; plugin updates take a minute.
+lock="$STATE/lock"
+for _ in $(seq 1 300); do
+  mkdir "$lock" 2>/dev/null && break
+  if [ -n "$(find "$lock" -maxdepth 0 -mmin +15 2>/dev/null)" ]; then rmdir "$lock" 2>/dev/null || true; fi
+  sleep 1
+done
+[ -d "$lock" ] || fail "lock busy for 5 minutes"
+trap 'rmdir "$lock" 2>/dev/null || true' EXIT
+tail -n 1000 "$LOG" >"$LOG.tmp" 2>/dev/null && mv "$LOG.tmp" "$LOG" || true
+
+# 1. Attribute again under the lock: another publisher may have shipped some.
+dirty="$(git status --porcelain --untracked-files=all | cut -c4- | sed 's/.* -> //')"
+mine="$(comm -12 <(printf '%s\n' "$mine") <(printf '%s\n' "$dirty" | sort -u) | sed '/^$/d')"
+if [ -n "$mine" ]; then
+  log "$agent $session: $(printf '%s' "$mine" | tr '\n' ' ')"
+  # 2. Bump, validate, commit, push.
+  files=()
+  while IFS= read -r f; do files+=("$f"); done <<<"$mine"
+  for plugin in $(printf '%s\n' "$mine" | sed -n 's|^plugins/\([^/]*\)/.*|\1|p' | sort -u); do
+    manifest="plugins/$plugin/.claude-plugin/plugin.json"
+    [ -f "$manifest" ] || continue
+    now="$(jq -r .version "$manifest")"
+    head_version="$(git show "HEAD:$manifest" 2>/dev/null | jq -r .version 2>/dev/null || echo none)"
+    if [ "$now" = "$head_version" ]; then
+      next="$(printf '%s' "$now" | awk -F. -v OFS=. '{$NF=$NF+1; print}')"
+      sed -i '' "s/\"version\": \"$now\"/\"version\": \"$next\"/" "$manifest"
+      log "bump $plugin $now -> $next"
+    fi
+    files+=("$manifest")
+    claude plugin validate "plugins/$plugin" --strict >>"$LOG" 2>&1 || fail "plugin $plugin failed validation"
+  done
+  git add -- "${files[@]}" >>"$LOG" 2>&1 || fail "git add"
+  git commit -q -m "publish: ${agent:-agent} turn ${session:0:8}" \
+    -m "Auto-published at turn end by agent-skills-publish." -- "${files[@]}" >>"$LOG" 2>&1 ||
+    fail "git commit"
+  if ! git push -q >>"$LOG" 2>&1; then
+    git pull -q --rebase --autostash >>"$LOG" 2>&1 || fail "pull --rebase before push"
+    git push -q >>"$LOG" 2>&1 || fail "git push"
+  fi
+fi
+
+# 3. Update installs for plugins whose version moved since the last publish here.
+head="$(git rev-parse HEAD)"
+last="$(cat "$marker" 2>/dev/null || true)"
+if [ -z "$last" ] || ! git cat-file -e "$last" 2>/dev/null; then
+  printf '%s\n' "$head" >"$marker"
+  last="$head"
+fi
+moved="$(git diff --name-only "$last" "$head" -- 'plugins/*/.claude-plugin/plugin.json' |
+  sed -n 's|^plugins/\([^/]*\)/.*|\1|p' | sort -u)"
+if [ -n "$moved" ]; then
+  # shellcheck disable=SC2086
+  python3 scripts/update-plugin-installs.py $moved >>"$LOG" 2>&1 || fail "local plugin update ($moved)"
+  log "updated here: $(printf '%s' "$moved" | tr '\n' ' ')"
+fi
+printf '%s\n' "$head" >"$marker"
+
+if [ -n "$other" ]; then
+  remote="$( { cat "$pending" 2>/dev/null; printf '%s\n' "$moved"; } | sed '/^$/d' | sort -u | tr '\n' ' ')"
+  if [ -n "$mine" ] || [ -n "$remote" ]; then
+    printf '%s\n' $remote >"$pending"
+    if ssh -o BatchMode=yes -o ConnectTimeout=20 "$other" \
+      "zsh -lc 'cd ~/dev/agent-skills && git pull -q --ff-only && { [ -z \"$remote\" ] || python3 scripts/update-plugin-installs.py $remote; }'" >>"$LOG" 2>&1; then
+      : >"$pending"
+      log "synced $other: ${remote:-pull only}"
+    else
+      fail "$other pull/update failed (${remote:-pull only}); retries next turn"
+    fi
+  fi
+fi

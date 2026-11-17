@@ -17,6 +17,12 @@ mkdir -p "$log_dir"
   "${HOOK_AGENT:-}" "${HOOK_SESSION_ID:-}" "${HOOK_TRANSCRIPT_PATH:-}" \
   </dev/null >>"$log_dir/index-session.log" 2>&1 &
 
+# Ship this turn's ~/dev/agent-skills edits to both Macs (subagent turns too).
+# Detached; it logs to ~/.cache/agent-skills-publish and alerts the PM inbox.
+"$scripts_root/hooks/turn-end/agent-skills-publish" \
+  "${HOOK_AGENT:-}" "${HOOK_SESSION_ID:-}" "${HOOK_TRANSCRIPT_PATH:-}" \
+  </dev/null >/dev/null 2>&1 &
+
 # Load agent-hooks profile (AGENT_SPEAK, etc.). Env vars already set win over profile.
 # shellcheck source=/dev/null
 . "$scripts_root/agent-hooks-env.sh"
