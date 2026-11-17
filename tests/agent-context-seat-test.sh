@@ -16,6 +16,8 @@ check() { # name, expected-substring-or-!substring, output
 
 export SEAT_HOST=rios-mac-mini
 
+export SEAT_SCREEN_SHARED=0
+
 out="$(SEAT_LOCAL_IDLE=4 "$seat")"
 check "typing here: this Mac"        "Seat: Mac Mini. Rio is typing here" "$out"
 check "typing here: no SSH needed"   "!MacBook" "$out"
@@ -23,6 +25,15 @@ check "typing here: no SSH needed"   "!MacBook" "$out"
 out="$(SEAT_LOCAL_IDLE=600 SEAT_REMOTE_IDLE=3 "$seat")"
 check "other Mac: named"             "Seat: MacBook Air" "$out"
 check "other Mac: GUI warning"       "land on Mac Mini's screen" "$out"
+
+out="$(SEAT_SCREEN_SHARED=1 SEAT_LOCAL_IDLE=2 SEAT_REMOTE_IDLE=0 "$seat")"
+check "screen shared: other Mac"     "Seat: MacBook Air. Rio is typing on the MacBook Air, viewing Mac Mini over Screen Sharing" "$out"
+
+out="$(SEAT_SCREEN_SHARED=1 SEAT_LOCAL_IDLE=2 SEAT_REMOTE_IDLE=500 "$seat")"
+check "screen shared, other idle: here" "Seat: Mac Mini. Rio is typing here" "$out"
+
+out="$(SEAT_SCREEN_SHARED=1 SEAT_LOCAL_IDLE=2 SEAT_REMOTE_ERR="ssh: timed out" SEAT_REMOTE_ONLINE=true "$seat")"
+check "screen shared, other unreachable: here" "Seat: Mac Mini. Rio is typing here" "$out"
 
 out="$(SEAT_LOCAL_IDLE=600 SEAT_REMOTE_IDLE=900 "$seat")"
 check "both idle: phone"             "Seat: Phone (likely)" "$out"

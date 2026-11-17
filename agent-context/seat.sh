@@ -54,8 +54,15 @@ visual to his device. A macOS permission prompt (TCC) blocking a command on \
 this Mac is not a serious blocker: tell Rio and wait, he approves it via \
 Screen Sharing. Do not hang silently or build workarounds."
 
-if [ "$local_idle" -lt "$THRESHOLD" ]; then
-  seat="Seat: $machine. Rio is typing here, GUI side effects land on his screen."
+# Screen Sharing from the other Mac injects its mouse and keys here, so this
+# Mac reads as active while Rio sits at the other one. While a session is
+# open, ask the other Mac too and credit whichever saw input more recently
+# (a tie goes to the other Mac, where the input started).
+shared=${SEAT_SCREEN_SHARED:-$(netstat -an -p tcp | awk '$4 ~ /[.]5900$/ && $6 == "ESTABLISHED" { f = 1 } END { print f ? 1 : 0 }')}
+
+here="Seat: $machine. Rio is typing here, GUI side effects land on his screen."
+if [ "$local_idle" -lt "$THRESHOLD" ] && [ "$shared" = 0 ]; then
+  seat=$here
 else
   remote_idle=${SEAT_REMOTE_IDLE:-}
   remote_err=${SEAT_REMOTE_ERR:-}
@@ -75,7 +82,13 @@ else
     online=${SEAT_REMOTE_ONLINE:-$(/Applications/Tailscale.app/Contents/MacOS/Tailscale status --json \
       | jq -r --arg h "$other_ts." '.Peer[] | select(.DNSName | startswith($h)) | .Online')}
   fi
-  if [ -n "$remote_err" ] && [ "$online" = false ]; then
+  if [ "$local_idle" -lt "$THRESHOLD" ]; then
+    if [ -z "$remote_err" ] && [ "$remote_idle" -le "$local_idle" ]; then
+      seat="Seat: $other. Rio is typing on the $other, viewing $machine over Screen Sharing. $gui_warning"
+    else
+      seat=$here
+    fi
+  elif [ -n "$remote_err" ] && [ "$online" = false ]; then
     seat="Seat: Phone (likely). $other is asleep (offline on Tailscale) and \
 $machine has had no input for $((local_idle / 60))m. Keep replies short and \
 skimmable, links tappable. $gui_warning"
