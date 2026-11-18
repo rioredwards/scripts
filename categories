@@ -6,7 +6,7 @@
                       tag catalog (~/dev/agent-sessions/data/session-tags.json) from the registry.
   categories labels [--apply]
                       plan (or make) missing `scope:<area slug>` GitHub labels for the Straightaway (Asana)
-                      areas in each category's `repos`. Creates only: existing labels keep their description
+                      areas in the registry's top-level `label_repos`. Creates only: existing labels keep their description
                       and color; never edits, deletes, or renames.
   categories check    no writes; exit 1 with one line per drift.
 
@@ -153,13 +153,13 @@ def gh(*args):
 
 
 def label_plan(reg):
-    """[(repo, "create" | "keep", name, description)] for every repo named in the registry.
+    """[(repo, "create" | "keep", name, description)] for every repo in `label_repos`.
 
     Only a missing label is planned; its description is the area name. Existing labels are left alone
     (their description and color may carry more detail than the Asana name)."""
     want = {"scope:" + a["slug"]: a["name"] for a in tagged_areas(reg) if a.get("asana_gid")}
     plan = []
-    for repo in [r for c in reg["categories"] for r in c.get("repos", [])]:
+    for repo in reg["label_repos"]:
         have = {l["name"] for l in json.loads(gh("label", "list", "--repo", repo, "--limit", "1000",
                                                   "--json", "name"))}
         plan += [(repo, "create", name, desc) for name, desc in want.items() if name not in have]

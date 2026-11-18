@@ -14,7 +14,7 @@ TAG_MAC = {"id": "mac-maintenance", "label": "Mac", "definition": "Mac work.", "
 REG = {
     "asana": {"project": "1", "category_field": "2"},
     "categories": [
-        {"name": "Work App", "slug": "work-app", "definition": "The work app.", "repos": ["o/r"], "areas": [
+        {"name": "Work App", "slug": "work-app", "definition": "The work app.", "repos": ["o/r", "o/other"], "areas": [
             {"name": "QC", "slug": "qc", "asana_gid": "10", "definition": "QC.", "session_tags": [TAG_QC, TAG_OCR]},
             {"name": "Labels", "slug": "labels", "asana_gid": "11", "definition": "Labels."},
             {"name": "Other", "slug": "other", "asana_gid": "13", "definition": "Rest."},
@@ -23,6 +23,7 @@ REG = {
             {"name": "Mac", "slug": "mac", "definition": "Mac.", "session_tags": [TAG_MAC]},
         ]},
     ],
+    "label_repos": ["o/r"],
     "unplaced": [],
 }
 OPTIONS = [{"gid": "10", "name": "QC", "enabled": True}, {"gid": "11", "name": "Labels", "enabled": True},
@@ -180,6 +181,12 @@ class Categories(unittest.TestCase):
                               "o/r: scope:auth kept, not in registry\n"
                               "dry run: `categories labels --apply` makes these changes\n")
         self.assertEqual(self.writes(), [])
+
+    def test_repo_in_repos_but_not_label_repos_gets_no_labels(self):
+        # o/other is in the category's `repos` but not `label_repos`: fake_gh fails on any other repo.
+        self.run_cmd("labels", "--apply")
+        self.run_cmd("check")
+        self.assertTrue(all(c[c.index("--repo") + 1] == "o/r" for c in self.gh_calls))
 
     def test_labels_apply_only_creates_missing(self):
         self.labels = [{"name": "scope:qc", "color": "0E8A16", "description": "QC scans"},
