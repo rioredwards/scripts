@@ -10,7 +10,8 @@ case "$ttl" in
   ''|*[!0-9]*|0) echo "Timeout must be a positive number of seconds" >&2; exit 1 ;;
 esac
 
-if ! pgrep -x Hammerspoon >/dev/null 2>&1; then
+# macOS pgrep skips ancestors by default. Hammerspoon can launch this script.
+if ! pgrep -ax Hammerspoon >/dev/null 2>&1; then
   if [[ "$cmd" == "start" ]]; then
     osascript -e 'display notification "Automation running, hands off" with title "Automation"'
   fi

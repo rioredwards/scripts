@@ -33,6 +33,7 @@ grok-stt | grok-stt --help
 grok-tts | grok-tts -h
 install-pr-review | install-pr-review --help
 keyfor | keyfor --list >/dev/null
+macbook-display-toggle | macbook-display-toggle --help
 macbook-wake | MACBOOK_NO_WAKE=1 macbook-wake
 narration-body | narration-body --help
 narration-render | narration-render --help

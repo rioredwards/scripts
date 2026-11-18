@@ -1,0 +1,290 @@
+#!/usr/bin/env python3
+"""Switch the other Mac between AirPlay and Universal Control."""
+
+import argparse
+import fcntl
+from functools import cache
+import json
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import time
+
+
+TARGETS = {
+    "Mac16,10": ("Rio’s MacBook Air", "Rio’s MacBook Air, Built-in Display"),
+    "MacBookAir10,1": ("Rio’s Mac mini", "Rio’s Mac mini, DELL S3225QS"),
+}
+SETTINGS = "x-apple.systempreferences:"
+DISPLAYS = SETTINGS + "com.apple.Displays-Settings.extension"
+GENERAL = SETTINGS + "com.apple.systempreferences.GeneralSettings"
+HS = "/Applications/Hammerspoon.app/Contents/Frameworks/hs/hs"
+CUE = str(Path(__file__).resolve().with_name("automation-cue.sh"))
+LINKED = "Linked keyboard and mouse"
+EXTENDED = "Extended display"
+
+# Use named accessibility elements. Display tiles expose their names as attributed text.
+ACCESSIBILITY = r'''
+local function get(element, attribute)
+    if element then return element:attributeValue(attribute) end
+end
+
+local function children(element)
+    return get(element, "AXChildren") or {}
+end
+
+local function label(element)
+    local description = get(element, "AXAttributedDescription")
+    return description and description:getString() or get(element, "AXTitle")
+end
+
+local function find(element, predicate)
+    if predicate(element) then return element end
+    for _, child in ipairs(children(element)) do
+        local match = find(child, predicate)
+        if match then return match end
+    end
+end
+
+local function press(element)
+    assert(element:performAction("AXPress"))
+end
+
+local function menuFor(control)
+    if #children(control) == 0 then press(control) end
+    return children(control)[1]
+end
+
+if operation == "screen" then
+    for _, screen in ipairs(hs.screen.allScreens()) do
+        if screen:name() == device .. " (AirPlay)" then return "present" end
+    end
+    return "absent"
+end
+
+local app = hs.application.get("com.apple.systempreferences")
+local window
+if app then
+    local application = hs.axuielement.applicationElement(app)
+    for _, candidate in ipairs(get(application, "AXWindows") or {}) do
+        if get(candidate, "AXTitle") == "Displays" then window = candidate; break end
+    end
+end
+if not window then return "loading" end
+
+local strip = find(window, function(element)
+    return get(element, "AXRole") == "AXScrollArea" and get(element, "AXDescription") == "Displays"
+end)
+if not strip then return "loading" end
+local pane = get(strip, "AXParent")
+local tile, state = nil, "unavailable"
+for _, child in ipairs(children(strip)) do
+    local name = label(child)
+    if name == "Airplay Video " .. device then tile, state = child, "airplay" end
+    if name == linkedTile then tile, state = child, "linked" end
+end
+if operation == "state" then return state end
+
+if operation == "link" then
+    if state ~= "unavailable" then return state end
+    local add = find(pane, function(element)
+        local description = get(element, "AXDescription") or ""
+        return get(element, "AXRole") == "AXMenuButton"
+            and description:find("Display settings for ", 1, true) == 1
+    end)
+    if not add then return "missing" end
+    local menu = menuFor(add)
+    if not menu then return "missing" end
+    local linkSection = false
+    for _, item in ipairs(children(menu)) do
+        local title = get(item, "AXTitle")
+        if title == "Link keyboard and mouse to" then linkSection = true end
+        if title == "Mirror or extend to" then break end
+        if linkSection and title == device and get(item, "AXEnabled") then
+            press(item)
+            return "requested"
+        end
+    end
+    assert(menu:performAction("AXCancel"))
+    return "missing"
+end
+
+if not tile then return "unavailable" end
+if operation == "select" then
+    if get(tile, "AXSelected") then return "selected" end
+    -- The display tiles expose their position, but no accessibility press action.
+    local focused = app:focusedWindow()
+    if not app:isFrontmost() or not focused or focused:title() ~= "Displays" then
+        return "waiting for Displays to have focus"
+    end
+    local point = assert(get(tile, "AXActivationPoint"), "The MacBook tile has no activation point")
+    local original = hs.mouse.absolutePosition()
+    hs.eventtap.leftClick(point)
+    local cursor = hs.mouse.absolutePosition()
+    if cursor.x == point.x and cursor.y == point.y then hs.mouse.absolutePosition(original) end
+    return "selected"
+end
+if not get(tile, "AXSelected") then return "waiting for selection" end
+
+local picker = find(pane, function(element)
+    return get(element, "AXRole") == "AXPopUpButton"
+        and get(get(element, "AXTitleUIElement"), "AXValue") == "Use as"
+end)
+if not picker then return "waiting for Use as" end
+local mode = get(picker, "AXValue")
+if operation == "mode" then return mode end
+
+if operation == "disconnect" then
+    assert(state == "airplay", "The selected MacBook is not an AirPlay display")
+    local disconnect = find(pane, function(element)
+        return get(element, "AXRole") == "AXButton" and label(element) == "Disconnect"
+    end)
+    if not disconnect then return "missing" end
+    press(disconnect)
+    return "requested"
+end
+
+assert(operation == "extend" and state == "linked" and mode == "Linked keyboard and mouse",
+    "The selected MacBook is not linked for keyboard and mouse")
+local menu = menuFor(picker)
+if not menu then return "missing" end
+for _, item in ipairs(children(menu)) do
+    if get(item, "AXTitle") == "Extended or mirrored display" and get(item, "AXEnabled") then
+        press(item)
+        return "requested"
+    end
+end
+assert(menu:performAction("AXCancel"))
+return "missing"
+'''
+
+
+def run(*args):
+    try:
+        return subprocess.run(args, stdin=subprocess.DEVNULL, capture_output=True,
+                              text=True, timeout=5, check=True).stdout.strip()
+    except subprocess.CalledProcessError as error:
+        raise RuntimeError(error.stderr.strip() or error.stdout.strip() or str(error)) from error
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise RuntimeError(str(error)) from error
+
+
+@cache
+def display_target():
+    model = run("/usr/sbin/sysctl", "-n", "hw.model")
+    if model not in TARGETS:
+        raise RuntimeError(f"No display target configured for {model}")
+    return TARGETS[model]
+
+
+def ax(operation):
+    device, linked_tile = display_target()
+    code = (f"local operation = {json.dumps(operation)}\n"
+            f"local device = {json.dumps(device, ensure_ascii=False)}\n"
+            f"local linkedTile = {json.dumps(linked_tile, ensure_ascii=False)}\n{ACCESSIBILITY}")
+    output = run(HS, "-c", code).splitlines()
+    if not output:
+        raise RuntimeError(f"Hammerspoon returned no result for {operation}")
+    return output[-1]
+
+
+def wait_for(check, description, seconds=6):
+    deadline = time.monotonic() + seconds
+    while True:
+        if check():
+            return
+        if time.monotonic() >= deadline:
+            raise RuntimeError(f"Timed out waiting for {description}")
+        time.sleep(0.25)
+
+
+def open_displays(refresh=False):
+    if refresh:
+        run("/usr/bin/open", GENERAL)
+        wait_for(lambda: ax("state") == "loading", "Displays to close")
+    run("/usr/bin/open", DISPLAYS)
+    wait_for(lambda: ax("state") != "loading", "Displays settings")
+
+
+def select_target():
+    wait_for(lambda: ax("select") == "selected", "the other Mac's display tile")
+
+
+def link_target():
+    if ax("state") != "linked":
+        result = ax("link")
+        if result == "missing":
+            open_displays(refresh=True)
+            wait_for(lambda: ax("link") in {"requested", "linked"},
+                     "the other Mac under Link keyboard and mouse")
+    wait_for(lambda: ax("state") == "linked", "the keyboard and mouse link", seconds=10)
+    select_target()
+    wait_for(lambda: ax("mode") == LINKED, LINKED)
+
+
+def toggle():
+    open_displays()
+    if ax("state") == "airplay" or ax("screen") == "present":
+        select_target()
+        wait_for(lambda: ax("disconnect") == "requested", "the other Mac's Disconnect button")
+        wait_for(lambda: ax("screen") == "absent" and ax("state") not in {"airplay", "loading"},
+                 "the AirPlay display to disconnect", seconds=10)
+        link_target()
+        return LINKED
+
+    link_target()
+    if ax("extend") != "requested":
+        open_displays(refresh=True)
+        select_target()
+        wait_for(lambda: ax("mode") == LINKED, LINKED)
+        wait_for(lambda: ax("extend") == "requested", "Extended or mirrored display")
+
+    try:
+        wait_for(lambda: ax("screen") == "present", "the AirPlay display to connect", seconds=12)
+    except RuntimeError as error:
+        if ax("state") != "airplay" and ax("screen") == "absent":
+            try:
+                link_target()
+            except RuntimeError as recovery_error:
+                raise RuntimeError(f"{error}. Could not restore the input link: {recovery_error}") from error
+            raise RuntimeError(f"{error}. Restored Linked keyboard and mouse.") from error
+        raise
+    select_target()
+    wait_for(lambda: ax("mode") == EXTENDED, EXTENDED)
+    return EXTENDED
+
+
+def guarded_toggle():
+    try:
+        run(CUE, "start", "90")
+        time.sleep(1)  # Give the user time to see the cue before opening Settings.
+        return toggle()
+    finally:
+        try:
+            run(CUE, "stop")
+        except RuntimeError as error:
+            print(f"macbook-display-toggle: Could not clear the automation cue: {error}",
+                  file=sys.stderr)
+
+
+def main():
+    argparse.ArgumentParser(description=__doc__).parse_args()
+    try:
+        display_target()
+        lock_path = Path(tempfile.gettempdir()) / "macbook-display-toggle.lock"
+        with lock_path.open("a") as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                print("A display switch is already running.")
+                return 0
+            print(guarded_toggle())
+    except RuntimeError as error:
+        print(f"macbook-display-toggle: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
