@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """categories: Rio's work categories, one registry (~/.agents/categories.json) synced to its copies.
 
-  categories pull     Asana Category options -> registry (new, renamed, disabled, removed). Never writes Asana.
+  categories pull     Asana Scope options -> registry (new, renamed, disabled, removed). Never writes Asana.
   categories render   rewrite the Work categories section of ~/.agents/VOCABULARY.md from the registry.
   categories labels [--apply]
                       plan (or make) missing `scope:<area slug>` GitHub labels for the Straightaway (Asana)
@@ -9,7 +9,7 @@
                       and color; never edits, deletes, or renames.
   categories check    no writes; exit 1 with one line per drift.
 
-Areas nest under their category (`categories[].areas`). Straightaway areas come from the Asana Category
+Areas nest under their category (`categories[].areas`). Straightaway areas come from the Asana Scope
 field; edit them there, then pull. Pull puts a new Asana option in top-level `unplaced` until you move it
 under a category; unplaced areas get no session tags or labels. agent-sessions reads the registry directly:
 each placed area except `other` is one session tag (id = slug, label = name, `definition`, optional `exclude`).
