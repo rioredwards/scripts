@@ -2,8 +2,7 @@
 """categories: Rio's work categories, one registry (~/.agents/categories.json) synced to its copies.
 
   categories pull     Asana Category options -> registry (new, renamed, disabled, removed). Never writes Asana.
-  categories render   rewrite the Work categories section of ~/.agents/VOCABULARY.md and the agent-sessions
-                      tag catalog (~/dev/agent-sessions/data/session-tags.json) from the registry.
+  categories render   rewrite the Work categories section of ~/.agents/VOCABULARY.md from the registry.
   categories labels [--apply]
                       plan (or make) missing `scope:<area slug>` GitHub labels for the Straightaway (Asana)
                       areas in the registry's top-level `label_repos`. Creates only: existing labels keep their description
@@ -12,8 +11,9 @@
 
 Areas nest under their category (`categories[].areas`). Straightaway areas come from the Asana Category
 field; edit them there, then pull. Pull puts a new Asana option in top-level `unplaced` until you move it
-under a category; unplaced areas get no session tags or labels. Everything else: edit the registry, then
-render. Token: `keyfor ASANA_PAT`, never printed. Plan: rioredwards/scripts#40.
+under a category; unplaced areas get no session tags or labels. agent-sessions reads the registry directly:
+each placed area except `other` is one session tag (id = slug, label = name, `definition`, optional `exclude`).
+Everything else: edit the registry, then render. Token: `keyfor ASANA_PAT`, never printed. Plan: rioredwards/scripts#40.
 """
 import copy, functools, json, os, re, subprocess, sys, urllib.error, urllib.request
 
@@ -22,7 +22,6 @@ REGISTRY = os.path.expanduser("~/.agents/categories.json")
 VOCAB = os.path.expanduser("~/.agents/VOCABULARY.md")
 BEGIN = "<!-- categories:begin (generated: edit ~/.agents/categories.json, run `categories render`) -->"
 END = "<!-- categories:end -->"
-CATALOG = os.path.expanduser("~/dev/agent-sessions/data/session-tags.json")
 LABEL_COLOR = "5319E7"  # straightaway-next's main scope color
 
 
@@ -76,10 +75,6 @@ def load():
         dupes = sorted({s for s in slugs if slugs.count(s) > 1})
         if dupes:
             die("duplicate %s slug(s) in %s: %s" % (kind, REGISTRY, ", ".join(dupes)))
-    ids = [t["id"] for t in catalog_tags(reg)]
-    dupes = sorted({i for i in ids if ids.count(i) > 1})
-    if dupes:
-        die("duplicate session tag id(s) in %s: %s" % (REGISTRY, ", ".join(dupes)))
     return reg
 
 
@@ -130,18 +125,9 @@ def sync(reg, options):
     return reg, changes
 
 
-def tagged_areas(reg):
-    """Active placed areas that get scope labels and session tags. `other` is the no-match bucket, never a tag."""
+def labeled_areas(reg):
+    """Active placed areas that get scope labels. `other` is the no-match bucket, never a label."""
     return [a for a in placed_areas(reg) if not a.get("asana_state") and a["slug"] != "other"]
-
-
-def catalog_tags(reg):
-    """Session-tag catalog entries: an area's own `session_tags`, else one built from the area itself."""
-    out = []
-    for a in tagged_areas(reg):
-        out += a.get("session_tags") or [{"id": a["slug"], "label": a["name"], "definition": a["definition"],
-                                          "exclude": ""}]
-    return out
 
 
 def gh(*args):
@@ -157,7 +143,7 @@ def label_plan(reg):
 
     Only a missing label is planned; its description is the area name. Existing labels are left alone
     (their description and color may carry more detail than the Asana name)."""
-    want = {"scope:" + a["slug"]: a["name"] for a in tagged_areas(reg) if a.get("asana_gid")}
+    want = {"scope:" + a["slug"]: a["name"] for a in labeled_areas(reg) if a.get("asana_gid")}
     plan = []
     for repo in reg["label_repos"]:
         have = {l["name"] for l in json.loads(gh("label", "list", "--repo", repo, "--limit", "1000",
@@ -189,14 +175,6 @@ def rendered(reg, text):
         die("%s lacks the categories marker comments; add %s and %s around the Work categories list"
             % (VOCAB, BEGIN, END))
     return text[:start] + section(reg) + text[end + len(END):]
-
-
-def read_json(path):
-    try:
-        with open(path) as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError) as e:
-        die("cannot read %s: %s" % (path, e))
 
 
 def write_json(path, value):
@@ -235,16 +213,6 @@ def cmd_render():
         print("rendered %s" % VOCAB)
     else:
         print("%s already current" % VOCAB)
-    catalog = read_json(CATALOG)
-    tags = catalog_tags(reg)
-    if catalog["tags"] != tags:
-        major, minor, _ = catalog["version"].split(".")
-        catalog["version"] = "%s.%d.0" % (major, int(minor) + 1)  # catalog_hash changes anyway; version is for humans
-        catalog["tags"] = tags
-        write_json(CATALOG, catalog)
-        print("rendered %s (version %s)" % (CATALOG, catalog["version"]))
-    else:
-        print("%s already current" % CATALOG)
     return 0
 
 
@@ -268,8 +236,6 @@ def cmd_check():
     text = read_vocab()
     if rendered(reg, text) != text:
         drift.append("%s Work categories section differs from the registry (run `categories render`)" % VOCAB)
-    if read_json(CATALOG)["tags"] != catalog_tags(reg):
-        drift.append("%s tags differ from the registry (run `categories render`)" % CATALOG)
     for repo, action, name, _ in label_plan(reg):
         if action == "create":
             drift.append("%s: label %s missing (run `categories labels --apply`)" % (repo, name))

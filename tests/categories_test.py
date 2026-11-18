@@ -8,19 +8,16 @@ cat = importlib.util.module_from_spec(spec)
 loader.exec_module(cat)
 GH = cat.gh
 
-TAG_QC = {"id": "production-qc", "label": "Production QC", "definition": "QC work.", "exclude": "Not QC."}
-TAG_OCR = {"id": "document-ocr", "label": "Document OCR", "definition": "OCR work.", "exclude": "Not OCR."}
-TAG_MAC = {"id": "mac-maintenance", "label": "Mac", "definition": "Mac work.", "exclude": ""}
 REG = {
     "asana": {"project": "1", "category_field": "2"},
     "categories": [
         {"name": "Work App", "slug": "work-app", "definition": "The work app.", "repos": ["o/r", "o/other"], "areas": [
-            {"name": "QC", "slug": "qc", "asana_gid": "10", "definition": "QC.", "session_tags": [TAG_QC, TAG_OCR]},
+            {"name": "QC", "slug": "qc", "asana_gid": "10", "definition": "QC and OCR work.", "exclude": "Not QC."},
             {"name": "Labels", "slug": "labels", "asana_gid": "11", "definition": "Labels."},
             {"name": "Other", "slug": "other", "asana_gid": "13", "definition": "Rest."},
         ]},
         {"name": "Tools", "slug": "tools", "definition": "Utilities.", "areas": [
-            {"name": "Mac", "slug": "mac", "definition": "Mac.", "session_tags": [TAG_MAC]},
+            {"name": "Mac", "slug": "mac", "definition": "Mac work."},
         ]},
     ],
     "label_repos": ["o/r"],
@@ -28,9 +25,6 @@ REG = {
 }
 OPTIONS = [{"gid": "10", "name": "QC", "enabled": True}, {"gid": "11", "name": "Labels", "enabled": True},
            {"gid": "13", "name": "Other", "enabled": True}]
-CATALOG = {"version": "2.0.0", "policy": {"matching": "keep me"}, "tags": [TAG_QC]}
-# Tags the registry renders, in area order: QC's two, Labels' default (id = slug), Mac's. Other is never a tag.
-TAGS = [TAG_QC, TAG_OCR, {"id": "labels", "label": "Labels", "definition": "Labels.", "exclude": ""}, TAG_MAC]
 VOCAB = "# Vocab\n\n## Work categories\n\n%s\n%s\n\nClassify by the goal and the interface.\n" % (cat.BEGIN, cat.END)
 
 
@@ -41,8 +35,6 @@ class Categories(unittest.TestCase):
         cat.VOCAB = os.path.join(self.tmp.name, "VOCABULARY.md")
         self.write(cat.REGISTRY, json.dumps(REG))
         self.write(cat.VOCAB, VOCAB)
-        cat.CATALOG = os.path.join(self.tmp.name, "session-tags.json")
-        self.write(cat.CATALOG, json.dumps(CATALOG))
         self.options = [dict(o) for o in OPTIONS]
         cat.send = lambda url: {"data": {"enum_options": self.options}}
         # GitHub labels in repo o/r: everything the registry wants, plus an extra.
@@ -108,7 +100,7 @@ class Categories(unittest.TestCase):
         self.assertEqual((rc, out), (1, "area 'Revenue Tracker' is unplaced: place it under a category in %s\n"
                                         % cat.REGISTRY))  # no tag or label drift: unplaced areas get neither
         self.run_cmd("render")
-        self.assertNotIn("Revenue Tracker", self.read(cat.VOCAB) + self.read(cat.CATALOG))
+        self.assertNotIn("Revenue Tracker", self.read(cat.VOCAB))
 
     def test_unplaced_area_updates_in_place_and_placing_it_clears_drift(self):
         reg = json.loads(json.dumps(REG))
@@ -154,7 +146,6 @@ class Categories(unittest.TestCase):
                           ("other", "Other", "removed"), ("mac", "Mac", None)])
         self.run_cmd("render")
         self.assertIn("- **Work App:** The work app.\n", self.read(cat.VOCAB))  # inactive areas drop out
-        self.assertEqual(json.loads(self.read(cat.CATALOG))["tags"], [TAG_MAC])  # and leave the catalog
         self.assertEqual(self.run_cmd("check"), (0, "categories: in sync\n"))  # scope:qc etc. are now extras
 
     def test_hand_edited_vocabulary_is_drift(self):
@@ -217,30 +208,6 @@ class Categories(unittest.TestCase):
                 GH("label", "list")
         finally:
             os.environ["PATH"] = old
-
-    def test_render_writes_catalog_tags_keeps_policy_bumps_version_once(self):
-        self.run_cmd("render")
-        catalog = json.loads(self.read(cat.CATALOG))
-        self.assertEqual(catalog, {"version": "2.1.0", "policy": {"matching": "keep me"}, "tags": TAGS})
-        self.run_cmd("render")
-        self.assertEqual(json.loads(self.read(cat.CATALOG))["version"], "2.1.0")
-        self.assertEqual(self.run_cmd("check")[0], 0)
-
-    def test_hand_edited_catalog_is_drift(self):
-        self.run_cmd("render")
-        catalog = json.loads(self.read(cat.CATALOG))
-        catalog["tags"].pop()
-        self.write(cat.CATALOG, json.dumps(catalog))
-        rc, out = self.run_cmd("check")
-        self.assertEqual(rc, 1)
-        self.assertIn("session-tags.json tags differ from the registry", out)
-
-    def test_duplicate_session_tag_id_fails_loud(self):
-        reg = json.loads(json.dumps(REG))
-        reg["categories"][1]["areas"][0]["session_tags"] = [TAG_OCR]
-        self.write(cat.REGISTRY, json.dumps(reg))
-        with self.assertRaisesRegex(SystemExit, "duplicate session tag id.*document-ocr"):
-            self.run_cmd("render")
 
     def test_no_token_fails_loud(self):
         cat.token.cache_clear()
