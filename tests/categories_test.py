@@ -14,16 +14,16 @@ TAG_MAC = {"id": "mac-maintenance", "label": "Mac", "definition": "Mac work.", "
 REG = {
     "asana": {"project": "1", "category_field": "2"},
     "categories": [
-        {"name": "Work App", "slug": "work-app", "definition": "The work app.", "repos": ["o/r"]},
-        {"name": "Tools", "slug": "tools", "definition": "Utilities."},
+        {"name": "Work App", "slug": "work-app", "definition": "The work app.", "repos": ["o/r"], "areas": [
+            {"name": "QC", "slug": "qc", "asana_gid": "10", "definition": "QC.", "session_tags": [TAG_QC, TAG_OCR]},
+            {"name": "Labels", "slug": "labels", "asana_gid": "11", "definition": "Labels."},
+            {"name": "Other", "slug": "other", "asana_gid": "13", "definition": "Rest."},
+        ]},
+        {"name": "Tools", "slug": "tools", "definition": "Utilities.", "areas": [
+            {"name": "Mac", "slug": "mac", "definition": "Mac.", "session_tags": [TAG_MAC]},
+        ]},
     ],
-    "areas": [
-        {"name": "QC", "slug": "qc", "category": "work-app", "asana_gid": "10", "definition": "QC.",
-         "session_tags": [TAG_QC, TAG_OCR]},
-        {"name": "Labels", "slug": "labels", "category": "work-app", "asana_gid": "11", "definition": "Labels."},
-        {"name": "Other", "slug": "other", "category": "work-app", "asana_gid": "13", "definition": "Rest."},
-        {"name": "Mac", "slug": "mac", "category": "tools", "definition": "Mac.", "session_tags": [TAG_MAC]},
-    ],
+    "unplaced": [],
 }
 OPTIONS = [{"gid": "10", "name": "QC", "enabled": True}, {"gid": "11", "name": "Labels", "enabled": True},
            {"gid": "13", "name": "Other", "enabled": True}]
@@ -91,7 +91,7 @@ class Categories(unittest.TestCase):
         self.assertIn("- **Work App:** The work app. Areas: QC, Labels, Other.\n- **Tools:** Utilities. Areas: Mac.\n", once)
         self.assertIn("Classify by the goal and the interface.", once)
 
-    def test_new_asana_option_is_drift_then_pulled_without_category(self):
+    def test_new_asana_option_is_drift_then_pulled_into_unplaced(self):
         self.run_cmd("render")
         self.options.append({"gid": "12", "name": "Revenue Tracker", "enabled": True})
         rc, out = self.run_cmd("check")
@@ -99,11 +99,47 @@ class Categories(unittest.TestCase):
         self.assertIn("new Asana option 'Revenue Tracker'", out)
         self.assertEqual(json.loads(self.read(cat.REGISTRY)), REG)  # check never writes
         self.run_cmd("pull")
-        area = json.loads(self.read(cat.REGISTRY))["areas"][-1]
-        self.assertEqual((area["slug"], area["category"], area["asana_gid"]), ("revenue-tracker", None, "12"))
+        reg = json.loads(self.read(cat.REGISTRY))
+        self.assertEqual(reg["unplaced"], [{"name": "Revenue Tracker", "slug": "revenue-tracker", "asana_gid": "12",
+                                            "definition": ""}])
+        self.assertEqual(reg["categories"], REG["categories"])
         rc, out = self.run_cmd("check")
-        self.assertEqual(rc, 1)
-        self.assertIn("area 'Revenue Tracker' has no category", out)
+        self.assertEqual((rc, out), (1, "area 'Revenue Tracker' is unplaced: place it under a category in %s\n"
+                                        % cat.REGISTRY))  # no tag or label drift: unplaced areas get neither
+        self.run_cmd("render")
+        self.assertNotIn("Revenue Tracker", self.read(cat.VOCAB) + self.read(cat.CATALOG))
+
+    def test_unplaced_area_updates_in_place_and_placing_it_clears_drift(self):
+        reg = json.loads(json.dumps(REG))
+        reg["unplaced"] = [{"name": "Rev", "slug": "rev", "asana_gid": "12", "definition": "Revenue."}]
+        self.write(cat.REGISTRY, json.dumps(reg))
+        self.options.append({"gid": "12", "name": "Revenue", "enabled": False})
+        out = self.run_cmd("pull")[1]
+        self.assertIn("renamed 'Rev' -> 'Revenue'", out)
+        self.assertEqual(json.loads(self.read(cat.REGISTRY))["unplaced"],
+                         [{"name": "Revenue", "slug": "rev", "asana_gid": "12", "definition": "Revenue.",
+                           "asana_state": "disabled"}])
+        self.options[-1]["enabled"] = True
+        self.run_cmd("pull")
+        reg = json.loads(self.read(cat.REGISTRY))
+        reg["categories"][0]["areas"].append(reg["unplaced"].pop())
+        self.write(cat.REGISTRY, json.dumps(reg))
+        self.labels.append({"name": "scope:rev", "color": "5319E7", "description": "Revenue"})
+        self.run_cmd("render")
+        self.assertIn("Areas: QC, Labels, Other, Revenue.", self.read(cat.VOCAB))
+        self.assertEqual(self.run_cmd("check"), (0, "categories: in sync\n"))
+
+    def test_old_flat_shape_and_duplicate_area_slugs_fail_loud(self):
+        reg = json.loads(json.dumps(REG))
+        reg["unplaced"] = [{"name": "Mac 2", "slug": "mac", "definition": ""}]
+        self.write(cat.REGISTRY, json.dumps(reg))
+        with self.assertRaisesRegex(SystemExit, "duplicate area slug.*mac"):
+            self.run_cmd("render")
+        reg = json.loads(json.dumps(REG))
+        reg["areas"] = []
+        self.write(cat.REGISTRY, json.dumps(reg))
+        with self.assertRaisesRegex(SystemExit, "top-level 'areas'"):
+            self.run_cmd("render")
 
     def test_rename_disable_remove_detected_by_gid(self):
         self.options = [{"gid": "10", "name": "Quality", "enabled": False}]
@@ -111,7 +147,7 @@ class Categories(unittest.TestCase):
         self.assertIn("renamed 'QC' -> 'Quality'", out)
         self.assertIn("'Quality' is disabled", out)
         self.assertIn("'Labels' (gid 11) was removed", out)
-        areas = json.loads(self.read(cat.REGISTRY))["areas"]
+        areas = [a for c in json.loads(self.read(cat.REGISTRY))["categories"] for a in c["areas"]]
         self.assertEqual([(a["slug"], a["name"], a.get("asana_state")) for a in areas],
                          [("qc", "Quality", "disabled"), ("labels", "Labels", "removed"),
                           ("other", "Other", "removed"), ("mac", "Mac", None)])
@@ -194,7 +230,7 @@ class Categories(unittest.TestCase):
 
     def test_duplicate_session_tag_id_fails_loud(self):
         reg = json.loads(json.dumps(REG))
-        reg["areas"][3]["session_tags"] = [TAG_OCR]
+        reg["categories"][1]["areas"][0]["session_tags"] = [TAG_OCR]
         self.write(cat.REGISTRY, json.dumps(reg))
         with self.assertRaisesRegex(SystemExit, "duplicate session tag id.*document-ocr"):
             self.run_cmd("render")

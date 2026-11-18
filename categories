@@ -10,8 +10,10 @@
                       and color; never edits, deletes, or renames.
   categories check    no writes; exit 1 with one line per drift.
 
-Straightaway areas come from the Asana Category field; edit them there, then pull. Everything else: edit
-the registry, then render. Token: `keyfor ASANA_PAT`, never printed. Plan: rioredwards/scripts#40.
+Areas nest under their category (`categories[].areas`). Straightaway areas come from the Asana Category
+field; edit them there, then pull. Pull puts a new Asana option in top-level `unplaced` until you move it
+under a category; unplaced areas get no session tags or labels. Everything else: edit the registry, then
+render. Token: `keyfor ASANA_PAT`, never printed. Plan: rioredwards/scripts#40.
 """
 import copy, functools, json, os, re, subprocess, sys, urllib.error, urllib.request
 
@@ -61,11 +63,16 @@ def load():
         die("no registry at %s" % REGISTRY)
     except json.JSONDecodeError as e:
         die("bad JSON in %s: %s" % (REGISTRY, e))
-    for key in ("asana", "categories", "areas"):
+    if "areas" in reg:
+        die("%s has a top-level 'areas' list: areas nest under categories[].areas (or `unplaced`)" % REGISTRY)
+    for key in ("asana", "categories", "unplaced"):
         if key not in reg:
             die("%s has no %r" % (REGISTRY, key))
-    for kind in ("categories", "areas"):
-        slugs = [x["slug"] for x in reg[kind]]
+    for c in reg["categories"]:
+        if "areas" not in c:
+            die("category %r in %s has no 'areas' list" % (c["slug"], REGISTRY))
+    for kind, items in (("category", reg["categories"]), ("area", all_areas(reg))):
+        slugs = [x["slug"] for x in items]
         dupes = sorted({s for s in slugs if slugs.count(s) > 1})
         if dupes:
             die("duplicate %s slug(s) in %s: %s" % (kind, REGISTRY, ", ".join(dupes)))
@@ -76,6 +83,14 @@ def load():
     return reg
 
 
+def placed_areas(reg):
+    return [a for c in reg["categories"] for a in c["areas"]]
+
+
+def all_areas(reg):
+    return placed_areas(reg) + reg["unplaced"]
+
+
 def slugify(name):
     return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
 
@@ -83,8 +98,8 @@ def slugify(name):
 def sync(reg, options):
     """Apply Asana options to a copy of reg. Returns (new_reg, change lines)."""
     reg = copy.deepcopy(reg)
-    by_gid = {a["asana_gid"]: a for a in reg["areas"] if a.get("asana_gid")}
-    taken = {a["slug"] for a in reg["areas"]}
+    by_gid = {a["asana_gid"]: a for a in all_areas(reg) if a.get("asana_gid")}
+    taken = {a["slug"] for a in all_areas(reg)}
     changes = []
     for o in options:
         area = by_gid.get(o["gid"])
@@ -93,10 +108,9 @@ def sync(reg, options):
             while slug in taken:
                 slug += "-new"
             taken.add(slug)
-            reg["areas"].append({"name": o["name"], "slug": slug, "category": None, "asana_gid": o["gid"],
-                                 "definition": ""})
-            changes.append("new Asana option %r (gid %s): added with no category; set its category and "
-                           "definition in %s" % (o["name"], o["gid"], REGISTRY))
+            reg["unplaced"].append({"name": o["name"], "slug": slug, "asana_gid": o["gid"], "definition": ""})
+            changes.append("new Asana option %r (gid %s): added to unplaced; move it under a category and "
+                           "write its definition in %s" % (o["name"], o["gid"], REGISTRY))
             continue
         if area["name"] != o["name"]:
             changes.append("Asana option renamed %r -> %r (gid %s)" % (area["name"], o["name"], o["gid"]))
@@ -117,8 +131,8 @@ def sync(reg, options):
 
 
 def tagged_areas(reg):
-    """Active areas that get scope labels and session tags. `other` is the no-match bucket, never a tag."""
-    return [a for a in reg["areas"] if not a.get("asana_state") and a["slug"] != "other"]
+    """Active placed areas that get scope labels and session tags. `other` is the no-match bucket, never a tag."""
+    return [a for a in placed_areas(reg) if not a.get("asana_state") and a["slug"] != "other"]
 
 
 def catalog_tags(reg):
@@ -154,20 +168,13 @@ def label_plan(reg):
 
 
 def problems(reg):
-    cats = {c["slug"] for c in reg["categories"]}
-    out = []
-    for a in reg["areas"]:
-        if not a.get("category"):
-            out.append("area %r has no category: set one in %s" % (a["name"], REGISTRY))
-        elif a["category"] not in cats:
-            out.append("area %r has unknown category %r" % (a["name"], a["category"]))
-    return out
+    return ["area %r is unplaced: place it under a category in %s" % (a["name"], REGISTRY) for a in reg["unplaced"]]
 
 
 def section(reg):
     lines = [BEGIN]
     for c in reg["categories"]:
-        areas = [a["name"] for a in reg["areas"] if a.get("category") == c["slug"] and not a.get("asana_state")]
+        areas = [a["name"] for a in c["areas"] if not a.get("asana_state")]
         line = "- **%s:** %s" % (c["name"], c["definition"])
         if areas:
             line += " Areas: %s." % ", ".join(areas)
