@@ -1,0 +1,200 @@
+#!/usr/bin/env python3
+"""categories: Rio's work categories, one registry (~/.agents/categories.json) synced to its copies.
+
+  categories pull     Asana Category options -> registry (new, renamed, disabled, removed). Never writes Asana.
+  categories render   rewrite the Work categories section of ~/.agents/VOCABULARY.md from the registry.
+  categories check    no writes; exit 1 with one line per drift.
+
+Straightaway areas come from the Asana Category field; edit them there, then pull. Everything else: edit
+the registry, then render. Token: `keyfor ASANA_PAT`, never printed. Plan: rioredwards/scripts#40.
+"""
+import copy, functools, json, os, re, subprocess, sys, urllib.error, urllib.request
+
+API = "https://app.asana.com/api/1.0"
+REGISTRY = os.path.expanduser("~/.agents/categories.json")
+VOCAB = os.path.expanduser("~/.agents/VOCABULARY.md")
+BEGIN = "<!-- categories:begin (generated: edit ~/.agents/categories.json, run `categories render`) -->"
+END = "<!-- categories:end -->"
+
+
+def die(msg):
+    raise SystemExit("categories: " + msg)
+
+
+@functools.cache
+def token():
+    r = subprocess.run(["keyfor", "ASANA_PAT"], capture_output=True, text=True)
+    if r.returncode or not r.stdout.strip():
+        die("no ASANA_PAT: set one with `keyfor --set ASANA_PAT`")
+    return r.stdout.strip()
+
+
+def send(url):
+    """One Asana GET -> parsed JSON. Tests replace this."""
+    req = urllib.request.Request(url, headers={"Authorization": "Bearer " + token()})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.load(resp)
+    except urllib.error.URLError as e:
+        why = "HTTP %s: %s" % (e.code, e.read().decode(errors="replace")[:400]) if hasattr(e, "code") else e.reason
+        die("GET %s -> %s" % (url.split("?")[0], why))
+
+
+def asana_options(reg):
+    field = reg["asana"]["category_field"]
+    data = send("%s/custom_fields/%s?opt_fields=enum_options.name,enum_options.enabled" % (API, field))["data"]
+    return [{"gid": o["gid"], "name": o["name"], "enabled": o.get("enabled", True)} for o in data["enum_options"]]
+
+
+def load():
+    try:
+        with open(REGISTRY) as f:
+            reg = json.load(f)
+    except FileNotFoundError:
+        die("no registry at %s" % REGISTRY)
+    except json.JSONDecodeError as e:
+        die("bad JSON in %s: %s" % (REGISTRY, e))
+    for key in ("asana", "categories", "areas"):
+        if key not in reg:
+            die("%s has no %r" % (REGISTRY, key))
+    for kind in ("categories", "areas"):
+        slugs = [x["slug"] for x in reg[kind]]
+        dupes = sorted({s for s in slugs if slugs.count(s) > 1})
+        if dupes:
+            die("duplicate %s slug(s) in %s: %s" % (kind, REGISTRY, ", ".join(dupes)))
+    return reg
+
+
+def save(reg):
+    tmp = os.path.realpath(REGISTRY) + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(reg, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+    os.replace(tmp, os.path.realpath(REGISTRY))
+
+
+def slugify(name):
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+
+
+def sync(reg, options):
+    """Apply Asana options to a copy of reg. Returns (new_reg, change lines)."""
+    reg = copy.deepcopy(reg)
+    by_gid = {a["asana_gid"]: a for a in reg["areas"] if a.get("asana_gid")}
+    taken = {a["slug"] for a in reg["areas"]}
+    changes = []
+    for o in options:
+        area = by_gid.get(o["gid"])
+        if area is None:
+            slug = slugify(o["name"])
+            while slug in taken:
+                slug += "-new"
+            taken.add(slug)
+            reg["areas"].append({"name": o["name"], "slug": slug, "category": None, "asana_gid": o["gid"],
+                                 "definition": ""})
+            changes.append("new Asana option %r (gid %s): added with no category; set its category and "
+                           "definition in %s" % (o["name"], o["gid"], REGISTRY))
+            continue
+        if area["name"] != o["name"]:
+            changes.append("Asana option renamed %r -> %r (gid %s)" % (area["name"], o["name"], o["gid"]))
+            area["name"] = o["name"]
+        state = None if o["enabled"] else "disabled"
+        if area.get("asana_state") != state:
+            changes.append("area %r is %s in Asana" % (area["name"], state or "enabled again"))
+            if state:
+                area["asana_state"] = state
+            else:
+                del area["asana_state"]
+    live = {o["gid"] for o in options}
+    for gid, area in by_gid.items():
+        if gid not in live and area.get("asana_state") != "removed":
+            changes.append("area %r (gid %s) was removed from Asana" % (area["name"], gid))
+            area["asana_state"] = "removed"
+    return reg, changes
+
+
+def problems(reg):
+    cats = {c["slug"] for c in reg["categories"]}
+    out = []
+    for a in reg["areas"]:
+        if not a.get("category"):
+            out.append("area %r has no category: set one in %s" % (a["name"], REGISTRY))
+        elif a["category"] not in cats:
+            out.append("area %r has unknown category %r" % (a["name"], a["category"]))
+    return out
+
+
+def section(reg):
+    lines = [BEGIN]
+    for c in reg["categories"]:
+        areas = [a["name"] for a in reg["areas"] if a.get("category") == c["slug"] and not a.get("asana_state")]
+        line = "- **%s:** %s" % (c["name"], c["definition"])
+        if areas:
+            line += " Areas: %s." % ", ".join(areas)
+        lines.append(line)
+    lines.append(END)
+    return "\n".join(lines)
+
+
+def rendered(reg, text):
+    start, end = text.find(BEGIN), text.find(END)
+    if start < 0 or end < start:
+        die("%s lacks the categories marker comments; add %s and %s around the Work categories list"
+            % (VOCAB, BEGIN, END))
+    return text[:start] + section(reg) + text[end + len(END):]
+
+
+def read_vocab():
+    with open(VOCAB) as f:
+        return f.read()
+
+
+def cmd_pull():
+    reg = load()
+    new, changes = sync(reg, asana_options(reg))
+    if new != reg:
+        save(new)
+    for line in changes or ["registry already matches Asana"]:
+        print(line)
+    for line in problems(new):
+        print(line)
+    return 0
+
+
+def cmd_render():
+    reg = load()
+    text = read_vocab()
+    out = rendered(reg, text)
+    if out != text:
+        with open(VOCAB, "w") as f:
+            f.write(out)
+        print("rendered %s" % VOCAB)
+    else:
+        print("%s already current" % VOCAB)
+    return 0
+
+
+def cmd_check():
+    reg = load()
+    drift = ["asana: %s (run `categories pull`)" % c for c in sync(reg, asana_options(reg))[1]]
+    drift += problems(reg)
+    text = read_vocab()
+    if rendered(reg, text) != text:
+        drift.append("%s Work categories section differs from the registry (run `categories render`)" % VOCAB)
+    for line in drift:
+        print(line)
+    if not drift:
+        print("categories: in sync")
+    return 1 if drift else 0
+
+
+def main(argv):
+    cmds = {"pull": cmd_pull, "render": cmd_render, "check": cmd_check}
+    if len(argv) != 1 or argv[0] not in cmds:
+        print(__doc__.strip())
+        return 0 if argv and argv[0] in ("-h", "--help") else 2
+    return cmds[argv[0]]()
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
