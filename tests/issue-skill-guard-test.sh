@@ -28,6 +28,10 @@ check allowed "jq 'select(.cmd | test(\"(gh issue create|gh issue edit)\"))' f"
 check allowed 'grep -n "gh issue create" hooks/*.sh'
 check allowed "rg 'x; gh issue edit' ."
 check allowed 'git commit -m "guard: ignore quoted gh issue create mentions"'
+check allowed 'gh api repos/o/r/issues/5/issue-field-values'
+check allowed "gh api repos/o/r/issues --jq '.[].issue-field-values'"
+check blocked 'gh api -X PATCH repos/o/r/issues/5 -f title=x'
+check blocked 'gh api repos/o/r/issues/5 -F body=@file'
 check allowed 'gh issue view 12'
 
 touch "/tmp/claude-issue-skill-$sid"

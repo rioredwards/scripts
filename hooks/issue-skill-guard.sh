@@ -28,7 +28,7 @@ if [ -n "$CMD" ]; then
   invoked=$?
   if printf '%s' "$CMD" | "$(dirname "$0")/lib/cmd-invokes" 'gh\s+api'; then
     if printf '%s' "$CMD" | grep -Eq '(repos/[^[:space:]]+/issues(/[[:digit:]]+)?(/labels[^[:space:]]*)?([^/[:alnum:]_]|$)|createIssue|updateIssue|addLabelsToLabelable|removeLabelsFromLabelable)' &&
-       printf '%s' "$CMD" | grep -Eq '(-[fF]|--(raw-)?field|--input|(-X|--method)[=[:space:]]*(POST|PATCH|PUT|DELETE))'; then
+       printf '%s' "$CMD" | grep -Eq '((^|[[:space:]])-[fF]|--(raw-)?field|--input|(-X|--method)[=[:space:]]*(POST|PATCH|PUT|DELETE))'; then
       MODE=api
     fi
   fi
