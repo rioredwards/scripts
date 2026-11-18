@@ -140,19 +140,18 @@ class Categories(unittest.TestCase):
                        {"name": "scope:auth", "color": "5319E7", "description": "Auth"}]
         rc, out = self.run_cmd("labels")
         self.assertEqual(rc, 0)
-        self.assertEqual(out, "o/r: edit scope:qc description 'QC scans' -> 'QC' (color 0E8A16 kept)\n"
-                              "o/r: create scope:labels (Labels, #5319E7)\n"
+        self.assertEqual(out, "o/r: create scope:labels (Labels, #5319E7)\n"
                               "o/r: scope:auth kept, not in registry\n"
                               "dry run: `categories labels --apply` makes these changes\n")
         self.assertEqual(self.writes(), [])
 
-    def test_labels_apply_creates_and_edits_never_deletes(self):
+    def test_labels_apply_only_creates_missing(self):
         self.labels = [{"name": "scope:qc", "color": "0E8A16", "description": "QC scans"},
                        {"name": "scope:auth", "color": "5319E7", "description": "Auth"}]
         rc, out = self.run_cmd("labels", "--apply")
         self.assertEqual(rc, 0)
+        # scope:qc keeps its richer description and color; scope:auth (extra) is kept too.
         self.assertEqual(self.writes(), [
-            ["label", "edit", "scope:qc", "--repo", "o/r", "--description", "QC"],
             ["label", "create", "scope:labels", "--repo", "o/r", "--color", "5319E7", "--description", "Labels"]])
         self.assertNotIn("dry run", out)
 
@@ -162,7 +161,7 @@ class Categories(unittest.TestCase):
         rc, out = self.run_cmd("check")
         self.assertEqual(rc, 1)
         self.assertIn("o/r: label scope:labels missing (run `categories labels --apply`)", out)
-        self.assertIn("o/r: label scope:qc description 'QC scans' should be 'QC'", out)
+        self.assertNotIn("scope:qc", out)  # a description differing from the Asana name is not drift
         self.assertEqual(self.writes(), [])
 
     def test_gh_failure_fails_loud(self):

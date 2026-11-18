@@ -5,8 +5,9 @@
   categories render   rewrite the Work categories section of ~/.agents/VOCABULARY.md and the agent-sessions
                       tag catalog (~/dev/agent-sessions/data/session-tags.json) from the registry.
   categories labels [--apply]
-                      plan (or make) `scope:<area slug>` GitHub labels for the Straightaway (Asana) areas in
-                      each category's `repos`. Creates and edits descriptions only; never deletes or renames.
+                      plan (or make) missing `scope:<area slug>` GitHub labels for the Straightaway (Asana)
+                      areas in each category's `repos`. Creates only: existing labels keep their description
+                      and color; never edits, deletes, or renames.
   categories check    no writes; exit 1 with one line per drift.
 
 Straightaway areas come from the Asana Category field; edit them there, then pull. Everything else: edit
@@ -75,14 +76,6 @@ def load():
     return reg
 
 
-def save(reg):
-    tmp = os.path.realpath(REGISTRY) + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(reg, f, indent=2, ensure_ascii=False)
-        f.write("\n")
-    os.replace(tmp, os.path.realpath(REGISTRY))
-
-
 def slugify(name):
     return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
 
@@ -146,19 +139,17 @@ def gh(*args):
 
 
 def label_plan(reg):
-    """[(repo, action, name, description, color)] for every repo named in the registry."""
+    """[(repo, "create" | "keep", name, description)] for every repo named in the registry.
+
+    Only a missing label is planned; its description is the area name. Existing labels are left alone
+    (their description and color may carry more detail than the Asana name)."""
     want = {"scope:" + a["slug"]: a["name"] for a in tagged_areas(reg) if a.get("asana_gid")}
     plan = []
     for repo in [r for c in reg["categories"] for r in c.get("repos", [])]:
-        have = {l["name"]: l for l in json.loads(gh("label", "list", "--repo", repo, "--limit", "1000",
-                                                     "--json", "name,color,description"))}
-        for name, desc in want.items():
-            old = have.get(name)
-            if old is None:
-                plan.append((repo, "create", name, desc, LABEL_COLOR))
-            elif old["description"] != desc:
-                plan.append((repo, "edit", name, desc, old))
-        plan += [(repo, "keep", n, None, None) for n in sorted(have) if n.startswith("scope:") and n not in want]
+        have = {l["name"] for l in json.loads(gh("label", "list", "--repo", repo, "--limit", "1000",
+                                                  "--json", "name"))}
+        plan += [(repo, "create", name, desc) for name, desc in want.items() if name not in have]
+        plan += [(repo, "keep", n, None) for n in sorted(have) if n.startswith("scope:") and n not in want]
     return plan
 
 
@@ -202,6 +193,7 @@ def read_json(path):
 
 
 def write_json(path, value):
+    path = os.path.realpath(path)
     tmp = path + ".tmp"
     with open(tmp, "w") as f:
         json.dump(value, f, indent=2, ensure_ascii=False)
@@ -218,7 +210,7 @@ def cmd_pull():
     reg = load()
     new, changes = sync(reg, asana_options(reg))
     if new != reg:
-        save(new)
+        write_json(REGISTRY, new)
     for line in changes or ["registry already matches Asana"]:
         print(line)
     for line in problems(new):
@@ -250,16 +242,11 @@ def cmd_render():
 
 
 def cmd_labels(apply):
-    for repo, action, name, desc, extra in label_plan(load()):
+    for repo, action, name, desc in label_plan(load()):
         if action == "create":
-            print("%s: create %s (%s, #%s)" % (repo, name, desc, extra))
+            print("%s: create %s (%s, #%s)" % (repo, name, desc, LABEL_COLOR))
             if apply:
-                gh("label", "create", name, "--repo", repo, "--color", extra, "--description", desc)
-        elif action == "edit":
-            print("%s: edit %s description %r -> %r (color %s kept)" % (repo, name, extra["description"], desc,
-                                                                         extra["color"]))
-            if apply:
-                gh("label", "edit", name, "--repo", repo, "--description", desc)
+                gh("label", "create", name, "--repo", repo, "--color", LABEL_COLOR, "--description", desc)
         else:
             print("%s: %s kept, not in registry" % (repo, name))
     if not apply:
@@ -276,12 +263,9 @@ def cmd_check():
         drift.append("%s Work categories section differs from the registry (run `categories render`)" % VOCAB)
     if read_json(CATALOG)["tags"] != catalog_tags(reg):
         drift.append("%s tags differ from the registry (run `categories render`)" % CATALOG)
-    for repo, action, name, desc, old in label_plan(reg):
+    for repo, action, name, _ in label_plan(reg):
         if action == "create":
             drift.append("%s: label %s missing (run `categories labels --apply`)" % (repo, name))
-        elif action == "edit":
-            drift.append("%s: label %s description %r should be %r (run `categories labels --apply`)"
-                         % (repo, name, old["description"], desc))
     for line in drift:
         print(line)
     if not drift:
