@@ -9,10 +9,12 @@
 # remote default branch's AGENTS.md (`**Class:** personal`), so a branch cannot
 # relabel its repo; no line means production and land refuses.
 # --autostash lets tracked uncommitted changes sit in the tree (rebase's own
-# autostash; the shared stash stack is never touched). Untracked files are ignored.
+# autostash) unless origin changed the same files: there git would park the edit on
+# the shared stash list and leave conflict markers, so land refuses first. Untracked
+# files are ignored.
 #
-# Exit: 0 landed | 1 refused or setup error (class, dirty tree, detached HEAD, no
-# origin) | 4 rebase conflict (aborted, work stays on its branch) | 5 push rejected
+# Exit: 0 landed | 1 refused or setup error (class, dirty tree, dirty file origin
+# changed, detached HEAD, no origin) | 4 rebase conflict (aborted, work stays on its branch) | 5 push rejected
 # (run land again) | 6 landed but the main checkout was not fast-forwarded.
 set -euo pipefail
 
@@ -30,11 +32,14 @@ default="$(git ls-remote --symref origin HEAD | sed -n 's|^ref: refs/heads/\(.*\
 [ -n "$default" ] || die 1 "cannot read origin's default branch"
 git rev-parse -q --verify "refs/remotes/origin/$default" >/dev/null || die 1 "origin/$default not fetched"
 
-class="$(git show "origin/$default:AGENTS.md" 2>/dev/null | sed -n 's/^\*\*Class:\*\* *`\{0,1\}\([a-z]*\).*/\1/p' | head -1)"
+class="$(git show "origin/$default:AGENTS.md" 2>/dev/null | sed -n 's/^\*\*Class:\*\* *`\{0,1\}\([a-z_-]*\).*/\1/p' | head -1)"
 [ "$class" = personal ] || die 1 "origin/$default AGENTS.md class is '${class:-missing}', not personal: use a PR"
 
-if [ -z "$auto" ] && [ -n "$(git status --porcelain --untracked-files=no)" ]; then
-  die 1 "uncommitted changes: commit them (or pass --autostash)"
+dirty="$(git diff --name-only HEAD)"
+if [ -n "$dirty" ]; then
+  [ -n "$auto" ] || die 1 "uncommitted changes: commit them (or pass --autostash)"
+  overlap="$(comm -12 <(printf '%s\n' "$dirty" | sort) <(git diff --name-only "HEAD...origin/$default" | sort))"
+  [ -z "$overlap" ] || die 1 "uncommitted changes to files origin/$default changed: $(printf '%s' "$overlap" | tr '\n' ' ')"
 fi
 
 if ! git merge-base --is-ancestor "origin/$default" HEAD; then

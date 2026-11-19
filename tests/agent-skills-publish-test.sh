@@ -6,6 +6,7 @@ P="$(cd "$(dirname "$0")/.." && pwd)/hooks/turn-end/agent-skills-publish"
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 fail=0
 check() { if [ "$2" = "$3" ]; then echo "  ok: $1"; else echo "  FAIL: $1 (want '$3', got '$2')" >&2; fail=1; fi; }
+export HOME="$tmp/home"; mkdir "$HOME" # a failing publish must not reach the real PM inbox
 
 git init -q --bare "$tmp/remote.git"
 git clone -q "$tmp/remote.git" "$tmp/repo" 2>/dev/null
@@ -66,4 +67,28 @@ check "marker at main head" "$(cat "$tmp/state/published-head")" "$(git -C "$R" 
 HOOK_CWD="$W" "$P" claude agent-a1b2c3d4e5 "$tmp/sub.jsonl"; check "subagent transcript publish exit" "$?" "0"
 check "subagent commit has only sub.md" "$(git -C "$W" show --name-only --format= HEAD | tr '\n' ' ')" "sub.md "
 check "subagent landed" "$(git -C "$R" rev-parse HEAD)" "$(git -C "$tmp/remote.git" rev-parse HEAD)"
+
+# Worktree session that also wrote a main-checkout path: the worktree file lands, the main file
+# is pushed from the main checkout. A land rejected once (exit 5) is retried once.
+printf 'w2\n' >>"$W/wt.md"; printf 'm\n' >>"$R/mine.md"
+printf '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"%s"}}]}}\n' "$W/wt.md" "$R/mine.md" >"$tmp/both.jsonl"
+mkdir "$tmp/stub"
+printf '#!/bin/bash\n[ -e "%s/stub/once" ] || { : >"%s/stub/once"; exit 5; }\nexec "%s/land" "$@"\n' "$tmp" "$tmp" "$SCRIPTS" >"$tmp/stub/land"
+chmod +x "$tmp/stub/land"
+HOOK_CWD="$W" SCRIPTS="$tmp/stub" "$P" claude b0th0000 "$tmp/both.jsonl"; check "both checkouts publish exit" "$?" "0"
+check "rejected land retried once" "$([ -e "$tmp/stub/once" ] && echo yes)" "yes"
+check "main file pushed from main" "$(git -C "$R" show --name-only --format= HEAD | tr '\n' ' ')" "mine.md "
+check "worktree file landed first" "$(git -C "$R" show --name-only --format= HEAD~1 | tr '\n' ' ')" "wt.md "
+check "both on origin" "$(git -C "$R" rev-parse HEAD)" "$(git -C "$tmp/remote.git" rev-parse HEAD)"
+check "both clean" "$(git -C "$R" status --porcelain mine.md)$(git -C "$W" status --porcelain wt.md)" ""
+
+# Detached worktree: fails loud before committing; the edit stays uncommitted.
+git -C "$R" worktree add -q --detach "$tmp/det"; D="$(cd "$tmp/det" && pwd -P)"
+printf 'd\n' >"$D/det.md"
+printf '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"%s/det.md"}}]}}\n' "$D" >"$tmp/det.jsonl"
+before="$(git -C "$tmp/remote.git" rev-parse HEAD)"
+HOOK_CWD="$D" "$P" claude de7ac4ed "$tmp/det.jsonl"; check "detached worktree fails" "$?" "1"
+check "detached: edit uncommitted" "$(git -C "$D" status --porcelain det.md)" "?? det.md"
+check "detached: remote unchanged" "$(git -C "$tmp/remote.git" rev-parse HEAD)" "$before"
+check "detached: failure logged" "$(grep -c 'detached HEAD' "$tmp/state/publish.log")" "1"
 exit $fail

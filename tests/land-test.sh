@@ -41,6 +41,16 @@ check "autostash: rebased onto other work" "$(g "$tmp/r.git" log --format=%s -3 
 check "autostash: main checkout matches" "$(g "$R" rev-parse HEAD)" "$(g "$tmp/r.git" rev-parse main)"
 g "$W" checkout -q -- w.md; rm "$W/untracked"
 
+# 2b. --autostash with a dirty file origin also changed refuses up front: no conflict markers,
+# nothing parked on the shared stash list, remote unchanged.
+printf 'up\n' >"$R/f"; g "$R" commit -qam up; g "$R" push -q origin main
+printf 'local\n' >"$W/f"; before="$(g "$tmp/r.git" rev-parse main)"
+(cd "$W" && "$L" --autostash >/dev/null 2>&1); check "autostash overlap refused" "$?" "1"
+check "autostash overlap: edit kept" "$(cat "$W/f")" "local"
+check "autostash overlap: stash list untouched" "$(g "$W" stash list)" "$stash_before"
+check "autostash overlap: remote unchanged" "$(g "$tmp/r.git" rev-parse main)" "$before"
+g "$W" checkout -q -- f
+
 # 3. Conflict: aborts, remote unchanged, branch intact, no rebase left behind.
 printf 'mine\n' >"$W/c.md"; g "$W" add -A; g "$W" commit -qm mine
 printf 'theirs\n' >"$R/c.md"; g "$R" add c.md; g "$R" commit -qm theirs; g "$R" push -q origin main
@@ -52,8 +62,9 @@ check "conflict: no rebase in progress" "$(g "$W" status | grep -c 'rebase in pr
 g "$W" reset -q --hard HEAD~1
 
 # 4. Production and unlabeled repos refuse and change nothing on the remote.
-for c in '**Class:** `production`' 'no class line'; do
-  n="p$(printf '%s' "$c" | tr -dc a-z | head -c4)"; mkrepo "$n" "$c"
+i=0
+for c in '**Class:** `production`' '**Class:** `personal-prod`' 'no class line'; do
+  i=$((i + 1)); n="p$i"; mkrepo "$n" "$c"
   g "$tmp/$n" checkout -qb feat; printf 'z\n' >"$tmp/$n/z"; g "$tmp/$n" add -A; g "$tmp/$n" commit -qm z
   rem="$(g "$tmp/$n.git" rev-parse main)"
   (cd "$tmp/$n" && "$L" >/dev/null 2>&1); check "refuses: $c" "$?" "1"

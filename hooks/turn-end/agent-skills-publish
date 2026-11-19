@@ -17,8 +17,9 @@
 # 3. Update installs for every plugin whose version moved since this Mac last
 #    published (also catches manual commits), here and on the other Mac.
 # A session in a linked worktree of the repo (HOOK_CWD) does steps 1-2 there and
-# lands its commit with `land --autostash` instead of pushing; step 3 runs from the
-# main checkout. Edits made by that session's subagents attribute the same way.
+# lands its commit with `land --autostash` instead of pushing (one retry if the push
+# is rejected), then steps 1-2 as before for any main-checkout files it wrote; step 3
+# runs from the main checkout. Its subagents' edits attribute the same way.
 # Failures are loud: log + one PM inbox status line. A failed remote update is
 # retried on the next run.
 set -euo pipefail
@@ -39,8 +40,8 @@ codex_rollouts() { # rollout -> it plus every descendant subagent rollout from t
   done
 }
 
-touched() { # agent transcript -> repo-relative paths its own tool calls wrote, one per line
-  local agent="$1" transcript="$2"
+touched() { # agent transcript [checkout] -> checkout-relative paths its own tool calls wrote
+  local agent="$1" transcript="$2" root="${3:-$REPO}"
   [ -f "$transcript" ] || return 0
   case "$agent" in
     claude)
@@ -56,9 +57,9 @@ touched() { # agent transcript -> repo-relative paths its own tool calls wrote, 
         grep -o '\*\*\* \(Update\|Add\|Delete\) File: [^\\"]*\|\*\*\* Move to: [^\\"]*' |
         sed 's/^\*\*\* [A-Za-z ]*: //' || true ;;
   esac | sed "s|^~/|$HOME/|" | while IFS= read -r p; do
-    case "$p" in "${ROOT:-$REPO}"/*) printf '%s\n' "${p#"${ROOT:-$REPO}"/}" ;; esac
+    case "$p" in "$root"/*) printf '%s\n' "${p#"$root"/}" ;; esac
     # check-ledger.sh --coverage regenerates GOALS.md's coverage block from the ledger.
-    if [ "$p" = "${ROOT:-$REPO}/LEDGER.md" ]; then printf '%s\n' GOALS.md; fi
+    if [ "$p" = "$root/LEDGER.md" ]; then printf '%s\n' GOALS.md; fi
   done | sort -u
 }
 
@@ -68,13 +69,16 @@ agent="${1:-}" session="${2:-}" transcript="${3:-}"
 [ -d "$REPO/.git" ] || exit 0
 mkdir -p "$STATE"
 
-# The checkout this session works in: its worktree of REPO, else REPO itself.
-ROOT="$REPO"
+# The linked worktree of REPO this session works in, if any (WT). Its agents often
+# also edit main-checkout paths (skills load from there), so both checkouts are read.
+WT=""
 if [ -n "${HOOK_CWD:-}" ] && [ -d "$HOOK_CWD" ]; then
   top="$(git -C "$HOOK_CWD" rev-parse --show-toplevel 2>/dev/null || true)"
   common="$(git -C "$HOOK_CWD" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
-  if [ -n "$top" ] && [ "$top" != "$REPO" ] && [ "$(cd "$common" 2>/dev/null && pwd -P)" = "$(cd "$REPO" && pwd -P)/.git" ]; then
-    ROOT="$top"
+  real_repo="$(cd "$REPO" && pwd -P)"
+  if [ -n "$top" ] && [ "$(cd "$top" && pwd -P)" != "$real_repo" ] &&
+    [ "$(cd "$common" 2>/dev/null && pwd -P)" = "$real_repo/.git" ]; then
+    WT="$top"
   fi
 fi
 
@@ -93,14 +97,20 @@ fail() {
   exit 1
 }
 
+dirty_in() { git -C "$1" status --porcelain --untracked-files=all | cut -c4- | sed 's/.* -> //'; }
+mine_in() { # checkout -> its dirty files this session's transcript wrote
+  local dirty
+  dirty="$(dirty_in "$1")"
+  [ -z "$dirty" ] || comm -12 <(touched "$agent" "$transcript" "$1") <(printf '%s\n' "$dirty" | sort -u)
+}
+
 # Fast path: nothing of this session's to commit and no pending install work.
-cd "$ROOT"
 marker="$STATE/published-head"
 pending="$STATE/remote-pending"
-dirty="$(git status --porcelain --untracked-files=all | cut -c4- | sed 's/.* -> //')"
-mine=""
-[ -z "$dirty" ] || mine="$(comm -12 <(touched "$agent" "$transcript") <(printf '%s\n' "$dirty" | sort -u))"
-if [ -z "$mine" ] && [ ! -s "$pending" ] && [ "$(cat "$marker" 2>/dev/null)" = "$(git -C "$REPO" rev-parse HEAD)" ]; then
+mine_wt=""
+[ -z "$WT" ] || mine_wt="$(mine_in "$WT")"
+mine="$(mine_in "$REPO")"
+if [ -z "$mine_wt$mine" ] && [ ! -s "$pending" ] && [ "$(cat "$marker" 2>/dev/null)" = "$(git -C "$REPO" rev-parse HEAD)" ]; then
   exit 0
 fi
 
@@ -115,12 +125,16 @@ done
 trap 'rmdir "$lock" 2>/dev/null || true' EXIT
 tail -n 1000 "$LOG" >"$LOG.tmp" 2>/dev/null && mv "$LOG.tmp" "$LOG" || true
 
-# 1. Attribute again under the lock: another publisher may have shipped some.
-dirty="$(git status --porcelain --untracked-files=all | cut -c4- | sed 's/.* -> //')"
-mine="$(comm -12 <(printf '%s\n' "$mine") <(printf '%s\n' "$dirty" | sort -u) | sed '/^$/d')"
-if [ -n "$mine" ]; then
-  log "$agent $session: $(printf '%s' "$mine" | tr '\n' ' ')"
-  # 2. Bump, validate, commit, push.
+publish() { # checkout files -> 1. re-attribute under the lock, 2. bump, validate, commit, push or land
+  local root="$1" mine files=() f plugin manifest now head_version next code=0
+  cd "$root"
+  # Another publisher may have shipped some while this one waited for the lock.
+  mine="$(comm -12 <(printf '%s\n' "$2") <(dirty_in "$root" | sort -u) | sed '/^$/d')"
+  [ -n "$mine" ] || return 0
+  log "$agent $session${WT:+ in $root}: $(printf '%s' "$mine" | tr '\n' ' ')"
+  if [ "$root" != "$REPO" ] && ! git symbolic-ref -q HEAD >/dev/null; then
+    fail "worktree $root is on a detached HEAD, land needs a branch; its edits stay uncommitted"
+  fi
   files=()
   while IFS= read -r f; do files+=("$f"); done <<<"$mine"
   for plugin in $(printf '%s\n' "$mine" | sed -n 's|^plugins/\([^/]*\)/.*|\1|p' | sort -u); do
@@ -140,13 +154,21 @@ if [ -n "$mine" ]; then
   git commit -q -m "publish: ${agent:-agent} turn ${session:0:8}" \
     -m "Auto-published at turn end by agent-skills-publish." -- "${files[@]}" >>"$LOG" 2>&1 ||
     fail "git commit"
-  if [ "$ROOT" != "$REPO" ]; then
-    "${SCRIPTS:-$HOME/scripts}/land" --autostash >>"$LOG" 2>&1 || fail "land from $ROOT"
+  if [ "$root" != "$REPO" ]; then
+    # Exit 5 is a rejected push (origin moved after land's fetch): land again once,
+    # as the main-checkout path pulls and pushes again. Anything else needs a person.
+    "${SCRIPTS:-$HOME/scripts}/land" --autostash >>"$LOG" 2>&1 || code=$?
+    if [ "$code" = 5 ]; then code=0; "${SCRIPTS:-$HOME/scripts}/land" --autostash >>"$LOG" 2>&1 || code=$?; fi
+    [ "$code" = 0 ] || fail "land from $root (exit $code, see land in $LOG); the commit waits on its branch"
   elif ! git push -q >>"$LOG" 2>&1; then
     git pull -q --rebase --autostash >>"$LOG" 2>&1 || fail "pull --rebase before push"
     git push -q >>"$LOG" 2>&1 || fail "git push"
   fi
-fi
+}
+
+# Worktree first: it lands, and the main checkout fast-forwards before its own commit.
+[ -z "$WT" ] || publish "$WT" "$mine_wt"
+publish "$REPO" "$mine"
 
 # 3. Update installs for plugins whose version moved since the last publish here.
 cd "$REPO"
@@ -167,7 +189,7 @@ printf '%s\n' "$head" >"$marker"
 
 if [ -n "$other" ]; then
   remote="$( { cat "$pending" 2>/dev/null; printf '%s\n' "$moved"; } | sed '/^$/d' | sort -u | tr '\n' ' ')"
-  if [ -n "$mine" ] || [ -n "$remote" ]; then
+  if [ -n "$mine_wt$mine" ] || [ -n "$remote" ]; then
     printf '%s\n' $remote >"$pending"
     if ssh -o BatchMode=yes -o ConnectTimeout=20 "$other" \
       "zsh -lc 'cd ~/dev/agent-skills && git pull -q --ff-only && { [ -z \"$remote\" ] || python3 scripts/update-plugin-installs.py $remote; }'" >>"$LOG" 2>&1; then
