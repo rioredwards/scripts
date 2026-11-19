@@ -1,0 +1,203 @@
+#!/usr/bin/python3
+"""system-catalog: one generated catalog of every piece of Rio's agentic system. Stdlib only, Apple's python3.
+
+  system-catalog [--out PATH]   read every source live, overwrite one JSON file (default
+                                ~/.local/state/system-catalog/catalog.json), print a count per kind.
+
+Entry: name, kind, where, trigger, goal (may be empty), health (ok | failing | not checked), reason,
+lastAudited (empty until the nightly audit exists). Health comes from tool-check's latest log (tools,
+launchd jobs, scheduled tasks) and `pm2 jlist`; other kinds are "not checked". An unreadable source
+exits 1 and leaves the old file untouched. Daily 03:40 via launchd com.rioredwards.system-catalog.
+Test env: SYSTEM_CATALOG_HOME (for ~), SYSTEM_CATALOG_SKILLS, SYSTEM_CATALOG_PM2_JSON (a file).
+"""
+import argparse, datetime, glob, json, os, plistlib, re, subprocess, sys, time
+
+HOME = os.environ.get("SYSTEM_CATALOG_HOME") or os.path.expanduser("~")
+SKILLS = os.environ.get("SYSTEM_CATALOG_SKILLS") or os.path.join(HOME, "dev/agent-skills")
+OK, FAIL, UNCHECKED = "ok", "failing", "not checked"
+
+def p(*parts):
+    return os.path.join(HOME, *parts)
+
+def tilde(path):
+    return path.replace(HOME, "~", 1)
+
+def entry(name, kind, where, trigger="", goal="", health=UNCHECKED, reason="no check yet"):
+    return {"name": name, "kind": kind, "where": tilde(where), "trigger": trigger, "goal": goal.strip(),
+            "health": health, "reason": "" if health == OK else reason, "lastAudited": ""}
+
+def read_json(path):
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+def frontmatter(path, key):
+    """First-line value of a `key:` in a file's leading --- block; empty for block scalars."""
+    with open(path, encoding="utf-8") as f:
+        lines = f.read().split("\n---", 1)[0].splitlines()
+    for line in lines:
+        if line.startswith(key + ":"):
+            v = line.split(":", 1)[1].strip().strip("\"'")
+            return "" if v in (">", "|", ">-", "|-") else v
+    return ""
+
+# review: 2026-12-03. Temporary shortcut: tool-check writes only a text log. Deciding test: delete this
+# parser when tool-check writes structured results (slice 2 of issue 53), then read those instead.
+LOG_LINE = re.compile(r"^\[(ok   |skip |BROKE)\] (tool list|tool|launchd job|Desktop task) (\S+)(?: - (.*?))?(?: \(\d+\.\d+s\))?$")
+
+def tool_check_log():
+    """-> ({(kind, name): (health, reason)}, log path, run time as ISO). The newest dated log."""
+    logs = sorted(glob.glob(p("Library/Logs/tool-check/????-??-??.log")))
+    if not logs:
+        raise SystemExit("ERROR: no tool-check log in %s" % tilde(p("Library/Logs/tool-check")))
+    with open(logs[-1], encoding="utf-8") as f:
+        lines = f.read().splitlines()
+    m = re.search(r"(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)$", lines[0]) if lines else None
+    if not m:
+        raise SystemExit("ERROR: %s: first line has no run time: %r" % (logs[-1], lines[:1]))
+    at = datetime.datetime.fromtimestamp(time.mktime(time.strptime(m.group(1), "%Y-%m-%d %H:%M:%S"))).astimezone().isoformat()
+    health = {}
+    for line in lines[1:]:
+        m = LOG_LINE.match(line)
+        if not m:
+            continue
+        tag, kind, name, msg = m.group(1).strip(), m.group(2), m.group(3), m.group(4) or ""
+        if kind == "launchd job":
+            name = re.sub(r"^com\.rio(redwards)?\.", "", name)
+        if kind == "tool list":  # a coverage finding about a tool: it can only make that tool failing
+            if tag != "BROKE":
+                continue
+            kind = "tool"
+        if tag == "BROKE" or (kind, name) not in health:
+            health[(kind, name)] = (FAIL, msg) if tag == "BROKE" else (UNCHECKED, msg) if tag == "skip" else (OK, "")
+    return health, logs[-1], at
+
+def checked(health, kind, name):
+    return health.get((kind, name), (UNCHECKED, "not in the latest tool-check log"))
+
+def skills():
+    """Plugin skills, the project manager's skills and Rio's own ~/.claude/skills."""
+    out = []
+    for prefix, pattern in [(None, os.path.join(SKILLS, "plugins/*/skills/*/SKILL.md")),
+                            ("pm", p("dev/project-manager/skills/*/SKILL.md")), ("user", p(".claude/skills/*/SKILL.md"))]:
+        for f in sorted(glob.glob(pattern)):
+            owner = prefix or f.split("/plugins/")[1].split("/")[0]
+            name = frontmatter(f, "name") or os.path.basename(os.path.dirname(f))
+            out.append(entry("%s:%s" % (owner, name), "skill", f, "invoked by name or by its description", frontmatter(f, "description")))
+    return out
+
+def plugins():
+    out = []
+    for f in sorted(glob.glob(os.path.join(SKILLS, "plugins/*/.claude-plugin/plugin.json"))):
+        d = read_json(f)
+        out.append(entry(d["name"], "plugin", f, "installed plugin", d.get("description", "")))
+    return out
+
+def hooks():
+    out, path = [], p(".claude/settings.json")
+    for event, groups in read_json(path)["hooks"].items():
+        for g in groups:
+            matcher = g.get("matcher", "*")
+            for h in g["hooks"]:
+                cmd = h.get("command", h.get("type", ""))
+                scripts = re.findall(r"\$HOME/([^\s\"']+)", cmd)
+                what = scripts[-1].replace("scripts/hooks/", "") if scripts else cmd[:60]
+                out.append(entry("%s %s %s" % (event, matcher, what), "hook", path, "%s, matcher %s" % (event, matcher)))
+    return out
+
+def hook_rules():
+    path = p("scripts/hooks/rules/rules.json")
+    return [entry(r["id"], "hook rule", path, "%s: %s" % (r["on"], r["do"])) for r in read_json(path)["rules"]]
+
+def tools(health):
+    out = []
+    for f in sorted(glob.glob(p("scripts/*")) + glob.glob(p("tools/*/*"))):
+        if os.path.isfile(f) and os.access(f, os.X_OK) and os.path.basename(f) != "test.sh":
+            name = os.path.basename(f)
+            h, why = checked(health, "tool", name)
+            out.append(entry(name, "tool", f, "run by hand or by another tool", health=h, reason=why))
+    return out
+
+def launchd(health):
+    out = []
+    for f in sorted(glob.glob(p("Library/LaunchAgents/com.rio*.plist"))):
+        d = plistlib.load(open(f, "rb"))
+        name = re.sub(r"^com\.rio(redwards)?\.", "", d["Label"])
+        cal = d.get("StartCalendarInterval")
+        cal = cal[0] if isinstance(cal, list) else cal
+        if cal:
+            trig = "daily %02d:%02d" % (cal.get("Hour", 0), cal.get("Minute", 0)) if "Weekday" not in cal else "weekly " + str(cal)
+        else:
+            trig = "every %ss" % d["StartInterval"] if "StartInterval" in d else "always on" if d.get("KeepAlive") else "at login" if d.get("RunAtLoad") else "unknown"
+        h, why = checked(health, "launchd job", name)
+        out.append(entry(name, "launchd job", f, trig, health=h, reason=why))
+    return out
+
+def pm2():
+    src = os.environ.get("SYSTEM_CATALOG_PM2_JSON")
+    if src:
+        raw = open(src, encoding="utf-8").read()
+    else:
+        r = subprocess.run(["pm2", "jlist"], capture_output=True, text=True, timeout=30, env=dict(os.environ, PATH=os.environ.get("PATH", "") + ":/opt/homebrew/bin:/usr/local/bin"))
+        if r.returncode:
+            raise SystemExit("ERROR: pm2 jlist failed (%d): %s" % (r.returncode, r.stderr.strip()[:200]))
+        raw = r.stdout
+    out = []
+    for d in json.loads(raw.strip().splitlines()[-1]):
+        status = d["pm2_env"]["status"]
+        out.append(entry(d["name"], "pm2 process", d["pm2_env"].get("pm_cwd") or d["pm2_env"].get("cwd", ""), "always on (pm2)",
+                         health=OK if status == "online" else FAIL, reason="pm2 status: " + status))
+    return out
+
+def scheduled_tasks(health):
+    files = sorted(glob.glob(p("Library/Application Support/Claude/claude-code-sessions/*/*/scheduled-tasks.json")))
+    if not files:
+        raise SystemExit("ERROR: no scheduled-tasks.json under Application Support/Claude/claude-code-sessions")
+    seen, out = set(), []
+    for f in files:
+        for t in read_json(f)["scheduledTasks"]:
+            if t["id"] in seen:
+                continue
+            seen.add(t["id"])
+            skill = t.get("filePath", "")
+            goal = frontmatter(skill, "description") if os.path.isfile(skill) else ""
+            trig = "cron " + t["cronExpression"] if "cronExpression" in t else "one-time"
+            h, why = checked(health, "Desktop task", t["id"]) if t.get("enabled") is True else (UNCHECKED, "disabled")
+            out.append(entry(t["id"], "scheduled task", skill or f, trig, goal, h, why))
+    return out
+
+def nightly_jobs():
+    out = []
+    for f in sorted(glob.glob(p(".codex/automations/*/automation.toml"))):
+        kv = dict(re.findall(r'^(\w+)\s*=\s*"(.*)"\s*$', open(f, encoding="utf-8").read(), re.M))
+        out.append(entry(kv.get("name") or os.path.basename(os.path.dirname(f)), "nightly job", f, kv.get("rrule", "unknown"),
+                         kv.get("prompt", "")[:140], reason="Codex %s; no check yet" % kv.get("status", "status unknown")))
+    return out
+
+def build():
+    health, log, log_at = tool_check_log()
+    groups = [skills(), plugins(), hooks(), hook_rules(), tools(health), launchd(health), pm2(), scheduled_tasks(health), nightly_jobs()]
+    for g, what in zip(groups, ["skills", "plugins", "hooks", "hook rules", "tools", "launchd jobs", "pm2 processes", "scheduled tasks", "nightly jobs"]):
+        if not g and what != "pm2 processes":
+            raise SystemExit("ERROR: no %s found" % what)
+    return {"generatedAt": datetime.datetime.now().astimezone().isoformat(timespec="seconds"), "host": os.uname().nodename,
+            "sources": {"toolCheck": {"file": tilde(log), "at": log_at}}, "entries": [e for g in groups for e in g]}
+
+def main():
+    ap = argparse.ArgumentParser(prog="system-catalog", description="Write the catalog of every piece of the system.")
+    ap.add_argument("--out", default=p(".local/state/system-catalog/catalog.json"))
+    args = ap.parse_args()
+    cat = build()
+    os.makedirs(os.path.dirname(args.out), exist_ok=True)
+    tmp = args.out + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(cat, f, indent=1)
+        f.write("\n")
+    os.replace(tmp, args.out)
+    for kind in dict.fromkeys(e["kind"] for e in cat["entries"]):
+        es = [e for e in cat["entries"] if e["kind"] == kind]
+        print("%-15s %3d  (%d failing, %d not checked)" % (kind, len(es), sum(e["health"] == FAIL for e in es), sum(e["health"] == UNCHECKED for e in es)))
+    print("wrote " + tilde(args.out))
+
+
+if __name__ == "__main__":
+    sys.exit(main())
