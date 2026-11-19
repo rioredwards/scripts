@@ -251,13 +251,17 @@ e.done()
 
 
 SECRET = "TOPSECRET_VALUE_12345"
-PATTERNS = ".env*\nnode_modules/\n.fallow/\nnext-env.d.ts\nnotes.txt\n.claude/worktrees/\nshots/\nscratch/\ndist/\n"
+PATTERNS = ".env*\nnode_modules/\n.fallow/\nnext-env.d.ts\nnotes.txt\n.claude/worktrees/\nshots/\nscratch/\ndist/\n.venv/\n__pycache__/\n*.pyc\n.pytest_cache/\n.ruff_cache/\n.mypy_cache/\n.tox/\nhtmlcov/\n.coverage\n.coverage.*\n.testmondata*\ninstance/\n"
 
 
 def ignoring(e, name, branch="feat", pushed=True):
     """A tree whose repo ignores the usual generated paths, caches and env files."""
     p = e.tree(name, branch, pushed=pushed)
     (e.repo / ".gitignore").write_text(PATTERNS)
+    # tracked files beside the ignored ones, as in a real repo (a directory holding only ignored paths is reported whole)
+    (e.repo / "skeleton" / "pkg").mkdir(parents=True, exist_ok=True)
+    (e.repo / "skeleton" / "app.py").write_text("x")
+    (e.repo / "skeleton" / "pkg" / "mod.py").write_text("x")
     e.git(e.repo, "add", ".")
     e.git(e.repo, "commit", "-q", "--allow-empty", "-m", "ignore")
     e.git(e.repo, "push", "-q", "origin", "main")
@@ -342,12 +346,27 @@ def removable(name, files, empty_dirs=()):
 
 for label, files, empties in (
     ("node_modules, .fallow, next-env.d.ts allowed", {"node_modules/x": "g", ".fallow/cache": "g", "next-env.d.ts": "g"}, ()),
+    ("python caches allowed", {"skeleton/.venv/bin/python": "g", "skeleton/pkg/__pycache__/a.pyc": "g", "skeleton/.pytest_cache/v": "g",
+                               ".ruff_cache/0.1/x": "g", ".mypy_cache/x": "g", ".tox/py/x": "g", "htmlcov/index.html": "g",
+                               "skeleton/.coverage": "g", "skeleton/.coverage.host.123": "g", "skeleton/.testmondata": "g",
+                               "skeleton/.testmondata-shm": "g", "skeleton/.testmondata-wal": "g", "skeleton/loose.pyc": "g"}, ()),
     ("empty nested .claude/worktrees allowed", {}, (".claude/worktrees",)),
 ):
     e, p = removable("gen", files, empties)
     v, _ = e.verdicts()
     check(label, v["gen"]["verdict"] == "remove" and v["gen"]["envFiles"] == 0, json.dumps(v["gen"]))
     e.done()
+
+# instance/ may hold a local database or config: never generated
+e, p = removable("inst", {"skeleton/instance/local.db": "x"})
+v, _ = e.verdicts()
+check("instance/ keeps the tree", v["inst"]["verdict"] == "keep" and any("allowlist" in r for r in v["inst"]["reasons"]), json.dumps(v["inst"]))
+e.done()
+# a generated name inside a walked non-generated ignored directory is not trusted
+e, p = removable("inst2", {"instance/.venv/x": "x"})
+v, _ = e.verdicts()
+check(".venv inside a non-generated ignored dir keeps", v["inst2"]["verdict"] == "keep", json.dumps(v["inst2"]))
+e.done()
 
 e, p = removable("envy", {})
 os.symlink("/dev/null", p / ".env")

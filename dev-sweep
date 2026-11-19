@@ -28,7 +28,7 @@ is unknown keeps it:
      git-dir index and HEAD log
   5. no process with its cwd inside it, no pm2 process or live dev lease for it
   6. ignored content only from a short generated-output allowlist (node_modules,
-     build and cache dirs, test output, .fallow, next-env.d.ts, an empty nested
+     build and cache dirs, Python caches and .venv, coverage and .testmondata files, test output, .fallow, next-env.d.ts, an empty nested
      .claude/worktrees, symlinked .env files; a wholly ignored directory is
      walked file by file). Regular .env* files do not block:
      on --apply each is first copied to $HOME/Backups/<repo>/worktree-env/
@@ -76,9 +76,10 @@ GENERATED_DIRS = {
     "node_modules", ".next", ".turbo", "dist", "build", "out", "coverage",
     ".cache", ".parcel-cache", "__pycache__", ".pytest_cache", ".mypy_cache",
     ".ruff_cache", "test-results", "playwright-report", ".DS_Store", ".fallow", "next-env.d.ts",
+    ".venv", ".tox", "htmlcov", ".coverage", ".testmondata", ".testmondata-shm", ".testmondata-wal",
 }
 INDEX_LINES = 500
-GENERATED_SUFFIXES = (".tsbuildinfo",)
+GENERATED_SUFFIXES = (".tsbuildinfo", ".pyc")
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 
@@ -222,7 +223,7 @@ def classify_ignored(wt):
     def judge(rel, reported):
         full = os.path.join(wt["dir"], rel)
         name = rel.rsplit("/", 1)[-1]
-        if reported and (name in GENERATED_DIRS or rel.endswith(GENERATED_SUFFIXES)):
+        if reported and (name in GENERATED_DIRS or name.startswith(".coverage.") or rel.endswith(GENERATED_SUFFIXES)):
             return
         if name.startswith(".env"):
             if os.path.islink(full):
