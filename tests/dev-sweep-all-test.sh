@@ -58,12 +58,13 @@ class Env:
         self.marker = self.tmp / "enabled"
         self.marker.write_text("")
         self.env = {**os.environ, "HOME": str(self.tmp / "home"), "DEV_ROOT": str(self.dev), "SCRIPTS": str(self.tmp / "scriptsrepo"),
-                    "DOTFILES": str(self.tmp / "no-dotfiles"), "DEV_SWEEP_LOG_DIR": str(self.logs), "DEV_SWEEP_PM_INBOX": str(self.pm),
+                    "DOTFILES": str(self.tmp / "plain-dotfiles"), "DEV_SWEEP_LOG_DIR": str(self.logs), "DEV_SWEEP_PM_INBOX": str(self.pm),
                     "DEV_SWEEP_BIN": str(self.fake), "DEV_SWEEP_MARKER": str(self.marker), "FAKE_CALLS": str(self.calls)}
         for rel, extra in (("alpha", 1), ("grp/beta", 1), ("bad", 1), ("big", 17), ("leftover", 1), ("single", 0)):
             self.repo(self.dev / rel, extra)
         self.repo(self.tmp / "scriptsrepo", 1)
         (self.dev / ".hidden-repo").mkdir()
+        (self.tmp / "plain-dotfiles").mkdir()  # exists but is not a repo: skipped
 
     def repo(self, path, extra):
         path.mkdir(parents=True)
@@ -124,6 +125,28 @@ for p in list(e.inbox.glob("*.md")):
         p.unlink()
 e.run(extra=big)
 check("an older unread line for the repo blocks a new one", "still has 18" not in e.inbox_text() and "failed on bad" in e.inbox_text(), e.inbox_text())
+# a line for a repo whose name only starts with "big" does not block big
+old.write_text("- status: Worktree sweep: big-backend still has 99 worktrees (old)\n")
+e.run(extra=big)
+check("a line for big-backend does not block big", "big still has 18" in e.inbox_text(), e.inbox_text())
+e.done()
+
+# --- one repo the wrapper cannot read: reported, the rest still run ----------------------------
+e = Env()
+(e.dev / "broken" / ".git").mkdir(parents=True)  # looks like a primary checkout, git rejects it
+(e.dev / "alpha-link").symlink_to(e.dev / "alpha")
+out = e.run(extra=big)
+check("an unreadable repo does not stop the rest", sorted(e.call_names()) == ["alpha", "bad", "beta", "big", "leftover", "scriptsrepo"], str(e.call_names()) + out.stderr)
+check("an unreadable repo gets a failure line", "- status: Worktree sweep failed on broken: " in e.inbox_text(), e.inbox_text() + out.stderr)
+check("an unreadable repo makes the run exit 1", out.returncode == 1, str(out.returncode))
+check("a symlink to a repo is swept once", e.call_names().count("alpha") == 1, str(e.call_names()))
+e.done()
+
+# --- missing roots fail loud ----------------------------------------------------------------------
+e = Env()
+for var in ("DEV_ROOT", "SCRIPTS", "DOTFILES"):
+    out = e.run(extra={var: str(e.tmp / "missing")})
+    check(f"missing {var} exits 2 and sweeps nothing", out.returncode == 2 and not e.calls.exists() and "is not a directory" in out.stderr, out.stderr)
 e.done()
 
 e = Env()
