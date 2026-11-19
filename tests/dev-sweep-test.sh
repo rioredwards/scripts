@@ -17,7 +17,7 @@ class Env:
         self.tmp = pathlib.Path(tempfile.mkdtemp()).resolve()
         self.repo, self.remote = self.tmp / "repo", self.tmp / "remote.git"
         self.env = {**os.environ, "DEV_LEASE_DIR": str(self.tmp / "leases"), "PM2_HOME": str(self.tmp / "pm2"),
-                    "GIT_AUTHOR_DATE": OLD, "GIT_COMMITTER_DATE": OLD}
+                    "GIT_AUTHOR_DATE": OLD, "GIT_COMMITTER_DATE": OLD, "HOME": str(self.tmp / "home")}
         subprocess.run(["git", "init", "--bare", "-q", str(self.remote)], check=True)
         subprocess.run(["git", "init", "-q", "-b", "main", str(self.repo)], check=True)
         self.git(self.repo, "config", "user.email", "t@example.com")
@@ -250,29 +250,125 @@ check("expired lease does not block", v["leased"]["verdict"] == "remove", json.d
 e.done()
 
 
-def unique_ignored(e):
-    p = e.tree("envy")
-    (e.repo / ".gitignore").write_text(".env\nnode_modules/\n.fallow/\n")
+SECRET = "TOPSECRET_VALUE_12345"
+PATTERNS = ".env*\nnode_modules/\n.fallow/\nnext-env.d.ts\nnotes.txt\n.claude/worktrees/\nshots/\n"
+
+
+def ignoring(e, name, branch="feat", pushed=True):
+    """A tree whose repo ignores the usual generated paths, caches and env files."""
+    p = e.tree(name, branch, pushed=pushed)
+    (e.repo / ".gitignore").write_text(PATTERNS)
     e.git(e.repo, "add", ".")
-    e.git(e.repo, "commit", "-qm", "ignore")
+    e.git(e.repo, "commit", "-q", "--allow-empty", "-m", "ignore")
     e.git(e.repo, "push", "-q", "origin", "main")
     e.git(p, "merge", "-q", "main")
-    e.git(p, "push", "-q", "origin", "feat")
-    (p / ".env").write_text("secret=1")
-    (p / "node_modules").mkdir()
-    (p / "node_modules" / "x").write_text("gen")
+    if pushed:
+        e.git(p, "push", "-q", "origin", branch)
     return p
 
 
-expect_keep("ignored file off the allowlist kept", unique_ignored, "not on the allowlist: .env")
+def with_files(name, files):
+    def setup(e):
+        p = ignoring(e, name)
+        for rel, text in files.items():
+            (p / rel).parent.mkdir(parents=True, exist_ok=True)
+            (p / rel).write_text(text)
+        return p
+    return setup
 
-e = Env()
-p = unique_ignored(e)
-(p / ".env").unlink()
+
+expect_keep("ignored file off the allowlist kept", with_files("odd", {"notes.txt": "mine"}), "not on the allowlist: notes.txt")
+expect_keep("ignored screenshot kept", with_files("shot", {"shots/a.png": "png"}), "not on the allowlist: shots/a.png")
+expect_keep("non-empty nested .claude/worktrees kept", with_files("nest", {".claude/worktrees/x": "y"}), "not on the allowlist: .claude/worktrees/x")
+
+
+def removable(name, files, empty_dirs=()):
+    e = Env()
+    p = ignoring(e, name)
+    for rel, text in files.items():
+        (p / rel).parent.mkdir(parents=True, exist_ok=True)
+        (p / rel).write_text(text)
+    for rel in empty_dirs:
+        (p / rel).mkdir(parents=True)
+    e.age(p)
+    return e, p
+
+
+for label, files, empties in (
+    ("node_modules, .fallow, next-env.d.ts allowed", {"node_modules/x": "g", ".fallow/cache": "g", "apps/next-env.d.ts": "g"}, ()),
+    ("empty nested .claude/worktrees allowed", {}, (".claude/worktrees",)),
+):
+    e, p = removable("gen", files, empties)
+    v, _ = e.verdicts()
+    check(label, v["gen"]["verdict"] == "remove" and v["gen"]["envFiles"] == 0, json.dumps(v["gen"]))
+    e.done()
+
+e, p = removable("envy", {})
 os.symlink("/dev/null", p / ".env")
-e.age(p)
 v, _ = e.verdicts()
-check("node_modules and symlinked .env allowed", v["envy"]["verdict"] == "remove", json.dumps(v["envy"]))
+check("symlinked .env allowed and not counted for backup", v["envy"]["verdict"] == "remove" and v["envy"]["envFiles"] == 0, json.dumps(v["envy"]))
+e.done()
+
+# --- env files are preserved, not a blocker ---------------------------------------
+
+
+def backup_dir(e):
+    return e.tmp / "home" / "Backups" / "repo" / "worktree-env"
+
+
+e, p = removable("envy", {".env": SECRET + "=1", "apps/web/.env.local": "other=2"})
+home_before = list((e.tmp / "home").rglob("*")) if (e.tmp / "home").exists() else []
+out = e.run()
+check("dry run: env files do not block and are counted", "remove\t" in out.stdout and "2 env files to preserve" in out.stdout, out.stdout)
+check("dry run writes no backup", not (e.tmp / "home" / "Backups").exists())
+check("dry run never prints env contents", SECRET not in out.stdout + out.stderr)
+out = e.run("--apply")
+check("apply never prints env contents", SECRET not in out.stdout + out.stderr)
+check("apply removed the tree with env files", not p.exists() and out.returncode == 0, out.stdout + out.stderr)
+b = backup_dir(e)
+files = sorted(b.glob("*.env"))
+digest = __import__("hashlib").sha256((SECRET + "=1").encode()).hexdigest()[:12]
+check("backup stored by hash with the same content", (b / f"{digest}.env").read_text() == SECRET + "=1" and len(files) == 2, str(files))
+check("backup modes are owner only", oct(b.stat().st_mode & 0o777) == "0o700" and oct((b / f"{digest}.env").stat().st_mode & 0o777) == "0o600")
+rows = [l.split("\t") for l in (b / "index.tsv").read_text().splitlines()]
+check("index line has date, tree, branch, file, hash",
+      len(rows) == 2 and {r[3] for r in rows} == {".env", "apps/web/.env.local"} and rows[0][1] == str(p) and rows[0][2] == "feat"
+      and any(r[4].startswith(digest) for r in rows) and rows[0][0][:2] == "20", str(rows))
+check("index and backups never hold anything but env content", SECRET not in (b / "index.tsv").read_text())
+e.done()
+
+# Same env content in two trees: one stored file, two index lines. Index is capped at 500 lines.
+e = Env()
+a = ignoring(e, "one", "f1")
+b2 = ignoring(e, "two", "f2")
+for p in (a, b2):
+    (p / ".env").write_text("same=1")
+    e.age(p)
+bd = backup_dir(e)
+bd.mkdir(parents=True)
+(bd / "index.tsv").write_text("".join(f"old{i}\n" for i in range(600)))
+out = e.run("--apply")
+lines = (bd / "index.tsv").read_text().splitlines()
+check("same content stored once, index lines per tree", len(list(bd.glob("*.env"))) == 1 and sum("\t.env\t" in l for l in lines) == 2, str(len(lines)))
+check("index trimmed to its last 500 lines", len(lines) == 500 and lines[0] == "old102", f"{len(lines)} {lines[0]}")
+check("both trees removed", not a.exists() and not b2.exists(), out.stdout)
+e.done()
+
+# A failed backup keeps the tree.
+e, p = removable("nobackup", {".env": "k=1"})
+(e.tmp / "home").mkdir()
+(e.tmp / "home" / "Backups").write_text("a file where the folder should be")
+out = e.run("--apply")
+check("failed backup keeps the tree", p.exists() and "keep: " in out.stdout and "backup" in out.stdout, out.stdout)
+e.done()
+
+# Corrupt stored copy under the same hash is caught by the read-back.
+e, p = removable("corrupt", {".env": "k=1"})
+bd = backup_dir(e)
+bd.mkdir(parents=True)
+(bd / (__import__("hashlib").sha256(b"k=1").hexdigest()[:12] + ".env")).write_text("tampered")
+out = e.run("--apply")
+check("read-back mismatch keeps the tree", p.exists() and "backup" in out.stdout, out.stdout)
 e.done()
 
 

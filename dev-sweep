@@ -22,7 +22,12 @@ is unknown keeps it:
      git-dir index and HEAD log
   5. no process with its cwd inside it, no pm2 process or live dev lease for it
   6. ignored content only from a short generated-output allowlist (node_modules,
-     build and cache dirs, test output, .env files that are symlinks)
+     build and cache dirs, test output, .fallow, next-env.d.ts, an empty nested
+     .claude/worktrees, symlinked .env files; a wholly ignored directory is
+     walked file by file). Regular .env* files do not block:
+     on --apply each is first copied to $HOME/Backups/<repo>/worktree-env/
+     <hash12>.env (owner only, read back and compared, logged in index.tsv capped
+     at 500 lines); a failed copy keeps the tree. Dry run only counts them.
 
 `git worktree lock` is the keep switch. Removal is unforced `git worktree
 remove`: never --force, never unlock, never clean or reset, never delete a
@@ -35,6 +40,8 @@ checkout, fetch fails, dev-scan fails) exits 2 with a message on stderr.
 DEV_LEASE_DIR and PM2_HOME are honored like dev-lease does, for tests.
 """
 
+import datetime
+import hashlib
 import importlib.machinery
 import importlib.util
 import json
@@ -50,8 +57,9 @@ TIMEOUT = 300
 GENERATED_DIRS = {
     "node_modules", ".next", ".turbo", "dist", "build", "out", "coverage",
     ".cache", ".parcel-cache", "__pycache__", ".pytest_cache", ".mypy_cache",
-    ".ruff_cache", "test-results", "playwright-report", ".DS_Store",
+    ".ruff_cache", "test-results", "playwright-report", ".DS_Store", ".fallow", "next-env.d.ts",
 }
+INDEX_LINES = 500
 GENERATED_SUFFIXES = (".tsbuildinfo",)
 
 HERE = os.path.dirname(os.path.realpath(__file__))
@@ -180,17 +188,46 @@ def live_state(repo):
 
 # --- the checks -------------------------------------------------------------
 
-def ignored_blockers(wt):
-    blockers = []
+def classify_ignored(wt):
+    """(blockers, env_files) from the tree's ignored entries.
+
+    dev-scan reports a wholly ignored directory as one entry, so a directory
+    that is not generated output is walked: its files are judged one by one
+    (an env file inside is still preserved, anything else blocks). Symlinks are
+    never followed.
+    """
+    blockers, envs = [], []
+
+    def judge(rel):
+        full = os.path.join(wt["dir"], rel)
+        parts = rel.split("/")
+        if any(part in GENERATED_DIRS for part in parts) or rel.endswith(GENERATED_SUFFIXES):
+            return
+        if parts[-1].startswith(".env"):
+            if os.path.islink(full):
+                return
+            if os.path.isfile(full):
+                envs.append(rel)
+                return
+        if os.path.isdir(full) and not os.path.islink(full):
+            for name in sorted(os.listdir(full)):
+                judge(f"{rel}/{name}")
+                if blockers:
+                    return
+            return  # an empty directory (or one holding only generated output) loses nothing
+        blockers.append(rel)
+
     for entry in wt["ignored"]:
-        path = entry.rstrip("/")
-        parts = path.split("/")
-        if any(part in GENERATED_DIRS for part in parts) or path.endswith(GENERATED_SUFFIXES):
-            continue
-        if parts[-1].startswith(".env") and os.path.islink(os.path.join(wt["dir"], path)):
-            continue
-        blockers.append(entry)
-    return blockers
+        judge(entry.rstrip("/"))
+    return list(dict.fromkeys(blockers)), list(dict.fromkeys(envs))
+
+
+def env_files(wt):
+    return classify_ignored(wt)[1]
+
+
+def ignored_blockers(wt):
+    return classify_ignored(wt)[0]
 
 
 def in_progress(gitdir):
@@ -296,6 +333,53 @@ def evaluate(wt, state):
     return ("keep", reasons) if reasons else (action, [])
 
 
+# --- env preservation ---------------------------------------------------------
+
+def backup_env(repo, wt):
+    """Copy each regular .env* file to $HOME/Backups/<repo>/worktree-env/<hash12>.env, verified.
+
+    Raises Unknown on any failure so the tree is kept. Env contents are never
+    printed: errors name paths, not bytes.
+    """
+    files = env_files(wt)
+    if not files:
+        return
+    folder = os.path.join(os.path.expanduser("~"), "Backups", os.path.basename(repo), "worktree-env")
+    stamp = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
+    entries = []
+    try:
+        os.makedirs(folder, mode=0o700, exist_ok=True)
+        os.chmod(folder, 0o700)
+        for rel in files:
+            with open(os.path.join(wt["dir"], rel), "rb") as handle:
+                data = handle.read()
+            digest = hashlib.sha256(data).hexdigest()
+            stored = os.path.join(folder, digest[:12] + ".env")
+            if not os.path.exists(stored):
+                temp = stored + ".new"
+                fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                with os.fdopen(fd, "wb") as out:
+                    out.write(data)
+                os.replace(temp, stored)
+            with open(stored, "rb") as handle:
+                if hashlib.sha256(handle.read()).hexdigest() != digest:
+                    raise Unknown(f"env backup {stored} does not match its source {rel}")
+            entries.append("\t".join([stamp, wt["dir"], wt["branch"], rel, digest]))
+        index = os.path.join(folder, "index.tsv")
+        lines = []
+        if os.path.exists(index):
+            with open(index) as handle:
+                lines = handle.read().splitlines()
+        lines = (lines + entries)[-INDEX_LINES:]
+        temp = index + ".new"
+        fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as out:
+            out.write("\n".join(lines) + "\n")
+        os.replace(temp, index)
+    except OSError as error:
+        raise Unknown(f"env backup failed: {error.strerror or type(error).__name__} ({error.filename})")
+
+
 # --- apply ------------------------------------------------------------------
 
 def refreshed(scan, repo, wt):
@@ -330,6 +414,7 @@ def remove_one(scan, repo, wt):
             verdict, reasons = evaluate(fresh, state)
             if verdict != "remove":
                 return "keep", [f"push not confirmed: {'; '.join(reasons) or verdict}"]
+        backup_env(repo, fresh)
         out = run(["git", "-C", repo, "worktree", "remove", wt["dir"]])
         if out.returncode:
             return "keep", [f"git refused removal: {out.stderr.strip()}"]
@@ -359,13 +444,14 @@ def sweep(repo, apply):
     results = []
     for wt in rows:
         verdict, reasons = evaluate(wt, state)
-        results.append({"dir": wt["dir"], "branch": wt["branch"], "verdict": verdict, "reasons": reasons})
+        results.append({"dir": wt["dir"], "branch": wt["branch"], "verdict": verdict, "reasons": reasons,
+                        "envFiles": len(env_files(wt)) if verdict != "keep" else 0})
     if isinstance(state["regs"], Unknown):
         die(str(state["regs"]))
     scanned_dirs = {wt["dir"] for wt in rows}
     for path in state["regs"]:
         if path not in scanned_dirs:
-            results.append({"dir": path, "branch": "", "verdict": "keep", "reasons": ["prunable or missing"]})
+            results.append({"dir": path, "branch": "", "verdict": "keep", "reasons": ["prunable or missing"], "envFiles": 0})
 
     if apply:
         scan = load_scan()
@@ -386,7 +472,8 @@ def render(results, apply, as_json):
     lines = []
     for r in results:
         verdict = f"keep: {'; '.join(r['reasons'])}" if r["verdict"] == "keep" else r["verdict"]
-        lines.append(f"{verdict}\t{r['dir']}\t{r['branch']}")
+        note = f"\t{r['envFiles']} env files to preserve" if r["envFiles"] and not apply else ""
+        lines.append(f"{verdict}\t{r['dir']}\t{r['branch']}{note}")
     lines.append(f"total {len(results)}, {'removed' if apply else 'would remove'} {len(gone)}, "
                  f"{'kept' if apply else 'would keep'} {kept}")
     return "\n".join(lines)
