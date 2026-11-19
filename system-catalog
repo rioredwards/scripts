@@ -31,14 +31,19 @@ def read_json(path):
         return json.load(f)
 
 def frontmatter(path, key):
-    """First-line value of a `key:` in a file's leading --- block; empty for block scalars."""
+    """A `key:` value from a file's leading --- block, joining folded/block and indented continuation lines."""
     with open(path, encoding="utf-8") as f:
         lines = f.read().split("\n---", 1)[0].splitlines()
-    for line in lines:
+    for i, line in enumerate(lines):
         if line.startswith(key + ":"):
-            v = line.split(":", 1)[1].strip().strip("\"'")
-            return "" if v in (">", "|", ">-", "|-") else v
+            parts = [line.split(":", 1)[1].strip()]
+            for l in lines[i + 1:]:
+                if not l.startswith((" ", "\t")):
+                    break
+                parts.append(l.strip())
+            return " ".join(x for x in parts if x not in ("", ">", "|", ">-", "|-")).strip("\"'")
     return ""
+
 
 # review: 2026-12-03. Temporary shortcut: tool-check writes only a text log. Deciding test: delete this
 # parser when tool-check writes structured results (slice 2 of issue 53), then read those instead.
@@ -109,12 +114,14 @@ def hook_rules():
     return [entry(r["id"], "hook rule", path, "%s: %s" % (r["on"], r["do"])) for r in read_json(path)["rules"]]
 
 def tools(health):
-    out = []
-    for f in sorted(glob.glob(p("scripts/*")) + glob.glob(p("tools/*/*"))):
-        if os.path.isfile(f) and os.access(f, os.X_OK) and os.path.basename(f) != "test.sh":
+    out, seen = [], set()
+    for f in sorted(glob.glob(p("scripts/*")) + glob.glob(p("tools/*/*")), key=lambda f: (os.path.islink(f), f)):  # real files first
+        real = os.path.realpath(f)  # a ~/scripts symlink to a ~/tools tool is one piece
+        if os.path.isfile(f) and os.access(f, os.X_OK) and os.path.basename(f) != "test.sh" and real not in seen:
+            seen.add(real)
             name = os.path.basename(f)
             h, why = checked(health, "tool", name)
-            out.append(entry(name, "tool", f, "run by hand or by another tool", health=h, reason=why))
+            out.append(entry(name, "tool", real, "run by hand or by another tool", health=h, reason=why))
     return out
 
 def launchd(health):

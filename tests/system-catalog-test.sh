@@ -28,11 +28,13 @@ def run():
 
 
 put("dev/agent-skills/plugins/demo/skills/hello/SKILL.md", "---\nname: hello\ndescription: Say hello.\n---\nbody\n")
+put("dev/agent-skills/plugins/demo/skills/long/SKILL.md", "---\nname: long\ndescription: >-\n  First part\n  second part.\nother: x\n---\n")
 put("dev/agent-skills/plugins/demo/.claude-plugin/plugin.json", json.dumps({"name": "demo", "description": "A demo plugin."}))
 put(".claude/settings.json", json.dumps({"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "\"$HOME/scripts/hooks/lib/hooklog\" Stop 'bash \"$HOME/scripts/hooks/reply-cap.sh\"'"}]}]}}))
 put("scripts/hooks/rules/rules.json", json.dumps({"rules": [{"id": "no-x", "on": "tool", "do": "deny"}]}))
 for rel in ("scripts/good", "scripts/bad", "scripts/skipped", "scripts/unlisted", "tools/t/tool-one"):
     put(rel, "#!/bin/sh\n", 0o755)
+os.symlink("../tools/t/tool-one", os.path.join(H, "scripts/tool-link"))
 put("scripts/notes.txt", "not executable")
 put("Library/LaunchAgents/com.rioredwards.nightly.plist", plistlib.dumps({"Label": "com.rioredwards.nightly", "StartCalendarInterval": {"Hour": 3, "Minute": 40}}).decode())
 put("Library/Application Support/Claude/claude-code-sessions/a/b/scheduled-tasks.json", json.dumps({"scheduledTasks": [
@@ -65,6 +67,7 @@ by = {(e["kind"], e["name"]): e for e in cat["entries"]}
 kinds = sorted({e["kind"] for e in cat["entries"]})
 check(kinds == sorted(["skill", "plugin", "hook", "hook rule", "tool", "launchd job", "pm2 process", "scheduled task", "nightly job"]), "every kind present: %s" % kinds)
 check(by[("skill", "demo:hello")]["goal"] == "Say hello.", "skill goal is its description")
+check(by[("skill", "demo:long")]["goal"] == "First part second part.", "multi-line description becomes the goal")
 check(by[("plugin", "demo")]["goal"] == "A demo plugin.", "plugin goal")
 check(("hook", "Stop * reply-cap.sh") in by, "hook named by event, matcher and script")
 check(by[("hook rule", "no-x")]["trigger"] == "tool: deny", "rule trigger")
@@ -72,6 +75,7 @@ check(by[("tool", "good")]["health"] == "ok", "newest log wins: good is ok, not 
 check(by[("tool", "bad")]["health"] == "failing" and by[("tool", "bad")]["reason"] == "exit 1", "BROKE tool is failing with its reason")
 check(by[("tool", "skipped")]["health"] == "not checked", "skipped tool is not checked")
 check(by[("tool", "unlisted")]["health"] == "failing", "uninventoried tool is failing")
+check(("tool", "tool-link") not in by and sum(k[1] == "tool-one" for k in by) == 1, "a symlinked tool is one piece")
 check(("tool", "notes.txt") not in by and ("tool", "tool-one") in by, "only executables, scripts and tools dirs")
 check(by[("launchd job", "nightly")]["trigger"] == "daily 03:40" and by[("launchd job", "nightly")]["health"] == "ok", "launchd trigger and health")
 check(by[("scheduled task", "t-on")]["health"] == "ok" and by[("scheduled task", "t-on")]["goal"] == "Do the nightly thing.", "task health and goal; duplicate id once")
@@ -85,6 +89,7 @@ check(len(cat["generatedAt"]) > 10, "generatedAt")
 first = open(OUT).read()
 run()
 check(len(open(OUT).read()) == len(first), "second run overwrites, no growth")
+first = open(OUT).read()
 for day in ("18", "19"):
     os.remove(os.path.join(H, "Library/Logs/tool-check/2026-11-%s.log" % day))
 r = run()
