@@ -251,7 +251,7 @@ e.done()
 
 
 SECRET = "TOPSECRET_VALUE_12345"
-PATTERNS = ".env*\nnode_modules/\n.fallow/\nnext-env.d.ts\nnotes.txt\n.claude/worktrees/\nshots/\n"
+PATTERNS = ".env*\nnode_modules/\n.fallow/\nnext-env.d.ts\nnotes.txt\n.claude/worktrees/\nshots/\nscratch/\ndist/\n"
 
 
 def ignoring(e, name, branch="feat", pushed=True):
@@ -307,6 +307,8 @@ e.git(p, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(sm), 
 e.git(p, "commit", "-qm", "sub")
 e.git(p, "push", "-q", "origin", "feat")
 e.age(p)
+v, _ = e.verdicts()
+check("dry run keeps a tree with a submodule", v["withsub"]["verdict"] == "keep" and any("submodules" in r for r in v["withsub"]["reasons"]), json.dumps(v["withsub"]))
 out = e.run("--apply")
 check("submodule tree survives apply", p.exists() and "submodules" in out.stdout, out.stdout + out.stderr)
 e.done()
@@ -339,7 +341,7 @@ def removable(name, files, empty_dirs=()):
 
 
 for label, files, empties in (
-    ("node_modules, .fallow, next-env.d.ts allowed", {"node_modules/x": "g", ".fallow/cache": "g", "apps/next-env.d.ts": "g"}, ()),
+    ("node_modules, .fallow, next-env.d.ts allowed", {"node_modules/x": "g", ".fallow/cache": "g", "next-env.d.ts": "g"}, ()),
     ("empty nested .claude/worktrees allowed", {}, (".claude/worktrees",)),
 ):
     e, p = removable("gen", files, empties)
@@ -426,6 +428,69 @@ e = Env()
 p = prunable(e)
 v, _ = e.verdicts()
 check("prunable kept", v["vanished"]["verdict"] == "keep" and "prunable" in v["vanished"]["reasons"][0], json.dumps(v.get("vanished")))
+e.done()
+
+
+# --- allowlist depth: a generated name counts only for a directory git reports itself ----
+
+expect_keep("file inside a wholly ignored dir is not trusted by a generated-looking subdir",
+            with_files("deep", {"scratch/out/results.csv": "1,2"}), "not on the allowlist: scratch/out/results.csv")
+expect_keep("node_modules inside a wholly ignored dir is not trusted",
+            with_files("deepnm", {"scratch/node_modules/pkg/x.js": "g"}), "not on the allowlist: scratch/node_modules/pkg/x.js")
+e, p = removable("deepenv", {"scratch/build/.env": SECRET})
+v, _ = e.verdicts()
+check("env file under a generated-looking subdir of an ignored dir is preserved, not dropped",
+      v["deepenv"]["verdict"] == "remove" and v["deepenv"]["envFiles"] == 1, json.dumps(v["deepenv"]))
+e.done()
+e = Env()
+p = ignoring(e, "nested")
+(p / "packages" / "x").mkdir(parents=True)
+(p / "packages" / "x" / "tracked.ts").write_text("t")
+e.git(p, "add", "-f", "packages/x/tracked.ts")
+e.git(p, "commit", "-qm", "t")
+e.git(p, "push", "-q", "origin", "feat")
+(p / "packages" / "x" / "dist").mkdir()
+(p / "packages" / "x" / "dist" / "a.js").write_text("g")
+e.age(p)
+v, _ = e.verdicts()
+check("generated dir git reports at depth is trusted (packages/x/dist/)", v["nested"]["verdict"] == "remove", json.dumps(v["nested"]))
+e.done()
+
+# --- a pull request head counts as on the remote -----------------------------------
+
+e = Env()
+p = e.tree("merged", pushed=False)
+e.git(p, "push", "-q", "origin", "HEAD:refs/pull/1/head")
+e.age(p)
+v, _ = e.verdicts()
+check("HEAD that is a PR head needs no push", v["merged"]["verdict"] == "remove", json.dumps(v["merged"]))
+check("no PR ref written locally", e.git(e.repo, "for-each-ref", "refs/pull") == "")
+out = e.run("--apply")
+check("apply removes it without recreating the branch",
+      not p.exists() and "refs/heads/feat" not in subprocess.check_output(["git", "-C", str(e.remote), "for-each-ref"], text=True), out.stdout)
+e.done()
+
+# --- no credential prompt on any git call -----------------------------------------
+
+e = Env()
+t = e.tree("prompt")
+e.age(t)
+real = shutil.which("git")
+(e.tmp / "bin").mkdir()
+fake = e.tmp / "bin" / "git"
+fake.write_text(f'#!/bin/sh\necho "$GIT_TERMINAL_PROMPT" >> "{e.tmp}/prompt.log"\nexec {real} "$@"\n')
+fake.chmod(0o755)
+out = e.run(env={"PATH": f"{e.tmp / 'bin'}:{os.environ['PATH']}", "GIT_TERMINAL_PROMPT": "1"})
+seen = set((e.tmp / "prompt.log").read_text().split())
+check("every git call runs with GIT_TERMINAL_PROMPT=0", seen == {"0"}, str(seen))
+e.done()
+
+# --- dry run and apply agree on submodules and oversized env files --------------------
+
+e, p = removable("bigenv", {".env": "x" * (1024 * 1024 + 1)})
+v, _ = e.verdicts()
+check("env-named file over 1 MB keeps the tree", v["bigenv"]["verdict"] == "keep"
+      and any("env-named file too large to preserve" in r for r in v["bigenv"]["reasons"]), json.dumps(v["bigenv"]))
 e.done()
 
 # --- dry run changes nothing ---------------------------------------------------

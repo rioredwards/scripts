@@ -15,7 +15,8 @@ is unknown keeps it:
   1. not the primary checkout, not locked, not prunable or missing
   2. no modified or untracked files, no rebase/merge/cherry-pick/revert/bisect
      in progress, no stash entry made from its branch
-  3. HEAD is contained in a remote branch (after the fetch). If not and HEAD is
+  3. HEAD is contained in a remote branch (after the fetch) or is the head of a
+     pull request (one ls-remote of refs/pull/*/head; nothing written locally). If not and HEAD is
      on a named branch, that branch is pushed without force (a rejected push
      keeps it). Detached HEAD that is not on a remote branch is kept.
   4. idle at least 24 hours: newest of last commit time and the mtimes of its
@@ -50,6 +51,8 @@ import subprocess
 import sys
 import time
 
+MAX_ENV_BYTES = 1024 * 1024
+PR_HEADS = set()  # shas of refs/pull/*/head on the remotes, read once per sweep
 IDLE_SECONDS = 24 * 60 * 60
 TIMEOUT = 300
 
@@ -76,7 +79,9 @@ class Unknown(Exception):
 
 def run(args, cwd=None):
     try:
-        return subprocess.run(args, cwd=cwd, capture_output=True, text=True, timeout=TIMEOUT)
+        # A credential prompt must fail fast, never hang a nightly run.
+        env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+        return subprocess.run(args, cwd=cwd, capture_output=True, text=True, timeout=TIMEOUT, env=env)
     except (OSError, subprocess.SubprocessError) as error:
         raise Unknown(f"{args[0]} failed: {error}")
 
@@ -189,37 +194,38 @@ def live_state(repo):
 # --- the checks -------------------------------------------------------------
 
 def classify_ignored(wt):
-    """(blockers, env_files) from the tree's ignored entries.
+    """(blockers, env_files, too_large) from the tree's ignored entries.
 
-    dev-scan reports a wholly ignored directory as one entry, so a directory
-    that is not generated output is walked: its files are judged one by one
-    (an env file inside is still preserved, anything else blocks). Symlinks are
-    never followed.
+    A generated name (node_modules, dist, ...) is trusted only for an entry git
+    itself reports, at any depth in the repo (packages/x/dist/). dev-scan
+    reports a wholly ignored directory as one entry; when that is not generated
+    output it is walked, and nothing inside is trusted by name: an env file is
+    preserved, anything else blocks. Symlinks are never followed.
     """
-    blockers, envs = [], []
+    blockers, envs, large = [], [], []
 
-    def judge(rel):
+    def judge(rel, reported):
         full = os.path.join(wt["dir"], rel)
-        parts = rel.split("/")
-        if any(part in GENERATED_DIRS for part in parts) or rel.endswith(GENERATED_SUFFIXES):
+        name = rel.rsplit("/", 1)[-1]
+        if reported and (name in GENERATED_DIRS or rel.endswith(GENERATED_SUFFIXES)):
             return
-        if parts[-1].startswith(".env"):
+        if name.startswith(".env"):
             if os.path.islink(full):
                 return
             if os.path.isfile(full):
-                envs.append(rel)
+                (large if os.path.getsize(full) > MAX_ENV_BYTES else envs).append(rel)
                 return
         if os.path.isdir(full) and not os.path.islink(full):
-            for name in sorted(os.listdir(full)):
-                judge(f"{rel}/{name}")
+            for child in sorted(os.listdir(full)):
+                judge(f"{rel}/{child}", False)
                 if blockers:
                     return
-            return  # an empty directory (or one holding only generated output) loses nothing
+            return  # an empty directory loses nothing
         blockers.append(rel)
 
     for entry in wt["ignored"]:
-        judge(entry.rstrip("/"))
-    return list(dict.fromkeys(blockers)), list(dict.fromkeys(envs))
+        judge(entry.rstrip("/"), True)
+    return list(dict.fromkeys(blockers)), list(dict.fromkeys(envs)), list(dict.fromkeys(large))
 
 
 def env_files(wt):
@@ -295,7 +301,7 @@ def evaluate(wt, state):
                                     "--format=%(refname:short)", "refs/remotes").split()
                      if not r.endswith("/HEAD")]
         action = "remove"
-        if not contained:
+        if not contained and wt["head"] not in PR_HEADS:
             if wt["branch"] == "detached":
                 reasons.append("detached HEAD with commits on no remote branch")
             else:
@@ -324,6 +330,10 @@ def evaluate(wt, state):
                 if any(inside(cwd, t) for t in tree_paths(wt["dir"])):
                     reasons.append(f"{label}: {' '.join(str(x) for x in item[:-1])}")
 
+        for rel in classify_ignored(wt)[2]:
+            reasons.append(f"env-named file too large to preserve: {rel}")
+        if any(line.startswith("160000 ") for line in git(wt["dir"], "ls-files", "--stage").split("\n")):
+            reasons.append("contains submodules (git refuses to remove the tree)")
         blockers = ignored_blockers(wt)
         if blockers:
             shown = ", ".join(blockers[:4]) + (f", +{len(blockers) - 4} more" if len(blockers) > 4 else "")
@@ -433,6 +443,12 @@ def sweep(repo, apply):
     out = run(["git", "-C", repo, "fetch", "--all", "--prune", "--quiet"])
     if out.returncode:
         die(f"git fetch failed in {repo}: {out.stderr.strip()}")
+    PR_HEADS.clear()
+    for remote in git(repo, "remote").split():
+        heads = run(["git", "-C", repo, "ls-remote", remote, "refs/pull/*/head"])
+        if heads.returncode:
+            die(f"git ls-remote failed for {remote}: {heads.stderr.strip()}")
+        PR_HEADS.update(line.split("\t")[0] for line in heads.stdout.splitlines() if line)
     scanned = run([os.path.join(HERE, "dev-scan"), "worktrees", repo])
     if scanned.returncode:
         die(f"dev-scan failed: {scanned.stderr.strip()}")
@@ -483,6 +499,7 @@ def main(argv):
     if not argv or argv[0] in ("-h", "--help"):
         print(__doc__.strip())
         return 0
+    os.environ["GIT_TERMINAL_PROMPT"] = "0"  # also covers dev-scan's own git calls
     apply = as_json = False
     paths = []
     for arg in argv:
