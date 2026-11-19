@@ -282,6 +282,50 @@ expect_keep("ignored screenshot kept", with_files("shot", {"shots/a.png": "png"}
 expect_keep("non-empty nested .claude/worktrees kept", with_files("nest", {".claude/worktrees/x": "y"}), "not on the allowlist: .claude/worktrees/x")
 
 
+def marker(name):
+    def setup(e):
+        p = e.tree(name)
+        (pathlib.Path(e.git(p, "rev-parse", "--absolute-git-dir")) / name).write_text("x")
+        return p
+    return setup
+
+
+for name in ("CHERRY_PICK_HEAD", "REVERT_HEAD", "BISECT_LOG"):
+    expect_keep(f"{name} in progress kept", marker(name), f"in progress: {name}")
+
+# A submodule is refused by git itself; apply keeps the tree and says why.
+e = Env()
+sm = e.tmp / "sm"
+subprocess.run(["git", "init", "-q", "-b", "main", str(sm)], check=True)
+e.git(sm, "config", "user.email", "t@example.com")
+e.git(sm, "config", "user.name", "T")
+(sm / "a").write_text("1")
+e.git(sm, "add", ".")
+e.git(sm, "commit", "-qm", "i")
+p = e.tree("withsub")
+e.git(p, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(sm), "sub")
+e.git(p, "commit", "-qm", "sub")
+e.git(p, "push", "-q", "origin", "feat")
+e.age(p)
+out = e.run("--apply")
+check("submodule tree survives apply", p.exists() and "submodules" in out.stdout, out.stdout + out.stderr)
+e.done()
+
+# An unreadable ignored directory keeps that tree; the sweep itself must not crash.
+e = Env()
+p = with_files("locked_dir", {"shots/a.png": "png"})(e)
+e.age(p)
+os.chmod(p / "shots", 0)
+try:
+    out = e.run("--json")
+    rows = {pathlib.Path(w["dir"]).name: w for w in json.loads(out.stdout)["worktrees"]} if out.returncode == 0 else {}
+    row = rows.get("locked_dir", {})
+    check("unreadable ignored dir kept, sweep survives", row.get("verdict") == "keep" and any("unknown" in r for r in row.get("reasons", [])), out.stderr[-200:] + json.dumps(row))
+finally:
+    os.chmod(p / "shots", 0o700)
+    e.done()
+
+
 def removable(name, files, empty_dirs=()):
     e = Env()
     p = ignoring(e, name)

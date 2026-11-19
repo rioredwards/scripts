@@ -328,7 +328,7 @@ def evaluate(wt, state):
         if blockers:
             shown = ", ".join(blockers[:4]) + (f", +{len(blockers) - 4} more" if len(blockers) > 4 else "")
             reasons.append(f"ignored content not on the allowlist: {shown}")
-    except Unknown as error:
+    except (Unknown, OSError) as error:  # an unreadable path is an unknown fact, not a crash
         reasons.append(f"unknown: {error}")
     return ("keep", reasons) if reasons else (action, [])
 
@@ -421,7 +421,7 @@ def remove_one(scan, repo, wt):
         if os.path.exists(wt["dir"]):
             return "keep", ["directory still exists after removal"]
         return ("pushed-and-removed" if pushed else "removed"), []
-    except Unknown as error:
+    except (Unknown, OSError) as error:
         return "keep", [f"unknown: {error}"]
 
 
