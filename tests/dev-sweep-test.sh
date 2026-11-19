@@ -680,6 +680,19 @@ check("apply totals", out.stdout.strip().splitlines()[-1] == "total 5, removed 2
 check("primary survives apply", (e.repo / "f").exists())
 e.done()
 
+# A landed branch (fully merged into origin's default branch) is deleted with its tree; an unmerged one stays.
+e = Env()
+landed, open_ = e.tree("landed", "f6"), e.tree("open", "f7")
+e.git(landed, "push", "-q", "origin", "HEAD:main")
+for p in (landed, open_):
+    e.age(p)
+out = e.run("--apply")
+check("landed apply exits 0", out.returncode == 0, out.stderr)
+check("landed tree removed", not landed.exists() and not open_.exists(), out.stdout)
+check("landed branch deleted", e.git(e.repo, "branch", "--list", "f6") == "", e.git(e.repo, "branch"))
+check("unmerged branch stays", e.git(e.repo, "branch", "--list", "f7") != "", e.git(e.repo, "branch"))
+e.done()
+
 e = Env()
 t = e.tree("rejected", pushed=False)
 e.age(t)

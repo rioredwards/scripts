@@ -41,8 +41,9 @@ globs, repeatable; an absolute path, `..` or empty value exits 2):
   devsweep.preserve <file>   ignored file handled like an env file: symlink ok, regular file backed up first
 
 `git worktree lock` is the keep switch. Removal is unforced `git worktree
-remove`: never --force, never unlock, never clean or reset, never delete a
-branch. Before each removal --apply re-reads the tree's facts and re-checks
+remove`: never --force, never unlock, never clean or reset. After a removal its
+local branch is deleted with `git branch -d` (never -D) only when fully merged into
+the remote default branch; an unmerged branch stays. Before each removal --apply re-reads the tree's facts and re-checks
 everything. Facts come from `dev-scan worktrees`; this adds the checks it lacks.
 
 If git drops a tree's registration but cannot delete all its files (for example
@@ -499,6 +500,20 @@ def finish_leftover(repo, path, why):
     return "partial", [f"unregistered leftover at {path}: {error}"]
 
 
+def delete_landed_branch(repo, wt, remote):
+    """After the tree is gone: `git branch -d` its branch if fully merged into the remote default
+    branch. Unmerged or refused (-d is never forced) means the branch stays."""
+    branch = wt["branch"]
+    head = run(["git", "-C", repo, "symbolic-ref", "--short", f"refs/remotes/{remote}/HEAD"])
+    if branch == "detached" or head.returncode:
+        return
+    default = head.stdout.strip().removeprefix(f"{remote}/")
+    if branch == default or branch in SHARED_BRANCHES or branch.startswith("release/"):
+        return
+    if run(["git", "-C", repo, "merge-base", "--is-ancestor", wt["head"], head.stdout.strip()]).returncode == 0:
+        run(["git", "-C", repo, "branch", "-d", branch])
+
+
 def remove_one(scan, repo, wt):
     """(result, reasons). Re-check, push if needed, unforced remove. Errors keep."""
     try:
@@ -518,6 +533,7 @@ def remove_one(scan, repo, wt):
             verdict, reasons = evaluate(fresh, state)
             if verdict != "remove":
                 return "keep", [f"push not confirmed: {'; '.join(reasons) or verdict}"]
+        remote_name = push_target(fresh)[0] or "origin"  # read while the tree still exists
         backup_env(repo, fresh)
         out = run(["git", "-C", repo, "worktree", "remove", wt["dir"]])
         done = "pushed-and-removed" if pushed else "removed"
@@ -529,6 +545,7 @@ def remove_one(scan, repo, wt):
             # every check, so finish the job (a keep here would orphan the folder forever).
             result, reasons = finish_leftover(repo, wt["dir"], why)
             return (done if result == "removed" else result), reasons
+        delete_landed_branch(repo, wt, remote_name)
         return done, []
     except (Unknown, OSError) as error:
         return "keep", [f"unknown: {error}"]
