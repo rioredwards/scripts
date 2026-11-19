@@ -25,6 +25,9 @@ Real runs only happen on a machine that opted in with the marker file
 $HOME/.local/state/dev-sweep/enabled (the plist source syncs to both Macs; the
 marker does not). Without it a real run exits 0 and says so. --dry-run always works.
 
+A run-level failure (a root folder missing) writes one status line too ("failed on
+all repos", same dedupe) before exiting 2; a dry run only prints it.
+
 Exit 0 when every repo swept without exit 2 or 3 and every inbox write worked;
 1 otherwise; 2 on a usage or setup error.
 
@@ -46,6 +49,10 @@ HOME = os.path.expanduser("~")
 MAX_REMAINING = 15
 KEEP_LOGS = 14
 SOURCE = "dev-sweep"
+
+
+class SetupError(Exception):
+    """A run-level failure: nothing could be swept. Reported to the PM inbox, then exit 2."""
 
 
 def die(message):
@@ -77,7 +84,7 @@ def discover():
               os.environ.get("DOTFILES") or os.path.join(HOME, ".dotfiles"))
     for path in (root, *extras):
         if not os.path.isdir(path):
-            die(f"{path} is not a directory")
+            raise SetupError(f"{path} is not a directory")
     found = []
     for first in scan.subdirs(root):
         if scan.is_main_checkout(first):
@@ -198,7 +205,15 @@ def main(argv):
     logfile = os.path.join(logdir, f"sweep-{stamp}{'-dry' if dry else ''}.log")
 
     lines, healthy = [f"dev-sweep-all {'dry run' if dry else 'apply'} {stamp}"], True
-    for repo in discover():
+    try:
+        repos = discover()
+    except SetupError as error:
+        # The whole run failed: launchd.log is read by nobody, so one inbox line (deduped), then exit 2.
+        print(f"dev-sweep-all: {error}", file=sys.stderr)
+        if not dry:
+            write_inbox(script, "all repos", f"Worktree sweep failed on all repos: {one_line(str(error))}", False, lines)
+        return 2
+    for repo in repos:
         name = os.path.basename(repo)
         try:
             if registered(repo) < 2:

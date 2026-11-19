@@ -147,6 +147,15 @@ e = Env()
 for var in ("DEV_ROOT", "SCRIPTS", "DOTFILES"):
     out = e.run(extra={var: str(e.tmp / "missing")})
     check(f"missing {var} exits 2 and sweeps nothing", out.returncode == 2 and not e.calls.exists() and "is not a directory" in out.stderr, out.stderr)
+out = e.run(extra={"DEV_ROOT": str(e.tmp / "missing")})
+lines = [l for l in e.inbox_text().splitlines() if l.startswith("- status:")]
+check("a run-level failure writes exactly one inbox line, deduped across runs",
+      len(lines) == 1 and "Worktree sweep failed on all repos: " in lines[0] and "is not a directory" in lines[0], e.inbox_text())
+e.done()
+
+e = Env()
+out = e.run("--dry-run", extra={"DEV_ROOT": str(e.tmp / "missing")})
+check("dry run run-level failure writes no inbox line, still exits 2", out.returncode == 2 and e.inbox_text() == "", e.inbox_text() + out.stderr)
 e.done()
 
 e = Env()

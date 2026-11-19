@@ -773,6 +773,34 @@ for key in ("generated", "preserve"):
         check(f"malformed devsweep.{key} {bad!r} is fatal", out.returncode == 2 and f"devsweep.{key}" in out.stderr, f"{out.returncode} {out.stderr}")
         e.done()
 
+# --- review fixes: self-ignoring dirs and pattern names ------------------------------------------
+
+def selfignoring(name, files):
+    def setup(e):
+        p = ignoring(e, name)
+        (p / "src").mkdir()
+        (p / "src" / "t.py").write_text("t")  # tracked, so src/build is not folded into a wholly ignored src/
+        e.git(p, "add", ".")
+        e.git(p, "commit", "-qm", "t")
+        e.git(p, "push", "-q", "origin", "feat")
+        for rel, text in files.items():
+            (p / rel).parent.mkdir(parents=True, exist_ok=True)
+            (p / rel).write_text(text)
+        return p
+    return setup
+
+
+expect_keep("src/build that ignores itself still has its contents judged",
+            selfignoring("selfbuild", {"src/build/.gitignore": "*\n", "src/build/real.md": "mine"}), "real.md")
+expect_keep("a directory named like a .pyc file is judged inside", with_files("pycdir", {"old.pyc/notes.md": "mine"}), "old.pyc/notes.md")
+expect_keep("a directory named .coverage.* is judged inside", with_files("covdir", {".coverage.backup/notes.md": "mine"}), ".coverage.backup/notes.md")
+e = Env()
+p = selfignoring("selfruff", {".ruff_cache/.gitignore": "*\n", ".ruff_cache/0.1/x": "g", ".venv/.gitignore": "*\n", ".venv/lib/y": "g"})(e)
+e.age(p)
+v, _ = e.verdicts()
+check("self-ignoring .ruff_cache and .venv stay removable", v["selfruff"]["verdict"] == "remove", json.dumps(v["selfruff"]))
+e.done()
+
 # --- loud failures ---------------------------------------------------------------
 
 e = Env()

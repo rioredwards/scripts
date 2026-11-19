@@ -87,6 +87,8 @@ GENERATED_DIRS = {
 }
 INDEX_LINES = 500
 GENERATED_SUFFIXES = (".tsbuildinfo", ".pyc")
+# Tools that write their own .gitignore (so git also lists their inner paths): everything inside is covered.
+SELF_IGNORING = {".ruff_cache", ".pytest_cache", ".mypy_cache", ".venv"}
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 
@@ -247,8 +249,12 @@ def classify_ignored(wt):
 
     def generated(rel):
         name = rel.rsplit("/", 1)[-1]
-        return (name in GENERATED_DIRS or name.startswith(".coverage.") or rel.endswith(GENERATED_SUFFIXES)
-                or rel in EXTRA_GENERATED)
+        if name in GENERATED_DIRS or rel in EXTRA_GENERATED:
+            return True
+        full = os.path.join(wt["dir"], rel)
+        if os.path.isdir(full) and not os.path.islink(full):
+            return False  # the name patterns below are for files; a directory is judged by what is inside
+        return name.startswith(".coverage.") or rel.endswith(GENERATED_SUFFIXES)
 
     def judge(rel, reported):
         full = os.path.join(wt["dir"], rel)
@@ -270,9 +276,10 @@ def classify_ignored(wt):
         blockers.append(rel)
 
     entries = [entry.rstrip("/") for entry in wt["ignored"]]
-    # A cache that ignores itself (ruff, pytest write their own .gitignore) makes git
-    # list its inner paths too; they are covered by the generated directory above them.
-    roots = {entry for entry in entries if generated(entry)}
+    # A cache that ignores itself (ruff, pytest, mypy, venv write their own .gitignore) makes git
+    # list its inner paths too; they are covered by the cache directory above them. No other
+    # name gets this: a build/ that ignores itself still has its contents judged.
+    roots = {entry for entry in entries if entry.rsplit("/", 1)[-1] in SELF_IGNORING and generated(entry)}
     for entry in entries:
         parts = entry.split("/")
         if any("/".join(parts[:i]) in roots for i in range(1, len(parts))):
