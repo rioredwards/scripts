@@ -1,0 +1,424 @@
+#!/usr/bin/env python3
+"""dev-sweep: remove the git worktrees of one repo that are finished, keep the rest.
+
+  dev-sweep <primary-checkout>           # dry run: one verdict line per worktree
+  dev-sweep <primary-checkout> --json    # same verdicts as JSON, for tools
+  dev-sweep <primary-checkout> --apply   # actually remove (and push where needed)
+
+Verdicts: remove | push-then-remove | keep: <reasons>. A final totals line says
+how many worktrees there are and how many go or stay. The default changes
+nothing in any worktree; it only runs `git fetch --all --prune` in the repo so
+"is it on GitHub" is judged against current remote refs.
+
+A worktree is removed only when ALL of these hold, and any check that errors or
+is unknown keeps it:
+  1. not the primary checkout, not locked, not prunable or missing
+  2. no modified or untracked files, no rebase/merge/cherry-pick/revert/bisect
+     in progress, no stash entry made from its branch
+  3. HEAD is contained in a remote branch (after the fetch). If not and HEAD is
+     on a named branch, that branch is pushed without force (a rejected push
+     keeps it). Detached HEAD that is not on a remote branch is kept.
+  4. idle at least 24 hours: newest of last commit time and the mtimes of its
+     git-dir index and HEAD log
+  5. no process with its cwd inside it, no pm2 process or live dev lease for it
+  6. ignored content only from a short generated-output allowlist (node_modules,
+     build and cache dirs, test output, .env files that are symlinks)
+
+`git worktree lock` is the keep switch. Removal is unforced `git worktree
+remove`: never --force, never unlock, never clean or reset, never delete a
+branch. Before each removal --apply re-reads the tree's facts and re-checks
+everything. Facts come from `dev-scan worktrees`; this adds the checks it lacks.
+
+Exit 0 when the sweep ran (keeps are normal). A real failure (not a primary
+checkout, fetch fails, dev-scan fails) exits 2 with a message on stderr.
+
+DEV_LEASE_DIR and PM2_HOME are honored like dev-lease does, for tests.
+"""
+
+import importlib.machinery
+import importlib.util
+import json
+import os
+import subprocess
+import sys
+import time
+
+IDLE_SECONDS = 24 * 60 * 60
+TIMEOUT = 300
+
+# Generated output: any path component with one of these names is rebuildable.
+GENERATED_DIRS = {
+    "node_modules", ".next", ".turbo", "dist", "build", "out", "coverage",
+    ".cache", ".parcel-cache", "__pycache__", ".pytest_cache", ".mypy_cache",
+    ".ruff_cache", "test-results", "playwright-report", ".DS_Store",
+}
+GENERATED_SUFFIXES = (".tsbuildinfo",)
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+
+
+def die(message):
+    print(f"dev-sweep: {message}", file=sys.stderr)
+    sys.exit(2)
+
+
+class Unknown(Exception):
+    """A fact could not be read. The caller keeps the worktree."""
+
+
+def run(args, cwd=None):
+    try:
+        return subprocess.run(args, cwd=cwd, capture_output=True, text=True, timeout=TIMEOUT)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise Unknown(f"{args[0]} failed: {error}")
+
+
+def git(path, *args):
+    """git stdout. Any failure raises Unknown: no guessing."""
+    out = run(["git", "--no-optional-locks", "-C", path, *args])
+    if out.returncode:
+        raise Unknown(f"git {' '.join(args)} failed in {path}: {out.stderr.strip()}")
+    return out.stdout
+
+
+def load_scan():
+    """dev-scan as a module, for its single-tree git_facts used by the re-check."""
+    sys.dont_write_bytecode = True
+    loader = importlib.machinery.SourceFileLoader("dev_scan", os.path.join(HERE, "dev-scan"))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+def inside(path, tree):
+    return path == tree or path.startswith(tree.rstrip("/") + "/")
+
+
+def tree_paths(tree):
+    return {tree, os.path.realpath(tree)}
+
+
+def registrations(repo):
+    """path -> {locked, prunable} for every registration, straight from git."""
+    found, current = {}, None
+    for line in git(repo, "worktree", "list", "--porcelain").split("\n"):
+        if line.startswith("worktree "):
+            current = found[line[len("worktree "):]] = {"locked": False, "prunable": False}
+        elif current is not None and (line == "locked" or line.startswith("locked ")):
+            current["locked"] = True
+        elif current is not None and (line.startswith("prunable") or line == "bare"):
+            current["prunable"] = True
+    return found
+
+
+# --- live state: things only true right now -------------------------------
+
+def process_cwds():
+    out = run(["lsof", "-a", "-d", "cwd", "-Fpcn"])
+    if not out.stdout:
+        raise Unknown(f"lsof gave no output: {out.stderr.strip()}")
+    procs, pid, command = [], None, ""
+    for line in out.stdout.split("\n"):
+        if line.startswith("p"):
+            pid, command = int(line[1:]), ""
+        elif line.startswith("c"):
+            command = line[1:]
+        elif line.startswith("n") and pid != os.getpid():
+            procs.append((pid, command, line[1:]))
+    return procs
+
+
+def pm2_cwds():
+    home = os.environ.get("PM2_HOME") or os.path.join(os.path.expanduser("~"), ".pm2")
+    try:
+        with open(os.path.join(home, "pm2.pid")) as handle:
+            os.kill(int(handle.read()), 0)
+    except (FileNotFoundError, ProcessLookupError):
+        return []  # no daemon, nothing registered; asking would spawn one
+    except (ValueError, OSError) as error:
+        raise Unknown(f"pm2 daemon state unreadable: {error}")
+    out = run(["pm2", "jlist"])
+    if out.returncode:
+        raise Unknown(f"pm2 jlist failed: {out.stderr.strip()}")
+    try:
+        return [(p["name"], p["pm2_env"]["pm_cwd"]) for p in json.loads(out.stdout)]
+    except (ValueError, KeyError, TypeError) as error:
+        raise Unknown(f"pm2 jlist unreadable: {error}")
+
+
+def live_leases():
+    base = os.environ.get("DEV_LEASE_DIR") or os.path.join(os.path.expanduser("~"), ".local/state/dev-leases")
+    if not os.path.isdir(base):
+        return []
+    leases = []
+    for name in sorted(os.listdir(base)):
+        if not name.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(base, name)) as handle:
+                record = json.load(handle)
+            if record["expires"] > time.time():
+                leases.append((record["name"], record["cwd"]))
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            raise Unknown(f"dev lease {name} unreadable: {error}")
+    return leases
+
+
+def live_state(repo):
+    """Everything that changes while we work. Each part is a value or an Unknown."""
+    state = {}
+    for key, fetch in (("procs", process_cwds), ("pm2", pm2_cwds), ("leases", live_leases),
+                       ("stash", lambda: git(repo, "stash", "list", "--format=%gs").split("\n")),
+                       ("regs", lambda: registrations(repo))):
+        try:
+            state[key] = fetch()
+        except Unknown as error:
+            state[key] = error
+    return state
+
+
+# --- the checks -------------------------------------------------------------
+
+def ignored_blockers(wt):
+    blockers = []
+    for entry in wt["ignored"]:
+        path = entry.rstrip("/")
+        parts = path.split("/")
+        if any(part in GENERATED_DIRS for part in parts) or path.endswith(GENERATED_SUFFIXES):
+            continue
+        if parts[-1].startswith(".env") and os.path.islink(os.path.join(wt["dir"], path)):
+            continue
+        blockers.append(entry)
+    return blockers
+
+
+def in_progress(gitdir):
+    names = ["rebase-merge", "rebase-apply", "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "BISECT_LOG", "sequencer"]
+    return [n for n in names if os.path.exists(os.path.join(gitdir, n))]
+
+
+def changed_files(wt):
+    lines = git(wt["dir"], "status", "--porcelain", "--untracked-files=all").split("\n")
+    names = [line[3:] for line in lines if line]
+    return ", ".join(names[:3]) + (f", +{len(names) - 3} more" if len(names) > 3 else "")
+
+
+def push_target(wt):
+    """(remote, error). The remote to push the branch to, or why there is none."""
+    branch = wt["branch"]
+    remote = ""
+    for key in (f"branch.{branch}.pushRemote", f"branch.{branch}.remote"):
+        out = run(["git", "-C", wt["dir"], "config", "--get", key])
+        remote = out.stdout.strip()
+        if remote:
+            break
+    remote = remote if remote and remote != "." else "origin"
+    if remote not in git(wt["dir"], "remote").split():
+        return None, f"no remote {remote} to push to"
+    tracking = f"refs/remotes/{remote}/{branch}"
+    if run(["git", "-C", wt["dir"], "rev-parse", "--verify", "-q", tracking]).returncode == 0:
+        if run(["git", "-C", wt["dir"], "merge-base", "--is-ancestor", tracking, "HEAD"]).returncode:
+            return None, f"push would be rejected ({remote}/{branch} has other commits)"
+    return remote, None
+
+
+def evaluate(wt, state):
+    """(verdict, reasons) for one worktree. verdict: remove | push-then-remove | keep."""
+    reasons = []
+    reg = state["regs"]
+    if isinstance(reg, Unknown):
+        return "keep", [f"unknown: {reg}"]
+    if wt["isMain"]:
+        return "keep", ["primary checkout"]
+    entry = reg.get(wt["dir"])
+    if entry is None:
+        return "keep", ["not registered with git"]
+    if entry["locked"]:
+        return "keep", ["locked"]
+    if entry["prunable"]:
+        return "keep", ["prunable or missing"]
+
+    try:
+        if wt["changed"] or wt["untracked"]:
+            reasons.append(f"uncommitted: {wt['changed']} modified, {wt['untracked']} untracked ({changed_files(wt)})")
+        gitdir = git(wt["dir"], "rev-parse", "--absolute-git-dir").strip()
+        busy = in_progress(gitdir)
+        if busy:
+            reasons.append(f"in progress: {', '.join(busy)}")
+        stash = state["stash"]
+        if isinstance(stash, Unknown):
+            reasons.append(f"unknown: {stash}")
+        else:
+            label = wt["branch"] if wt["branch"] != "detached" else "(no branch)"
+            if any(s.startswith((f"WIP on {label}:", f"On {label}:")) for s in stash):
+                reasons.append(f"stash entry from {label}")
+
+        contained = [r for r in git(wt["dir"], "for-each-ref", "--contains", wt["head"],
+                                    "--format=%(refname:short)", "refs/remotes").split()
+                     if not r.endswith("/HEAD")]
+        action = "remove"
+        if not contained:
+            if wt["branch"] == "detached":
+                reasons.append("detached HEAD with commits on no remote branch")
+            else:
+                remote, error = push_target(wt)
+                if error:
+                    reasons.append(error)
+                action = "push-then-remove"
+
+        stamps = [wt["lastCommit"]]
+        for name in ("index", "logs/HEAD"):
+            try:
+                stamps.append(os.path.getmtime(os.path.join(gitdir, name)))
+            except FileNotFoundError:
+                pass
+        idle = time.time() - max(stamps)
+        if idle < IDLE_SECONDS:
+            reasons.append(f"idle only {idle / 3600:.1f}h (needs 24h)")
+
+        for source, label in (("procs", "running process"), ("pm2", "pm2 process"), ("leases", "live dev lease")):
+            facts = state[source]
+            if isinstance(facts, Unknown):
+                reasons.append(f"unknown: {facts}")
+                continue
+            for item in facts:
+                cwd = item[-1]
+                if any(inside(cwd, t) for t in tree_paths(wt["dir"])):
+                    reasons.append(f"{label}: {' '.join(str(x) for x in item[:-1])}")
+
+        blockers = ignored_blockers(wt)
+        if blockers:
+            shown = ", ".join(blockers[:4]) + (f", +{len(blockers) - 4} more" if len(blockers) > 4 else "")
+            reasons.append(f"ignored content not on the allowlist: {shown}")
+    except Unknown as error:
+        reasons.append(f"unknown: {error}")
+    return ("keep", reasons) if reasons else (action, [])
+
+
+# --- apply ------------------------------------------------------------------
+
+def refreshed(scan, repo, wt):
+    """The tree's facts and the live state, re-read from scratch."""
+    base = scan.git(repo, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+    try:
+        facts = scan.git_facts(wt["dir"], base.strip() if base else None)
+    except SystemExit:
+        raise Unknown("dev-scan could not re-read the tree")
+    fresh = {**wt, **facts}
+    if fresh["head"] != wt["head"]:
+        raise Unknown("HEAD moved during the sweep")
+    return fresh, live_state(repo)
+
+
+def remove_one(scan, repo, wt):
+    """(result, reasons). Re-check, push if needed, unforced remove. Errors keep."""
+    try:
+        fresh, state = refreshed(scan, repo, wt)
+        verdict, reasons = evaluate(fresh, state)
+        if verdict == "keep":
+            return "keep", [f"changed before removal: {'; '.join(reasons)}"]
+        pushed = verdict == "push-then-remove"
+        if pushed:
+            remote, error = push_target(fresh)
+            if error:
+                return "keep", [error]
+            out = run(["git", "-C", wt["dir"], "push", remote, f"refs/heads/{wt['branch']}:refs/heads/{wt['branch']}"])
+            if out.returncode:
+                return "keep", [f"push failed: {out.stderr.strip().splitlines()[-1] if out.stderr.strip() else out.returncode}"]
+            fresh, state = refreshed(scan, repo, wt)
+            verdict, reasons = evaluate(fresh, state)
+            if verdict != "remove":
+                return "keep", [f"push not confirmed: {'; '.join(reasons) or verdict}"]
+        out = run(["git", "-C", repo, "worktree", "remove", wt["dir"]])
+        if out.returncode:
+            return "keep", [f"git refused removal: {out.stderr.strip()}"]
+        if os.path.exists(wt["dir"]):
+            return "keep", ["directory still exists after removal"]
+        return ("pushed-and-removed" if pushed else "removed"), []
+    except Unknown as error:
+        return "keep", [f"unknown: {error}"]
+
+
+# --- main -------------------------------------------------------------------
+
+def sweep(repo, apply):
+    if not os.path.isdir(os.path.join(repo, ".git")):
+        die(f"{repo} is not a primary checkout (no .git directory). Pass the repo's main checkout.")
+    out = run(["git", "-C", repo, "fetch", "--all", "--prune", "--quiet"])
+    if out.returncode:
+        die(f"git fetch failed in {repo}: {out.stderr.strip()}")
+    scanned = run([os.path.join(HERE, "dev-scan"), "worktrees", repo])
+    if scanned.returncode:
+        die(f"dev-scan failed: {scanned.stderr.strip()}")
+    rows = json.loads(scanned.stdout)
+    if not rows or os.path.realpath(rows[0]["dir"]) != os.path.realpath(repo):
+        die(f"{repo} is not the first worktree git lists; pass the primary checkout")
+
+    state = live_state(repo)
+    results = []
+    for wt in rows:
+        verdict, reasons = evaluate(wt, state)
+        results.append({"dir": wt["dir"], "branch": wt["branch"], "verdict": verdict, "reasons": reasons})
+    if isinstance(state["regs"], Unknown):
+        die(str(state["regs"]))
+    scanned_dirs = {wt["dir"] for wt in rows}
+    for path in state["regs"]:
+        if path not in scanned_dirs:
+            results.append({"dir": path, "branch": "", "verdict": "keep", "reasons": ["prunable or missing"]})
+
+    if apply:
+        scan = load_scan()
+        by_dir = {wt["dir"]: wt for wt in rows}
+        for result in results:
+            if result["verdict"] in ("remove", "push-then-remove"):
+                result["verdict"], result["reasons"] = remove_one(scan, repo, by_dir[result["dir"]])
+    return results
+
+
+def render(results, apply, as_json):
+    gone = [r for r in results if r["verdict"] not in ("keep",)]
+    kept = len(results) - len(gone)
+    if as_json:
+        return json.dumps({"worktrees": results, "total": len(results),
+                           "removed" if apply else "wouldRemove": len(gone),
+                           "kept" if apply else "wouldKeep": kept})
+    lines = []
+    for r in results:
+        verdict = f"keep: {'; '.join(r['reasons'])}" if r["verdict"] == "keep" else r["verdict"]
+        lines.append(f"{verdict}\t{r['dir']}\t{r['branch']}")
+    lines.append(f"total {len(results)}, {'removed' if apply else 'would remove'} {len(gone)}, "
+                 f"{'kept' if apply else 'would keep'} {kept}")
+    return "\n".join(lines)
+
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help"):
+        print(__doc__.strip())
+        return 0
+    apply = as_json = False
+    paths = []
+    for arg in argv:
+        if arg == "--apply":
+            apply = True
+        elif arg == "--json":
+            as_json = True
+        elif arg in ("-h", "--help"):
+            print(__doc__.strip())
+            return 0
+        elif arg.startswith("-"):
+            die(f"unknown option {arg}")
+        else:
+            paths.append(arg)
+    if len(paths) != 1:
+        die("needs exactly one primary checkout path")
+    try:
+        results = sweep(os.path.abspath(os.path.expanduser(paths[0])), apply)
+    except Unknown as error:
+        die(str(error))
+    print(render(results, apply, as_json))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

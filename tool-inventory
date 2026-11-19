@@ -28,6 +28,7 @@ screenshot-enrich | screenshot-enrich --help
 dev-lease | dev-lease --help
 dev-ls | dev-ls --help
 dev-scan | dev-scan --help
+dev-sweep | dev-sweep --help
 dev-up | dev-up --help
 grok-stt | grok-stt --help
 grok-tts | grok-tts -h
