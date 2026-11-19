@@ -220,10 +220,14 @@ def classify_ignored(wt):
     """
     blockers, envs, large = [], [], []
 
+    def generated(rel):
+        name = rel.rsplit("/", 1)[-1]
+        return name in GENERATED_DIRS or name.startswith(".coverage.") or rel.endswith(GENERATED_SUFFIXES)
+
     def judge(rel, reported):
         full = os.path.join(wt["dir"], rel)
         name = rel.rsplit("/", 1)[-1]
-        if reported and (name in GENERATED_DIRS or name.startswith(".coverage.") or rel.endswith(GENERATED_SUFFIXES)):
+        if reported and generated(rel):
             return
         if name.startswith(".env"):
             if os.path.islink(full):
@@ -239,8 +243,15 @@ def classify_ignored(wt):
             return  # an empty directory loses nothing
         blockers.append(rel)
 
-    for entry in wt["ignored"]:
-        judge(entry.rstrip("/"), True)
+    entries = [entry.rstrip("/") for entry in wt["ignored"]]
+    # A cache that ignores itself (ruff, pytest write their own .gitignore) makes git
+    # list its inner paths too; they are covered by the generated directory above them.
+    roots = {entry for entry in entries if generated(entry)}
+    for entry in entries:
+        parts = entry.split("/")
+        if any("/".join(parts[:i]) in roots for i in range(1, len(parts))):
+            continue
+        judge(entry, True)
     return list(dict.fromkeys(blockers)), list(dict.fromkeys(envs)), list(dict.fromkeys(large))
 
 
