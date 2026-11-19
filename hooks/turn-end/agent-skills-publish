@@ -16,6 +16,9 @@
 #    commit only those files, push.
 # 3. Update installs for every plugin whose version moved since this Mac last
 #    published (also catches manual commits), here and on the other Mac.
+# A session in a linked worktree of the repo (HOOK_CWD) does steps 1-2 there and
+# lands its commit with `land --autostash` instead of pushing; step 3 runs from the
+# main checkout. Edits made by that session's subagents attribute the same way.
 # Failures are loud: log + one PM inbox status line. A failed remote update is
 # retried on the next run.
 set -euo pipefail
@@ -53,9 +56,9 @@ touched() { # agent transcript -> repo-relative paths its own tool calls wrote, 
         grep -o '\*\*\* \(Update\|Add\|Delete\) File: [^\\"]*\|\*\*\* Move to: [^\\"]*' |
         sed 's/^\*\*\* [A-Za-z ]*: //' || true ;;
   esac | sed "s|^~/|$HOME/|" | while IFS= read -r p; do
-    case "$p" in "$REPO"/*) printf '%s\n' "${p#"$REPO"/}" ;; esac
+    case "$p" in "${ROOT:-$REPO}"/*) printf '%s\n' "${p#"${ROOT:-$REPO}"/}" ;; esac
     # check-ledger.sh --coverage regenerates GOALS.md's coverage block from the ledger.
-    if [ "$p" = "$REPO/LEDGER.md" ]; then printf '%s\n' GOALS.md; fi
+    if [ "$p" = "${ROOT:-$REPO}/LEDGER.md" ]; then printf '%s\n' GOALS.md; fi
   done | sort -u
 }
 
@@ -64,6 +67,16 @@ if [ "${1:-}" = --touched ]; then touched "${2:-}" "${3:-}"; exit 0; fi
 agent="${1:-}" session="${2:-}" transcript="${3:-}"
 [ -d "$REPO/.git" ] || exit 0
 mkdir -p "$STATE"
+
+# The checkout this session works in: its worktree of REPO, else REPO itself.
+ROOT="$REPO"
+if [ -n "${HOOK_CWD:-}" ] && [ -d "$HOOK_CWD" ]; then
+  top="$(git -C "$HOOK_CWD" rev-parse --show-toplevel 2>/dev/null || true)"
+  common="$(git -C "$HOOK_CWD" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+  if [ -n "$top" ] && [ "$top" != "$REPO" ] && [ "$(cd "$common" 2>/dev/null && pwd -P)" = "$(cd "$REPO" && pwd -P)/.git" ]; then
+    ROOT="$top"
+  fi
+fi
 
 case "$(scutil --get LocalHostName 2>/dev/null || hostname)" in
   *[Mm]ini*) other=macbook ;;
@@ -81,13 +94,13 @@ fail() {
 }
 
 # Fast path: nothing of this session's to commit and no pending install work.
-cd "$REPO"
+cd "$ROOT"
 marker="$STATE/published-head"
 pending="$STATE/remote-pending"
 dirty="$(git status --porcelain --untracked-files=all | cut -c4- | sed 's/.* -> //')"
 mine=""
 [ -z "$dirty" ] || mine="$(comm -12 <(touched "$agent" "$transcript") <(printf '%s\n' "$dirty" | sort -u))"
-if [ -z "$mine" ] && [ ! -s "$pending" ] && [ "$(cat "$marker" 2>/dev/null)" = "$(git rev-parse HEAD)" ]; then
+if [ -z "$mine" ] && [ ! -s "$pending" ] && [ "$(cat "$marker" 2>/dev/null)" = "$(git -C "$REPO" rev-parse HEAD)" ]; then
   exit 0
 fi
 
@@ -127,13 +140,16 @@ if [ -n "$mine" ]; then
   git commit -q -m "publish: ${agent:-agent} turn ${session:0:8}" \
     -m "Auto-published at turn end by agent-skills-publish." -- "${files[@]}" >>"$LOG" 2>&1 ||
     fail "git commit"
-  if ! git push -q >>"$LOG" 2>&1; then
+  if [ "$ROOT" != "$REPO" ]; then
+    "${SCRIPTS:-$HOME/scripts}/land" --autostash >>"$LOG" 2>&1 || fail "land from $ROOT"
+  elif ! git push -q >>"$LOG" 2>&1; then
     git pull -q --rebase --autostash >>"$LOG" 2>&1 || fail "pull --rebase before push"
     git push -q >>"$LOG" 2>&1 || fail "git push"
   fi
 fi
 
 # 3. Update installs for plugins whose version moved since the last publish here.
+cd "$REPO"
 head="$(git rev-parse HEAD)"
 last="$(cat "$marker" 2>/dev/null || true)"
 if [ -z "$last" ] || ! git cat-file -e "$last" 2>/dev/null; then

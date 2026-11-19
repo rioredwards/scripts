@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# land: put the committed work of this checkout on the remote default branch, then
+# fast-forward the main checkout. Personal-class repos only (no PRs there).
+#
+#   land [--autostash]   run from a worktree or the main checkout, work committed
+#
+# Fetch, rebase onto origin's default branch (only when it moved), push HEAD to it
+# (never forced, hooks run), fast-forward the main checkout. Class is read from the
+# remote default branch's AGENTS.md (`**Class:** personal`), so a branch cannot
+# relabel its repo; no line means production and land refuses.
+# --autostash lets tracked uncommitted changes sit in the tree (rebase's own
+# autostash; the shared stash stack is never touched). Untracked files are ignored.
+#
+# Exit: 0 landed | 1 refused or setup error (class, dirty tree, detached HEAD, no
+# origin) | 4 rebase conflict (aborted, work stays on its branch) | 5 push rejected
+# (run land again) | 6 landed but the main checkout was not fast-forwarded.
+set -euo pipefail
+
+die() { printf 'land: %s\n' "$2" >&2; exit "$1"; }
+auto=""
+case "${1:-}" in --autostash) auto=--autostash ;; "") ;; *) die 1 "usage: land [--autostash]" ;; esac
+
+top="$(git rev-parse --show-toplevel 2>/dev/null)" || die 1 "not in a git checkout"
+cd "$top"
+git remote get-url origin >/dev/null 2>&1 || die 1 "no origin remote"
+branch="$(git symbolic-ref --short -q HEAD)" || die 1 "detached HEAD: land needs a branch"
+
+git fetch -q origin || die 1 "fetch failed"
+default="$(git ls-remote --symref origin HEAD | sed -n 's|^ref: refs/heads/\(.*\)[[:space:]]HEAD$|\1|p')"
+[ -n "$default" ] || die 1 "cannot read origin's default branch"
+git rev-parse -q --verify "refs/remotes/origin/$default" >/dev/null || die 1 "origin/$default not fetched"
+
+class="$(git show "origin/$default:AGENTS.md" 2>/dev/null | sed -n 's/^\*\*Class:\*\* *`\{0,1\}\([a-z]*\).*/\1/p' | head -1)"
+[ "$class" = personal ] || die 1 "origin/$default AGENTS.md class is '${class:-missing}', not personal: use a PR"
+
+if [ -z "$auto" ] && [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+  die 1 "uncommitted changes: commit them (or pass --autostash)"
+fi
+
+if ! git merge-base --is-ancestor "origin/$default" HEAD; then
+  git rebase -q $auto "origin/$default" >&2 || { git rebase --abort 2>/dev/null || true; die 4 "rebase onto origin/$default conflicted; aborted, work stays on $branch"; }
+fi
+
+git push -q origin "HEAD:refs/heads/$default" || die 5 "push to origin/$default rejected; run land again"
+
+main="$(git worktree list --porcelain | sed -n '1s/^worktree //p')"
+if [ "$(cd "$main" && pwd -P)" != "$(pwd -P)" ]; then
+  [ "$(git -C "$main" symbolic-ref --short -q HEAD || true)" = "$default" ] ||
+    die 6 "landed, but main checkout $main is not on $default"
+  git -C "$main" merge -q --ff-only "origin/$default" || die 6 "landed, but main checkout $main did not fast-forward"
+fi
+printf 'land: %s landed on origin/%s\n' "$branch" "$default"

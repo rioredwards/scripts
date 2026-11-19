@@ -46,4 +46,24 @@ check "theirs still staged" "$(git -C "$R" status --porcelain theirs.md)" "M  th
 check "marker at head" "$(cat "$tmp/state/published-head")" "$(git -C "$R" rev-parse HEAD)"
 before="$(git -C "$R" rev-parse HEAD)"
 "$P" claude abcdef123456 "$tmp/claude.jsonl"; check "rerun is a no-op" "$(git -C "$R" rev-parse HEAD)" "$before"
+
+# Worktree session (HOOK_CWD in a linked worktree): commits there and lands on origin, other
+# uncommitted files stay put, main checkout fast-forwards. A second transcript (a subagent's
+# own, own session id) publishes the same way.
+export SCRIPTS="$(dirname "$P")/../.."
+printf '**Class:** `personal`\n' >"$R/AGENTS.md"; git -C "$R" add AGENTS.md; git -C "$R" commit -qm class; git -C "$R" push -q origin HEAD
+git -C "$R" worktree add -qb feat "$tmp/wt"; W="$(cd "$tmp/wt" && pwd -P)" # git reports real paths
+printf 'w\n' >"$W/wt.md"; printf 'o\n' >"$W/other.md"; printf 'sub\n' >"$W/sub.md"
+for f in wt sub; do
+  printf '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"%s/%s.md"}}]}}\n' "$W" "$f" >"$tmp/$f.jsonl"
+done
+HOOK_CWD="$W" "$P" claude abcdef123456 "$tmp/wt.jsonl"; check "worktree publish exit" "$?" "0"
+check "worktree commit has only wt.md" "$(git -C "$W" show --name-only --format= HEAD | tr '\n' ' ')" "wt.md "
+check "worktree landed on origin" "$(git -C "$W" rev-parse HEAD)" "$(git -C "$tmp/remote.git" rev-parse HEAD)"
+check "main checkout fast-forwarded" "$(git -C "$R" rev-parse HEAD)" "$(git -C "$tmp/remote.git" rev-parse HEAD)"
+check "other file stays uncommitted" "$(git -C "$W" status --porcelain other.md)" "?? other.md"
+check "marker at main head" "$(cat "$tmp/state/published-head")" "$(git -C "$R" rev-parse HEAD)"
+HOOK_CWD="$W" "$P" claude agent-a1b2c3d4e5 "$tmp/sub.jsonl"; check "subagent transcript publish exit" "$?" "0"
+check "subagent commit has only sub.md" "$(git -C "$W" show --name-only --format= HEAD | tr '\n' ' ')" "sub.md "
+check "subagent landed" "$(git -C "$R" rev-parse HEAD)" "$(git -C "$tmp/remote.git" rev-parse HEAD)"
 exit $fail
