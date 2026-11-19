@@ -493,6 +493,53 @@ check("env-named file over 1 MB keeps the tree", v["bigenv"]["verdict"] == "keep
       and any("env-named file too large to preserve" in r for r in v["bigenv"]["reasons"]), json.dumps(v["bigenv"]))
 e.done()
 
+
+# --- backup pushes skip hooks and never target a shared branch -----------------------
+
+for shared in ("develop", "release/1.2"):
+    expect_keep(f"unpushed commits on shared branch {shared} kept",
+                lambda e, b=shared: e.tree("shr", b, pushed=False), f"unpushed commits on shared branch {shared}")
+
+
+def default_other_name(e):
+    e.git(e.repo, "push", "-q", "origin", "main:trunk")
+    e.git(e.repo, "fetch", "-q", "origin")
+    e.git(e.repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+    return e.tree("trk", "trunk", pushed=False)
+
+
+expect_keep("default branch under another name is shared", default_other_name, "unpushed commits on shared branch trunk")
+
+
+def unknown_default(e):
+    p = e.tree("unk", "feature", pushed=False)
+    # newer git recreates origin/HEAD on fetch unless told not to
+    e.git(e.repo, "config", "remote.origin.followRemoteHEAD", "never")
+    e.git(e.repo, "symbolic-ref", "--delete", "refs/remotes/origin/HEAD")
+    return p
+
+
+expect_keep("unknown remote default branch keeps an unpushed tree", unknown_default, "remote default branch unknown")
+
+e = Env()
+hook = e.repo / ".git" / "hooks" / "pre-push"
+hook.write_text("#!/bin/sh\necho hook ran >&2\nexit 1\n")
+hook.chmod(0o755)
+t = e.tree("hooked", "feature", pushed=False, commit=True)
+e.age(t)
+out = e.run("--apply")
+check("failing pre-push hook does not block a feature-branch backup push",
+      not t.exists() and "refs/heads/feature" in subprocess.check_output(["git", "-C", str(e.remote), "for-each-ref"], text=True), out.stdout + out.stderr)
+e.done()
+
+# A pushed shared branch is fine to remove: nothing to push.
+e = Env()
+t = e.tree("pushed_dev", "develop")
+e.age(t)
+v, _ = e.verdicts()
+check("shared branch already on the remote is removable", v["pushed_dev"]["verdict"] == "remove", json.dumps(v["pushed_dev"]))
+e.done()
+
 # --- dry run changes nothing ---------------------------------------------------
 
 e = Env()

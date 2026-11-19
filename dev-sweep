@@ -18,7 +18,12 @@ is unknown keeps it:
   3. HEAD is contained in a remote branch (after the fetch) or is the head of a
      pull request (one ls-remote of refs/pull/*/head; nothing written locally). If not and HEAD is
      on a named branch, that branch is pushed without force (a rejected push
-     keeps it). Detached HEAD that is not on a remote branch is kept.
+     keeps it). That push SKIPS client hooks (git push --no-verify), because a
+     slow or strict pre-push hook would block a plain backup. So it never pushes
+     to a shared branch: the remote's default branch (refs/remotes/<remote>/HEAD;
+     unset means unknown, keep), main, master, dev, develop, staging, production
+     or release/*, with unpushed commits, is kept. Detached HEAD that is not on
+     a remote branch is kept.
   4. idle at least 24 hours: newest of last commit time and the mtimes of its
      git-dir index and HEAD log
   5. no process with its cwd inside it, no pm2 process or live dev lease for it
@@ -247,6 +252,9 @@ def changed_files(wt):
     return ", ".join(names[:3]) + (f", +{len(names) - 3} more" if len(names) > 3 else "")
 
 
+SHARED_BRANCHES = {"main", "master", "dev", "develop", "staging", "production"}
+
+
 def push_target(wt):
     """(remote, error). The remote to push the branch to, or why there is none."""
     branch = wt["branch"]
@@ -259,6 +267,12 @@ def push_target(wt):
     remote = remote if remote and remote != "." else "origin"
     if remote not in git(wt["dir"], "remote").split():
         return None, f"no remote {remote} to push to"
+    head = run(["git", "-C", wt["dir"], "symbolic-ref", "--short", f"refs/remotes/{remote}/HEAD"])
+    if head.returncode:
+        return None, f"unpushed commits; remote default branch unknown (refs/remotes/{remote}/HEAD unset)"
+    default = head.stdout.strip().removeprefix(f"{remote}/")
+    if branch == default or branch in SHARED_BRANCHES or branch.startswith("release/"):
+        return None, f"unpushed commits on shared branch {branch}"
     tracking = f"refs/remotes/{remote}/{branch}"
     if run(["git", "-C", wt["dir"], "rev-parse", "--verify", "-q", tracking]).returncode == 0:
         if run(["git", "-C", wt["dir"], "merge-base", "--is-ancestor", tracking, "HEAD"]).returncode:
@@ -417,7 +431,7 @@ def remove_one(scan, repo, wt):
             remote, error = push_target(fresh)
             if error:
                 return "keep", [error]
-            out = run(["git", "-C", wt["dir"], "push", remote, f"refs/heads/{wt['branch']}:refs/heads/{wt['branch']}"])
+            out = run(["git", "-C", wt["dir"], "push", "--no-verify", remote, f"refs/heads/{wt['branch']}:refs/heads/{wt['branch']}"])
             if out.returncode:
                 return "keep", [f"push failed: {out.stderr.strip().splitlines()[-1] if out.stderr.strip() else out.returncode}"]
             fresh, state = refreshed(scan, repo, wt)
