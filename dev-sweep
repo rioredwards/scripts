@@ -35,6 +35,11 @@ is unknown keeps it:
      <hash12>.env (owner only, read back and compared, logged in index.tsv capped
      at 500 lines); a failed copy keeps the tree. Dry run only counts them.
 
+Per-repo opt-in, in the primary checkout's local git config (repo-relative paths, no
+globs, repeatable; an absolute path, `..` or empty value exits 2):
+  devsweep.generated <dir>   counts as generated when git reports that exact dir as its own ignored entry
+  devsweep.preserve <file>   ignored file handled like an env file: symlink ok, regular file backed up first
+
 `git worktree lock` is the keep switch. Removal is unforced `git worktree
 remove`: never --force, never unlock, never clean or reset, never delete a
 branch. Before each removal --apply re-reads the tree's facts and re-checks
@@ -67,6 +72,8 @@ import time
 
 MAX_ENV_BYTES = 1024 * 1024
 PR_HEADS = set()  # shas of refs/pull/*/head on the remotes, read once per sweep
+EXTRA_GENERATED = set()  # devsweep.generated: repo-relative dirs this repo declares as generated
+PRESERVE = set()  # devsweep.preserve: repo-relative ignored files handled like env files
 IDLE_SECONDS = 24 * 60 * 60
 TIMEOUT = 300
 EXIT_PARTIAL = 3
@@ -209,6 +216,24 @@ def live_state(repo):
 
 # --- the checks -------------------------------------------------------------
 
+def declared_paths(repo, key):
+    """Values of devsweep.<key> in the primary checkout's local git config, validated."""
+    out = run(["git", "-C", repo, "config", "--local", "--get-all", f"devsweep.{key}"])
+    if out.returncode == 1:
+        return set()
+    if out.returncode:
+        die(f"git config devsweep.{key} failed in {repo}: {out.stderr.strip()}")
+    paths = set()
+    for value in out.stdout.split("\n")[:-1]:
+        parts = value.split("/")
+        if (not value or value.startswith("/") or any(part in ("", ".", "..") for part in parts)
+                or any(ch in value for ch in "*?[\\")):
+            die(f"devsweep.{key} in {repo} has a malformed value {value!r}: "
+                "use a repo-relative path with no '..', empty parts, trailing slash or glob")
+        paths.add(value)
+    return paths
+
+
 def classify_ignored(wt):
     """(blockers, env_files, too_large) from the tree's ignored entries.
 
@@ -222,14 +247,15 @@ def classify_ignored(wt):
 
     def generated(rel):
         name = rel.rsplit("/", 1)[-1]
-        return name in GENERATED_DIRS or name.startswith(".coverage.") or rel.endswith(GENERATED_SUFFIXES)
+        return (name in GENERATED_DIRS or name.startswith(".coverage.") or rel.endswith(GENERATED_SUFFIXES)
+                or rel in EXTRA_GENERATED)
 
     def judge(rel, reported):
         full = os.path.join(wt["dir"], rel)
         name = rel.rsplit("/", 1)[-1]
         if reported and generated(rel):
             return
-        if name.startswith(".env"):
+        if name.startswith(".env") or rel in PRESERVE:
             if os.path.islink(full):
                 return
             if os.path.isfile(full):
@@ -506,6 +532,10 @@ def remove_one(scan, repo, wt):
 def sweep(repo, apply):
     if not os.path.isdir(os.path.join(repo, ".git")):
         die(f"{repo} is not a primary checkout (no .git directory). Pass the repo's main checkout.")
+    EXTRA_GENERATED.clear()
+    EXTRA_GENERATED.update(declared_paths(repo, "generated"))
+    PRESERVE.clear()
+    PRESERVE.update(declared_paths(repo, "preserve"))
     out = run(["git", "-C", repo, "fetch", "--all", "--prune", "--quiet"])
     if out.returncode:
         die(f"git fetch failed in {repo}: {out.stderr.strip()}")

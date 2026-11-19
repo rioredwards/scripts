@@ -251,7 +251,7 @@ e.done()
 
 
 SECRET = "TOPSECRET_VALUE_12345"
-PATTERNS = ".env*\nnode_modules/\n.fallow/\nnext-env.d.ts\nnotes.txt\n.claude/worktrees/\nshots/\nscratch/\ndist/\n.venv/\n__pycache__/\n*.pyc\n.mypy_cache/\n.tox/\nhtmlcov/\n.coverage\n.coverage.*\n.testmondata*\ninstance/\n"
+PATTERNS = ".env*\nnode_modules/\n.fallow/\nnext-env.d.ts\nnotes.txt\n.claude/worktrees/\nshots/\nscratch/\ndist/\n.venv/\n__pycache__/\n*.pyc\n.mypy_cache/\n.tox/\nhtmlcov/\n.coverage\n.coverage.*\n.testmondata*\ninstance/\n/skeleton/flask_app/static/spa/\n"
 
 
 def ignoring(e, name, branch="feat", pushed=True):
@@ -260,6 +260,8 @@ def ignoring(e, name, branch="feat", pushed=True):
     (e.repo / ".gitignore").write_text(PATTERNS)
     # tracked files beside the ignored ones, as in a real repo (a directory holding only ignored paths is reported whole)
     (e.repo / "skeleton" / "pkg").mkdir(parents=True, exist_ok=True)
+    (e.repo / "skeleton" / "flask_app" / "static").mkdir(parents=True, exist_ok=True)
+    (e.repo / "skeleton" / "flask_app" / "static" / "app.css").write_text("x")
     (e.repo / "skeleton" / "app.py").write_text("x")
     (e.repo / "skeleton" / "pkg" / "mod.py").write_text("x")
     e.git(e.repo, "add", ".")
@@ -693,6 +695,83 @@ e.git(other, "push", "-q", "origin", "feat")
 out = e.run("--apply")
 check("apply keeps a tree whose push is rejected", t.exists() and "keep: push would be rejected" in out.stdout, out.stdout)
 e.done()
+
+# --- per-repo opt-in: devsweep.generated and devsweep.preserve in the primary's local git config ----
+
+SPA = "skeleton/flask_app/static/spa"
+
+
+def declare(e, key, *values):
+    for value in values:
+        e.git(e.repo, "config", "--add", f"devsweep.{key}", value)
+
+
+e, p = removable("spa", {f"{SPA}/index.html": "g", f"{SPA}/assets/a.js": "g"})
+v, _ = e.verdicts()
+check("undeclared spa dir still keeps", v["spa"]["verdict"] == "keep" and any("allowlist" in r for r in v["spa"]["reasons"]), json.dumps(v["spa"]))
+declare(e, "generated", SPA)
+v, _ = e.verdicts()
+check("declared generated dir makes the tree removable", v["spa"]["verdict"] == "remove", json.dumps(v["spa"]))
+e.done()
+
+e, p = removable("spanest", {"scratch/spa/a.js": "g"})
+declare(e, "generated", "scratch/spa")
+v, _ = e.verdicts()
+check("declared dir inside another ignored dir is not trusted", v["spanest"]["verdict"] == "keep", json.dumps(v["spanest"]))
+e.done()
+
+e, p = removable("spabase", {"skeleton/other/spa/a.js": "g", "scratch/x/spa/a.js": "g"})
+declare(e, "generated", SPA)
+v, _ = e.verdicts()
+check("declared path is not trusted by basename elsewhere", v["spabase"]["verdict"] == "keep", json.dumps(v["spabase"]))
+e.done()
+
+GOOGLE = "skeleton/instance/google_dev_resources.json"
+e, p = removable("goog", {GOOGLE: SECRET})
+v, _ = e.verdicts()
+check("undeclared config file in an ignored dir keeps", v["goog"]["verdict"] == "keep", json.dumps(v["goog"]))
+declare(e, "preserve", GOOGLE)
+v, _ = e.verdicts()
+check("declared preserve file counts like an env file", v["goog"]["verdict"] == "remove" and v["goog"]["envFiles"] == 1, json.dumps(v["goog"]))
+out = e.run("--apply")
+check("preserve file never printed", SECRET not in out.stdout + out.stderr)
+check("preserve file removed after backup", not p.exists() and out.returncode == 0, out.stdout + out.stderr)
+b = backup_dir(e)
+digest = __import__("hashlib").sha256(SECRET.encode()).hexdigest()[:12]
+stored = b / f"{digest}.env"
+check("preserve file stored by hash, owner only", stored.exists() and stored.read_text() == SECRET
+      and oct(stored.stat().st_mode & 0o777) == "0o600", str(list(b.glob("*"))))
+check("preserve file logged in the index", (b / "index.tsv").exists() and GOOGLE in (b / "index.tsv").read_text())
+e.done()
+
+e, p = removable("googlink", {})
+(p / "skeleton" / "instance").mkdir(parents=True)
+os.symlink("/dev/null", p / GOOGLE)
+declare(e, "preserve", GOOGLE)
+v, _ = e.verdicts()
+check("declared preserve symlink is removable, nothing to back up", v["googlink"]["verdict"] == "remove" and v["googlink"]["envFiles"] == 0, json.dumps(v["googlink"]))
+e.done()
+
+e, p = removable("sibling", {GOOGLE: SECRET, "skeleton/instance/dev.db": "data"})
+declare(e, "preserve", GOOGLE)
+v, _ = e.verdicts()
+check("undeclared sibling (dev.db) still keeps", v["sibling"]["verdict"] == "keep" and any("dev.db" in r for r in v["sibling"]["reasons"]), json.dumps(v["sibling"]))
+e.done()
+
+e, p = removable("bigpres", {GOOGLE: "x" * (1024 * 1024 + 1)})
+declare(e, "preserve", GOOGLE)
+v, _ = e.verdicts()
+check("preserve file over 1 MB keeps the tree", v["bigpres"]["verdict"] == "keep", json.dumps(v["bigpres"]))
+e.done()
+
+for key in ("generated", "preserve"):
+    for bad in ("/abs/path", "../up", "a/../b", "", "a//b", "a/", "src/*.js"):
+        e = Env()
+        e.tree("t")
+        declare(e, key, bad)
+        out = e.run()
+        check(f"malformed devsweep.{key} {bad!r} is fatal", out.returncode == 2 and f"devsweep.{key}" in out.stderr, f"{out.returncode} {out.stderr}")
+        e.done()
 
 # --- loud failures ---------------------------------------------------------------
 
