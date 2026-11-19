@@ -510,7 +510,10 @@ def delete_landed_branch(repo, wt, remote):
     default = head.stdout.strip().removeprefix(f"{remote}/")
     if branch == default or branch in SHARED_BRANCHES or branch.startswith("release/"):
         return
-    if run(["git", "-C", repo, "merge-base", "--is-ancestor", wt["head"], head.stdout.strip()]).returncode == 0:
+    # The branch's tip now, not the scanned head: -d alone would also accept a branch merged
+    # only into its own upstream, which dev-sweep may just have pushed.
+    tip = f"refs/heads/{branch}"
+    if run(["git", "-C", repo, "merge-base", "--is-ancestor", tip, head.stdout.strip()]).returncode == 0:
         run(["git", "-C", repo, "branch", "-d", branch])
 
 
