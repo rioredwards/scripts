@@ -3,7 +3,7 @@
 set -eu
 root="$(cd "$(dirname "$0")/.." && pwd)"
 python3 - "$root/dev-sweep" <<'PY'
-import json, os, pathlib, shutil, subprocess, sys, tempfile, time
+import importlib.machinery, importlib.util, json, os, pathlib, re, shutil, subprocess, sys, tempfile, time
 
 sweep = sys.argv[1]
 OLD = "2020-01-01T00:00:00"
@@ -538,6 +538,92 @@ t = e.tree("pushed_dev", "develop")
 e.age(t)
 v, _ = e.verdicts()
 check("shared branch already on the remote is removable", v["pushed_dev"]["verdict"] == "remove", json.dumps(v["pushed_dev"]))
+e.done()
+
+
+# --- half-finished `git worktree remove` leaves an unregistered folder --------------------
+# A shim git on PATH deregisters the tree and fails like git does when a file will not go
+# ("Directory not empty"), leaving the folder behind.
+
+def half_remove_env(e):
+    shim = e.tmp / "shim"
+    shim.mkdir()
+    real = shutil.which("git")
+    (shim / "git").write_text(f"""#!/bin/bash
+args=("$@")
+for i in "${{!args[@]}}"; do
+  if [ "${{args[$i]}}" = worktree ] && [ "${{args[$((i+1))]}}" = remove ]; then
+    target="${{args[$((i+2))]}}"
+    for g in "$FAKE_REPO"/.git/worktrees/*; do
+      if [ "$(dirname "$(cat "$g/gitdir")")" = "$target" ]; then rm -rf "$g"; fi
+    done
+    echo "error: failed to delete '$target': Directory not empty" >&2
+    exit 1
+  fi
+done
+exec {real} "$@"
+""")
+    (shim / "git").chmod(0o755)
+    return {"PATH": f"{shim}:{os.environ['PATH']}", "FAKE_REPO": str(e.repo)}
+
+
+def leftover_tree(e, name="half"):
+    p = e.tree(name)
+    e.age(p)
+    (p / "node_modules").mkdir()
+    (p / "node_modules" / "x.js").write_text("x")
+    (e.repo / ".git" / "info" / "exclude").write_text("node_modules/\n")
+    return p
+
+
+e = Env()
+t = leftover_tree(e)
+out = e.run("--apply", env=half_remove_env(e))
+check("half-removed tree: leftover folder is finished off", not t.exists(), out.stdout + out.stderr)
+check("half-removed tree reports removed, exit 0, no partial",
+      out.returncode == 0 and f"removed\t{t}" in out.stdout and "partial" not in out.stdout, out.stdout + out.stderr)
+check("half-removed tree is no longer registered", str(t) not in e.git(e.repo, "worktree", "list", "--porcelain"))
+e.done()
+
+e = Env()
+t = leftover_tree(e)
+locked = t / "node_modules"
+os.chmod(locked, 0o555)  # files inside cannot be unlinked, so the delete cannot finish
+try:
+    out = e.run("--apply", env=half_remove_env(e))
+    check("undeletable leftover is reported partial, not keep",
+          f"partial: unregistered leftover at {t}:" in out.stdout and not re.search(r"^keep.*\bhalf\b", out.stdout, re.M), out.stdout + out.stderr)
+    check("partial exits 3", out.returncode == 3, str(out.returncode))
+    check("totals line counts partial separately", re.search(r"removed \d+, kept \d+, partial 1$", out.stdout.strip()), out.stdout)
+finally:
+    os.chmod(locked, 0o755)
+e.done()
+
+# bounds on the recursive delete, called directly
+loader = importlib.machinery.SourceFileLoader("dev_sweep_mod", sweep)
+spec = importlib.util.spec_from_loader("dev_sweep_mod", loader)
+ds = importlib.util.module_from_spec(spec)
+loader.exec_module(ds)
+ds.LEFTOVER_PAUSE = 0
+
+e = Env()
+check("delete refuses the primary checkout", ds.finish_leftover(str(e.repo), str(e.repo), "x")[0] == "keep" and e.repo.exists())
+t = e.tree("reg")
+check("delete refuses a path that is still registered", ds.finish_leftover(str(e.repo), str(t), "x")[0] == "keep" and t.exists())
+target = e.tmp / "precious"
+target.mkdir()
+(target / "keepme").write_text("x")
+link = e.tmp / "linked"
+link.symlink_to(target)
+res = ds.finish_leftover(str(e.repo), str(link), "x")
+check("delete refuses a symlink", res[0] == "partial" and "symlink" in res[1][0] and (target / "keepme").exists() and link.is_symlink(), str(res))
+sibling = e.tmp / "sibling"
+sibling.mkdir()
+orphan = e.tmp / "orphan"
+orphan.mkdir()
+(orphan / "f").write_text("x")
+res = ds.finish_leftover(str(e.repo), str(orphan), "x")
+check("delete touches only the given folder", res[0] == "removed" and not orphan.exists() and sibling.exists() and e.repo.exists())
 e.done()
 
 # --- dry run changes nothing ---------------------------------------------------

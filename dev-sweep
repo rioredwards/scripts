@@ -40,7 +40,15 @@ remove`: never --force, never unlock, never clean or reset, never delete a
 branch. Before each removal --apply re-reads the tree's facts and re-checks
 everything. Facts come from `dev-scan worktrees`; this adds the checks it lacks.
 
-Exit 0 when the sweep ran (keeps are normal). A real failure (not a primary
+If git drops a tree's registration but cannot delete all its files (for example
+Finder has the folder open), the tree has already passed every check, so --apply
+deletes the leftover folder itself (retrying a few times) and reports `removed`.
+Only that exact directory is deleted, never the primary checkout, a registered
+path or a symlink. If it still cannot be deleted the verdict is `partial:
+unregistered leftover at <dir>: <error>`, counted as "partial N" in the totals,
+and the exit code is 3 so the nightly wrapper can raise it.
+
+Exit 0 when the sweep ran (keeps are normal), 3 when any tree ended `partial`. A real failure (not a primary
 checkout, fetch fails, dev-scan fails) exits 2 with a message on stderr.
 
 DEV_LEASE_DIR and PM2_HOME are honored like dev-lease does, for tests.
@@ -52,6 +60,7 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -60,6 +69,7 @@ MAX_ENV_BYTES = 1024 * 1024
 PR_HEADS = set()  # shas of refs/pull/*/head on the remotes, read once per sweep
 IDLE_SECONDS = 24 * 60 * 60
 TIMEOUT = 300
+EXIT_PARTIAL = 3
 
 # Generated output: any path component with one of these names is rebuildable.
 GENERATED_DIRS = {
@@ -419,6 +429,31 @@ def refreshed(scan, repo, wt):
     return fresh, live_state(repo)
 
 
+LEFTOVER_TRIES, LEFTOVER_PAUSE = 4, 0.5
+
+
+def finish_leftover(repo, path, why):
+    """(removed|keep|partial, reasons) for a folder git unregistered but could not fully delete.
+    Deletes only `path`, the exact directory this run passed to `git worktree remove`."""
+    if os.path.realpath(path) == os.path.realpath(repo):
+        return "keep", ["refusing to delete the primary checkout"]
+    if any(os.path.realpath(p) == os.path.realpath(path) for p in registrations(repo)):
+        return "keep", [f"git refused removal: {why}"]
+    if os.path.islink(path):
+        return "partial", [f"unregistered leftover at {path}: path is a symlink, not deleted"]
+    if not os.path.isdir(path):
+        return "removed", []
+    error = why
+    for attempt in range(LEFTOVER_TRIES):  # a Finder .DS_Store can reappear mid-delete
+        failures = []
+        shutil.rmtree(path, onerror=lambda fn, p, info: failures.append(str(info[1])))
+        if not os.path.lexists(path):
+            return "removed", [f"deleted leftover folder after git: {why}"]
+        error = failures[0] if failures else "directory still exists"
+        time.sleep(LEFTOVER_PAUSE)
+    return "partial", [f"unregistered leftover at {path}: {error}"]
+
+
 def remove_one(scan, repo, wt):
     """(result, reasons). Re-check, push if needed, unforced remove. Errors keep."""
     try:
@@ -440,11 +475,16 @@ def remove_one(scan, repo, wt):
                 return "keep", [f"push not confirmed: {'; '.join(reasons) or verdict}"]
         backup_env(repo, fresh)
         out = run(["git", "-C", repo, "worktree", "remove", wt["dir"]])
-        if out.returncode:
-            return "keep", [f"git refused removal: {out.stderr.strip()}"]
-        if os.path.exists(wt["dir"]):
-            return "keep", ["directory still exists after removal"]
-        return ("pushed-and-removed" if pushed else "removed"), []
+        done = "pushed-and-removed" if pushed else "removed"
+        if out.returncode or os.path.exists(wt["dir"]):
+            why = out.stderr.strip() if out.returncode else "directory still exists after removal"
+            if wt["dir"] in registrations(repo):
+                return "keep", [f"git refused removal: {why}"] if out.returncode else [why]
+            # git dropped the registration but left files behind: this tree already passed
+            # every check, so finish the job (a keep here would orphan the folder forever).
+            result, reasons = finish_leftover(repo, wt["dir"], why)
+            return (done if result == "removed" else result), reasons
+        return done, []
     except (Unknown, OSError) as error:
         return "keep", [f"unknown: {error}"]
 
@@ -493,19 +533,21 @@ def sweep(repo, apply):
 
 
 def render(results, apply, as_json):
-    gone = [r for r in results if r["verdict"] not in ("keep",)]
-    kept = len(results) - len(gone)
+    gone = [r for r in results if r["verdict"] not in ("keep", "partial")]
+    partial = sum(r["verdict"] == "partial" for r in results)
+    kept = len(results) - len(gone) - partial
     if as_json:
+        extra = {"partial": partial} if apply else {}
         return json.dumps({"worktrees": results, "total": len(results),
                            "removed" if apply else "wouldRemove": len(gone),
-                           "kept" if apply else "wouldKeep": kept})
+                           "kept" if apply else "wouldKeep": kept, **extra})
     lines = []
     for r in results:
-        verdict = f"keep: {'; '.join(r['reasons'])}" if r["verdict"] == "keep" else r["verdict"]
+        verdict = f"{r['verdict']}: {'; '.join(r['reasons'])}" if r["verdict"] in ("keep", "partial") else r["verdict"]
         note = f"\t{r['envFiles']} env files to preserve" if r["envFiles"] and not apply else ""
         lines.append(f"{verdict}\t{r['dir']}\t{r['branch']}{note}")
     lines.append(f"total {len(results)}, {'removed' if apply else 'would remove'} {len(gone)}, "
-                 f"{'kept' if apply else 'would keep'} {kept}")
+                 f"{'kept' if apply else 'would keep'} {kept}" + (f", partial {partial}" if partial else ""))
     return "\n".join(lines)
 
 
@@ -535,7 +577,7 @@ def main(argv):
     except Unknown as error:
         die(str(error))
     print(render(results, apply, as_json))
-    return 0
+    return EXIT_PARTIAL if any(r["verdict"] == "partial" for r in results) else 0
 
 
 if __name__ == "__main__":
