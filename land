@@ -13,7 +13,9 @@
 # the shared stash list and leave conflict markers, so land refuses first. Untracked
 # files are ignored.
 #
-# Exit: 0 landed | 1 refused or setup error (class, dirty tree, dirty file origin
+# Refuses commits to be landed whose subject starts with WIP, fixup! or squash!.
+#
+# Exit: 0 landed | 1 refused or setup error (class, WIP/fixup!/squash! commit, dirty tree, dirty file origin
 # changed, detached HEAD, no origin) | 4 rebase conflict (aborted, work stays on its branch) | 5 push rejected
 # (run land again) | 6 landed but the main checkout was not fast-forwarded.
 set -euo pipefail
@@ -34,6 +36,9 @@ git rev-parse -q --verify "refs/remotes/origin/$default" >/dev/null || die 1 "or
 
 class="$(git show "origin/$default:AGENTS.md" 2>/dev/null | sed -n 's/^\*\*Class:\*\* *`\{0,1\}\([a-z_-]*\).*/\1/p' | head -1)"
 [ "$class" = personal ] || die 1 "origin/$default AGENTS.md class is '${class:-missing}', not personal: use a PR"
+
+bad="$(git log --format='%h %s' "origin/$default..HEAD" | grep -iE '^[0-9a-f]+ (wip([^a-z]|$)|fixup!|squash!)' | head -1 || true)"
+[ -z "$bad" ] || die 1 "refusing to land unfinished commit: $bad (WIP, fixup! and squash! subjects must be fixed first)"
 
 dirty="$(git diff --name-only HEAD)"
 if [ -n "$dirty" ]; then

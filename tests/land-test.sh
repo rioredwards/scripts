@@ -75,4 +75,16 @@ done
 printf 'm\n' >"$R/m.md"; g "$R" add m.md; g "$R" commit -qm direct
 (cd "$R" && "$L" >/dev/null 2>&1); check "main checkout land" "$?" "0"
 check "main checkout land: pushed" "$(g "$R" rev-parse HEAD)" "$(g "$tmp/r.git" rev-parse main)"
+
+# 6. Unfinished commits (WIP any case, fixup!, squash!) refuse, name the commit, remote unchanged.
+for s in 'wip: half done' 'fixup! work' 'squash! work'; do
+  g "$R" checkout -qb unfinished; printf '%s\n' "$s" >"$R/u.md"; g "$R" add u.md; g "$R" commit -qm "$s"
+  rem="$(g "$tmp/r.git" rev-parse main)"
+  out="$(cd "$R" && "$L" 2>&1 >/dev/null)"; rc=$?
+  check "refuses: $s" "$rc" "1"
+  check "refuses: $s names commit" "$(printf '%s' "$out" | grep -c "$s")" "1"
+  check "refuses: $s remote unchanged" "$(g "$tmp/r.git" rev-parse main)" "$rem"
+  g "$R" checkout -q main; g "$R" branch -qD unfinished
+done
+g "$R" commit -q --allow-empty -m "wipe cache"; (cd "$R" && "$L" >/dev/null 2>&1); check "wipe is not WIP" "$?" "0"
 exit $fail
