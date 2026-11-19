@@ -50,7 +50,7 @@ block=$(awk -v now="$now" '
       t=$0; sub(/^- [0-9:-]+ +/,"",t); sub(/ +·.*/,"",t)
       print win "  " t; exit
     }
-  }' "$journal")
+  }' "$journal") || true
 [ -n "$block" ] || exit 0
 
 echo "Detour check: Rio's planned focus block is running now (${block%%  *}): ${block#*  }. If this session's work is a detour from it, offer Rio a one-line seed issue for the detour and point him back to the block."
