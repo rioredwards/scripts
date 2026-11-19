@@ -154,6 +154,16 @@ check("a run-level failure writes exactly one inbox line, deduped across runs",
 e.done()
 
 e = Env()
+locked = e.dev / "grp"
+locked.chmod(0o000)  # dev-scan cannot list it
+out = e.run(extra=big)
+locked.chmod(0o755)
+check("an unreadable folder under DEV_ROOT is a run-level failure with an inbox line",
+      out.returncode == 2 and not e.calls.exists() and "- status: Worktree sweep failed on all repos: a folder under" in e.inbox_text(),
+      f"{out.returncode} {out.stderr} {e.inbox_text()}")
+e.done()
+
+e = Env()
 out = e.run("--dry-run", extra={"DEV_ROOT": str(e.tmp / "missing")})
 check("dry run run-level failure writes no inbox line, still exits 2", out.returncode == 2 and e.inbox_text() == "", e.inbox_text() + out.stderr)
 e.done()

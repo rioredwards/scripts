@@ -25,7 +25,7 @@ Real runs only happen on a machine that opted in with the marker file
 $HOME/.local/state/dev-sweep/enabled (the plist source syncs to both Macs; the
 marker does not). Without it a real run exits 0 and says so. --dry-run always works.
 
-A run-level failure (a root folder missing) writes one status line too ("failed on
+A run-level failure (a root folder missing or unreadable) writes one status line too ("failed on
 all repos", same dedupe) before exiting 2; a dry run only prints it.
 
 Exit 0 when every repo swept without exit 2 or 3 and every inbox write worked;
@@ -86,11 +86,14 @@ def discover():
         if not os.path.isdir(path):
             raise SetupError(f"{path} is not a directory")
     found = []
-    for first in scan.subdirs(root):
-        if scan.is_main_checkout(first):
-            found.append(first)
-            continue
-        found += [second for second in scan.subdirs(first) if scan.is_main_checkout(second)]
+    try:  # dev-scan's subdirs exits on an unreadable folder; that is a run-level failure too
+        for first in scan.subdirs(root):
+            if scan.is_main_checkout(first):
+                found.append(first)
+                continue
+            found += [second for second in scan.subdirs(first) if scan.is_main_checkout(second)]
+    except SystemExit:
+        raise SetupError(f"a folder under {root} could not be read (dev-scan said why above)")
     found += [extra for extra in extras if scan.is_main_checkout(extra)]
     unique = {}
     for repo in found:
