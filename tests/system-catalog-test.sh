@@ -90,6 +90,9 @@ first = open(OUT).read()
 run()
 check(len(open(OUT).read()) == len(first), "second run overwrites, no growth")
 first = open(OUT).read()
+for bad, err in (("[BROKE] launchd job launchctl - list failed", "match no catalog entry"), ("[BROKE] tool check inventory - check crashed", "unrecognized")):
+    put("Library/Logs/tool-check/2026-11-19.log", "Tool check: (h) 2026-11-19 03:22:15\n\n%s\n" % bad)
+    check((r := run()).returncode != 0 and err in r.stderr and open(OUT).read() == first, "fails loudly, old file kept: " + bad)
 for day in ("18", "19"):
     os.remove(os.path.join(H, "Library/Logs/tool-check/2026-11-%s.log" % day))
 r = run()

@@ -63,7 +63,9 @@ def tool_check_log():
     health = {}
     for line in lines[1:]:
         m = LOG_LINE.match(line)
-        if not m:
+        if not m:  # test suites are not catalog pieces; any other result line in a new shape is an error
+            if re.match(r"\[(ok   |skip |BROKE)\] (?!test suite )", line):
+                raise SystemExit("ERROR: %s: unrecognized result line: %r" % (logs[-1], line))
             continue
         tag, kind, name, msg = m.group(1).strip(), m.group(2), m.group(3), m.group(4) or ""
         if kind == "launchd job":
@@ -77,7 +79,7 @@ def tool_check_log():
     return health, logs[-1], at
 
 def checked(health, kind, name):
-    return health.get((kind, name), (UNCHECKED, "not in the latest tool-check log"))
+    return health.pop((kind, name), (UNCHECKED, "not in the latest tool-check log"))
 
 def skills():
     """Plugin skills, the project manager's skills and Rio's own ~/.claude/skills."""
@@ -186,6 +188,9 @@ def build():
     for g, what in zip(groups, ["skills", "plugins", "hooks", "hook rules", "tools", "launchd jobs", "pm2 processes", "scheduled tasks", "nightly jobs"]):
         if not g and what != "pm2 processes":
             raise SystemExit("ERROR: no %s found" % what)
+    lost = ["%s %s" % k for k, (h, _) in health.items() if h == FAIL]  # e.g. launchctl itself failed
+    if lost:
+        raise SystemExit("ERROR: tool-check failures that match no catalog entry: " + ", ".join(lost))
     return {"generatedAt": datetime.datetime.now().astimezone().isoformat(timespec="seconds"), "host": os.uname().nodename,
             "sources": {"toolCheck": {"file": tilde(log), "at": log_at}}, "entries": [e for g in groups for e in g]}
 
