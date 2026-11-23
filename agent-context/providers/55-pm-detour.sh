@@ -53,4 +53,4 @@ block=$(awk -v now="$now" '
   }' "$journal") || true
 [ -n "$block" ] || exit 0
 
-echo "Detour check: Rio's planned focus block is running now (${block%%  *}): ${block#*  }. If this session's work is a detour from it, offer Rio a one-line seed issue for the detour and point him back to the block."
+echo "Detour check: Rio's planned focus block is running now (${block%%  *}): ${block#*  }. If this session's work is a detour from it, open your next reply with one line that names the block and offers to file the detour as a one-line seed issue, then carry on with whatever Rio chooses."
