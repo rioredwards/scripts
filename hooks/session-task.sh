@@ -7,4 +7,4 @@ set -uo pipefail
 
 INPUT="$(cat)"
 hook_is_delegate "$INPUT" && exit 0
-printf '%s' "$INPUT" | python3 "$HOME/dev/project-manager/scripts/session_task.py" hook "${1:-claude}"
+printf '%s' "$INPUT" | python3 "$HOME/dev/project-manager/scripts/session_task.py" hook "${1:-}"
