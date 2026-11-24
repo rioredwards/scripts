@@ -262,7 +262,9 @@ class RulesTests(unittest.TestCase):
                            ('Okay to merge?', 2),
                            ('Merged? No, the PR waits on CI.', 0),
                            ('Tests pass. Built the age gate.', 0),
-                           ("Kept the key and labeled it.", 0)):
+                           ("Kept the key and labeled it.", 0),
+                           ("The audit found X. Is it worth fixing? Low value.", 0),
+                           ("Ran the suite; which one failed? None.", 0)):
             with self.subTest(text=text):
                 result = self.run_hook("response", {"last_assistant_message": text})
                 self.assertEqual(result.returncode, code, result.stderr)

@@ -494,7 +494,7 @@
         ]
       },
       "match": {
-        "text": "(?i)❓|\\byour (call|pick)\\b|\\b((want|like) me|should|shall (i|we)|(ok|okay) to|approve|which (one|of|do you|should|would)|(can|may) (i|we)|go ahead|do you (want|prefer)|yes ?/ ?no|or (leave|keep|skip|drop|not)|worth)\\b[^?\\n]*\\?|(^|\\n)[^\\w\\n]*(want|build|include|add|bump|kill|merge|fold|re-?run|run|file|close|keep|drop|ship|push|delete|remove|switch|split|start|use|try|open|turn|move|revive|raise|apply|fix|make|land|commit|update|install|restart|send|draft|park|defer|skip|exclude|replace|promote|port|wire|enable|disable|retry|archive|post|resume|queue)\\b[^?\\n]*\\?|▶️[^?\\n]*\\?|\\b(right|ok|okay|yes)\\?"
+        "text": "(?i)❓|\\byour (call|pick)\\b|\\b((want|like) me|should|shall (i|we)|(ok|okay) to|approve|which (do you|should|would)|(can|may) (i|we)|go ahead|do you (want|prefer)|yes ?/ ?no|or (leave|keep|skip|drop|not))\\b[^?\\n]*\\?|(^|\\n)[^\\w\\n]*(want|build|include|add|bump|kill|merge|fold|re-?run|run|file|close|keep|drop|ship|push|delete|remove|switch|split|start|use|try|open|turn|move|revive|raise|apply|fix|make|land|commit|update|install|restart|send|draft|park|defer|skip|exclude|replace|promote|port|wire|enable|disable|retry|archive|post|resume|queue)\\b[^?\\n]*\\?|▶️[^?\\n]*\\?|\\b(right|ok|okay|yes)\\?"
       },
       "unless": "(?i)why you:",
       "do": "remind",
@@ -510,7 +510,7 @@
         ]
       },
       "match": {
-        "text": "(?i)❓|\\byour (call|pick)\\b|\\b((want|like) me|should|shall (i|we)|(ok|okay) to|approve|which (one|of|do you|should|would)|(can|may) (i|we)|go ahead|do you (want|prefer)|yes ?/ ?no|or (leave|keep|skip|drop|not)|worth)\\b[^?\\n]*\\?|(^|\\n)[^\\w\\n]*(want|build|include|add|bump|kill|merge|fold|re-?run|run|file|close|keep|drop|ship|push|delete|remove|switch|split|start|use|try|open|turn|move|revive|raise|apply|fix|make|land|commit|update|install|restart|send|draft|park|defer|skip|exclude|replace|promote|port|wire|enable|disable|retry|archive|post|resume|queue)\\b[^?\\n]*\\?|▶️[^?\\n]*\\?|\\b(right|ok|okay|yes)\\?"
+        "text": "(?i)❓|\\byour (call|pick)\\b|\\b((want|like) me|should|shall (i|we)|(ok|okay) to|approve|which (do you|should|would)|(can|may) (i|we)|go ahead|do you (want|prefer)|yes ?/ ?no|or (leave|keep|skip|drop|not))\\b[^?\\n]*\\?|(^|\\n)[^\\w\\n]*(want|build|include|add|bump|kill|merge|fold|re-?run|run|file|close|keep|drop|ship|push|delete|remove|switch|split|start|use|try|open|turn|move|revive|raise|apply|fix|make|land|commit|update|install|restart|send|draft|park|defer|skip|exclude|replace|promote|port|wire|enable|disable|retry|archive|post|resume|queue)\\b[^?\\n]*\\?|▶️[^?\\n]*\\?|\\b(right|ok|okay|yes)\\?"
       },
       "do": "remind",
       "text": "Rio set attention to away for this session: nobody will answer, so never end on a question to him. Take the safest reversible path and keep working to done or budget. A real step-5 decision goes to the PM inbox as an `- ask:` line (headless rule); carry on with whatever does not depend on it. Work that needs his yes first (plan approval, big-work scope) waits for it: queue the ask, never treat silence as approval. Nothing irreversible meanwhile."
