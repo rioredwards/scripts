@@ -341,7 +341,7 @@
         "input": "(^|[[:space:];&|(){}`'\\\"/@])railway(/cli)?\\\"?[[:space:]]+(-[^[:space:]]+([[:space:]]+[^-[:space:]][^[:space:]]*)?[[:space:]]+)*((add|agent|api|bucket|buckets|cdn|ca|code|config|connect|delete|rm|remove|deploy|dev|develop|down|environment|env|flag|flags|functions|function|func|fn|funcs|fns|init|new|link|login|logout|run|local|shell|ssh|up|variables|variable|vars|var|volume|volumes|tcp-proxy|unlink|redeploy|restart|redis|sandbox|sandboxes|sbx|scale|postgres|mysql|private-network|outbound-network|project|projects|open|setup|skills|mcp|templates|template|trace|traces|tracing|upgrade|usage|waf)([[:space:];&|)'\\\"]|$)|(deployment|deployments|domain|service)[[:space:]]+(?!(list|ls|logs|status)([[:space:]]|$))[^[:space:]]+)"
       },
       "do": "deny",
-      "text": "BLOCKED: railway CLI is read-only for agents. Writes, deploys, and anything that exposes variables (variables, run, shell, ssh, connect, api) are Rio's. Allowed: railway status, logs, metrics, list, deployment list, service list, domain list, docs. For an approved Straightaway Legacy migration export, use the Legacy repo's skeleton/scripts/export_legacy_migration.py."
+      "text": "BLOCKED: railway CLI is read-only for agents. Writes, deploys, and anything that exposes variables (variables, run, shell, ssh, connect, api) are Rio's. Allowed: railway status, logs, metrics, list, deployment list, service list, domain list, docs. For an approved Straightaway Legacy migration export, follow the Legacy RUNBOOK's scoped read-only procedure."
     },
     {
       "id": "neon-direct-connection",

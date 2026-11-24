@@ -571,15 +571,9 @@ class RulesTests(unittest.TestCase):
                 result = self.run_hook("tool", {"tool_name": tool, "tool_input": inp})
                 self.assertNotIn("deny", result.stdout)
 
-    def test_legacy_migration_export_does_not_open_raw_railway_access(self):
+    def test_raw_railway_access_is_denied_for_claude_and_codex(self):
         for agent, tool, key in (("claude", "Bash", "command"), ("codex", "exec_command", "cmd")):
             with self.subTest(agent=agent):
-                allowed = self.run_hook("tool", {
-                    "tool_name": tool, "tool_input": {
-                        key: "skeleton/.venv/bin/python skeleton/scripts/export_legacy_migration.py",
-                    },
-                }, agent=agent)
-                self.assertNotIn("deny", allowed.stdout)
                 for command in ("railway variable list --json", "railway up",
                                 "railway variable set DATABASE_URL=example"):
                     denied = self.run_hook("tool", {

@@ -90,10 +90,10 @@ plus `list-variables`, so values never reach a transcript. `railway-cli-read-onl
 `deployment list`, `service list`, `domain list`, `docs` stay open. Deny list, not allow
 list, so `railway logs && railway up` cannot slip through. Ledger: L-0114.
 
-For an approved Straightaway Legacy migration export, use the Legacy repo's
-`skeleton/scripts/export_legacy_migration.py`. The exporter runs its fixed
-query in a verified read-only transaction and keeps source credentials inside
-the process. The raw CLI and MCP restrictions still apply.
+For a Rio-approved Straightaway Legacy migration export, follow the Legacy
+RUNBOOK. Use a verified read-only transaction, keep source credentials inside
+the process, and keep one-off export scripts outside the repositories.
+The raw CLI and MCP restrictions still apply.
 
 ## Slack
 
