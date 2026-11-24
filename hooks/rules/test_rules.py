@@ -571,6 +571,25 @@ class RulesTests(unittest.TestCase):
                 result = self.run_hook("tool", {"tool_name": tool, "tool_input": inp})
                 self.assertNotIn("deny", result.stdout)
 
+    def test_legacy_migration_export_does_not_open_raw_railway_access(self):
+        for agent, tool, key in (("claude", "Bash", "command"), ("codex", "exec_command", "cmd")):
+            with self.subTest(agent=agent):
+                allowed = self.run_hook("tool", {
+                    "tool_name": tool, "tool_input": {
+                        key: "skeleton/.venv/bin/python skeleton/scripts/export_legacy_migration.py",
+                    },
+                }, agent=agent)
+                self.assertNotIn("deny", allowed.stdout)
+                for command in ("railway variable list --json", "railway up",
+                                "railway variable set DATABASE_URL=example"):
+                    denied = self.run_hook("tool", {
+                        "tool_name": tool, "tool_input": {key: command},
+                    }, agent=agent)
+                    self.assertIn("railway-cli-read-only", denied.stdout)
+                    self.assertEqual(
+                        json.loads(denied.stdout)["hookSpecificOutput"]["permissionDecision"], "deny",
+                    )
+
     def assert_prod_guard(self, blocked, allowed):
         """blocked: (rule id, tool, command or MCP input); allowed: (tool, command or MCP input)."""
         def payload(tool, cmd):
