@@ -69,5 +69,17 @@ with tempfile.TemporaryDirectory() as tmp:
     ]
     for origin in ('http://host.test:443', 'https://host.test:8447', 'https://host.test.example'):
         assert lookup(origin) == []
+    dev_url = pathlib.Path(scan).with_name('dev-url')
+    def marker_command(*args):
+        return subprocess.check_output([str(dev_url), *args], cwd=work, text=True).strip()
+
+    marker_command('set', 'https://host.test:8447')
+    marker_command('set', 'https://HOST.test:8447/refreshed')
+    assert marker_command() == 'https://HOST.test:8447/refreshed'
+    assert lookup('https://host.test')[0]['lastSeenMs'] == 200000
+    assert lookup('https://host.test:8447')[0]['dir'] == str(work)
+    assert len(marker.read_text().splitlines()) == 2, 'refreshing an origin must not add a history row'
+    marker_command('clear')
+    assert lookup('https://host.test:8447') == []
 print('worktree facts: clean, ignored, locked, untracked, rename, unpushed, unmerged, unknown base passed')
 PY

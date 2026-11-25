@@ -14,8 +14,55 @@ case "${1:-get}" in
     u="${2:-}"
     case "$u" in http://*|https://*) ;; *) echo "dev-url: want a full http(s) URL" >&2; exit 2 ;; esac
     case "$u" in *localhost*|*127.0.0.1*) echo "dev-url: use the tailnet hostname, not localhost (breaks from the other Mac/phone)" >&2; exit 2 ;; esac
-    printf '%s\n' "$u" > "$F"; echo "dev-url: $u" ;;
+    python3 - "$F" "$u" <<'PY' || exit $?
+import os
+import sys
+import tempfile
+from pathlib import Path
+from urllib.parse import urlsplit
+
+marker = Path(sys.argv[1])
+url = sys.argv[2]
+
+def origin(value):
+    try:
+        parts = urlsplit(value)
+        port = parts.port if parts.port is not None else {"http": 80, "https": 443}.get(parts.scheme)
+        return parts.scheme, parts.hostname, port
+    except ValueError:
+        return value
+
+history = []
+try:
+    with marker.open(encoding="utf-8") as existing:
+        previous = existing.readline().rstrip("\n")
+        if previous:
+            mtime_ms = os.fstat(existing.fileno()).st_mtime_ns // 1_000_000
+            history = [f"{mtime_ms}\t{previous}\n", *existing]
+except FileNotFoundError:
+    pass
+
+# The current URL is line one. Keep at most eight earlier origins with their
+# own observation times, so refreshing the current marker cannot age them.
+seen = {origin(url)}
+with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=marker.parent, delete=False) as pending:
+    try:
+        pending.write(url + "\n")
+        for record in history:
+            stamp, _, previous = record.rstrip("\n").partition("\t")
+            key = origin(previous)
+            if stamp.isdecimal() and key not in seen:
+                pending.write(record.rstrip("\n") + "\n")
+                seen.add(key)
+                if len(seen) == 9:
+                    break
+        pending.close()
+        os.replace(pending.name, marker)
+    finally:
+        Path(pending.name).unlink(missing_ok=True)
+PY
+    echo "dev-url: $u" ;;
   clear) rm -f "$F"; echo "dev-url cleared" ;;
-  get) [ -r "$F" ] && cat "$F" || exit 1 ;;
+  get) [ -r "$F" ] && head -n 1 "$F" || exit 1 ;;
   *) echo "usage: dev-url [set <url>|clear]" >&2; exit 2 ;;
 esac

@@ -274,10 +274,17 @@ def cmd_dev_link(url):
                 die(f"cannot locate dev-url marker in {path}")
             try:
                 with open(marker.removesuffix("\n"), encoding="utf-8") as handle:
-                    if http_origin(handle.read().strip()) != origin:
-                        continue
-                    mtime_ms = os.fstat(handle.fileno()).st_mtime_ns // 1_000_000
+                    if http_origin(handle.readline().strip()) == origin:
+                        mtime_ms = os.fstat(handle.fileno()).st_mtime_ns // 1_000_000
+                    else:
+                        mtime_ms = max(
+                            (int(stamp) for stamp, _, saved in (line.strip().partition("\t") for line in handle)
+                             if stamp.isdecimal() and http_origin(saved) == origin),
+                            default=None,
+                        )
             except FileNotFoundError:
+                continue
+            if mtime_ms is None:
                 continue
             matches.append({
                 "dir": path,
