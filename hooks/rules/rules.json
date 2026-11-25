@@ -423,6 +423,16 @@
       "text": "BLOCKED: distributor Raw tabs (Springboard-Raw, Columbia-Full-Raw, ...) hold exports Rio pastes by hand. Never write them (API, gws, gog, gspread, scripts); give Rio paste steps instead. Reads are fine."
     },
     {
+      "id": "sheet-notes-for-readers",
+      "on": "tool",
+      "match": {
+        "tool": "^(Bash|Monitor|exec_command|shell|Write|Edit|MultiEdit|NotebookEdit)$|apply_patch$|^mcp__.*(update_spreadsheet|batch_?update)",
+        "content": "(?s)(?=.*[\"',(]note\\\\?[\"',)])(?=.*(?i:updatecells|batch_?update|update_spreadsheet))|\\.setNotes?\\(|(?:update|insert)_notes?\\("
+      },
+      "do": "remind",
+      "text": "You're writing a spreadsheet cell note. A note is for the person reading that cell, not your audit log. Write one or two plain sentences on what they need to know or do, e.g. \"Uses last year's $11.46 rate; 2026 price not set yet.\" Leave out row numbers, invoice lists, cell references, raw URLs, and method: report that trace to Rio, or link one labeled source. If the reader needs nothing, skip the note; a bad note is worse than none. More: ui:sheets ref/copy.md."
+    },
+    {
       "id": "tooling-must-still-run",
       "on": "tool",
       "match": {

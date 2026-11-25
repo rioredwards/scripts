@@ -929,6 +929,34 @@ class RulesTests(unittest.TestCase):
                 out = self.run_hook("tool", {"tool_name": tool, "tool_input": inp})
                 self.assertNotIn("Raw tabs", out.stdout)
 
+    def test_sheet_notes_get_reader_reminder(self):
+        """Writing a cell note reminds the agent notes are for readers, not audit trails (Nov 2026)."""
+        cells = {"updateCells": {"rows": [{"values": [{"note": "QuickBooks CSV rows 10, 12"}]}], "fields": "note"}}
+        reminded = [
+            ("mcp__15d3f519-e889-4356-8b0c-87d349a3deb2__update_spreadsheet", {"spreadsheetId": "X", "requests": [cells]}),
+            ("Bash", {"command": "gws sheets spreadsheets batchUpdate --json '" + json.dumps({"requests": [cells]}) + "'"}),
+            ("Bash", {"command": "python3 - <<'PY'\nreq = {'updateCells': {'rows': [{'values': [{'note': note}]}]}}\nservice.spreadsheets().batchUpdate(body=b)\nPY"}),
+            ("Write", {"file_path": "/tmp/x.gs", "content": "sheet.getRange('A1').setNote('x');"}),
+            ("Write", {"file_path": "/tmp/x.py", "content": "ws.update_note('A1', 'x')"}),
+            # Codex helper shape that wrote the Oct 2026 COGS audit-trail notes.
+            ("Bash", {"command": "cat > a.py <<'PY'\ndef cell(value=None, note=None):\n    result['note'] = note\nplan.append({'updateCells': {'fields': 'userEnteredValue,note'}})\nPY"}),
+        ]
+        quiet = [
+            ("Bash", {"command": "gws sheets spreadsheets values get --params '{\"range\":\"Notes!A1:B9\"}'"}),
+            ("Bash", {"command": "gws sheets spreadsheets get --params '{\"fields\":\"sheets(data(rowData(values(note))))\"}'"}),
+            ("Bash", {"command": "jq '.note' notes.json"}),
+            ("Write", {"file_path": "/tmp/notes.md", "content": "Spreadsheets need fewer notes: keep them short."}),
+        ]
+        for tool, inp in reminded:
+            with self.subTest(reminded=tool):
+                out = self.run_hook("tool", {"tool_name": tool, "tool_input": inp})
+                self.assertIn("not your audit log", out.stdout)
+                self.assertNotIn('"deny"', out.stdout)
+        for tool, inp in quiet:
+            with self.subTest(quiet=inp):
+                out = self.run_hook("tool", {"tool_name": tool, "tool_input": inp})
+                self.assertNotIn("not your audit log", out.stdout)
+
     def test_system_edits_route_to_system_skill(self):
         """Edit/Write into Rio's system files get the utils:system nudge; other paths do not."""
         hit = [
