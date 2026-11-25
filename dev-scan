@@ -8,6 +8,7 @@ ssh, and the answers describe the machine it ran on.
   dev-scan apps              # every runnable repo under ~/dev
   dev-scan worktrees <dir>   # every live checkout of that repo
   dev-scan scripts <dir>     # everything runnable in that checkout
+  dev-scan dev-link <origin> # checkouts that recorded this dev server origin
 
 Every subcommand prints a JSON array on stdout and nothing else. Nothing to
 report is an empty array, not an error. A real failure (no ~/dev, not a repo)
@@ -22,6 +23,7 @@ import os
 import re
 import subprocess
 import sys
+from urllib.parse import urlsplit
 
 # dev-up's own detection order, mirrored so this offers exactly what dev-up
 # will actually run. Drifting from it would name a start command that starts
@@ -122,12 +124,11 @@ def last_commit(path):
         return 0
 
 
-def cmd_apps():
-    """Every runnable repo, most recently committed first.
+def main_checkout_dirs():
+    """Every main checkout under the dev root.
 
     One level under ~/dev, then one level inside anything that is not itself a
-    repo, because related repos get grouped in a container dir. Repos with
-    nothing startable are left out: this list exists to run things.
+    repo, because related repos get grouped in a container dir.
     """
     candidates = []
     for path in subdirs(dev_root()):
@@ -136,9 +137,13 @@ def cmd_apps():
         else:
             candidates.extend(child for child in subdirs(path) if is_main_checkout(child))
 
+    return candidates
+
+
+def cmd_apps():
     apps = [
         {"name": os.path.basename(path), "dir": path, "lastCommit": last_commit(path)}
-        for path in candidates
+        for path in main_checkout_dirs()
         if start_command(path)
     ]
     apps.sort(key=lambda app: -app["lastCommit"])
@@ -189,15 +194,15 @@ def git_facts(path, base):
     return {**facts, "unpushed": unpushed, "ahead": ahead, "behind": behind, "base": base.removeprefix("origin/")}
 
 
-def cmd_worktrees(repo_dir):
-    """Every live checkout, main first, then most recently committed.
+def registered_worktrees(repo_dir, detached_as_hash=False):
+    """Every live checkout listed by Git, including paths outside ~/dev.
 
     `git worktree list` is the only honest source. Three directory naming
     conventions coexist on disk and none reliably encodes the branch, so names
     are never parsed. Entries git marks prunable, or whose directory is gone,
-    are dropped. Each row carries what deleting it would lose (see git_facts).
+    are dropped.
     """
-    out = git(repo_dir, "worktree", "list", "--porcelain")
+    out = git(repo_dir, "worktree", "list", "--porcelain", "-z")
     if out is None:
         die(f"not a git repo: {repo_dir}")
 
@@ -217,24 +222,70 @@ def cmd_worktrees(repo_dir):
             )
         current.clear()
 
-    for line in out.split("\n"):
+    for line in out.split("\0"):
         if line.startswith("worktree "):
             flush()
             current["dir"] = line[len("worktree ") :]
         elif line.startswith("branch refs/heads/"):
             current["branch"] = line[len("branch refs/heads/") :]
+        elif detached_as_hash and line.startswith("HEAD "):
+            current["branch"] = line[len("HEAD ") :]
         elif line.startswith("prunable") or line == "bare":
             current["skip"] = True
         elif line == "locked" or line.startswith("locked "):
             current["locked"] = True
     flush()
+    return worktrees
 
+
+def cmd_worktrees(repo_dir):
+    worktrees = registered_worktrees(repo_dir)
     head = git(repo_dir, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
     base = head.strip() if head else None
     for worktree in worktrees:
         worktree.update(git_facts(worktree["dir"], base))
     worktrees.sort(key=lambda w: (not w["isMain"], -w["lastCommit"]))
     return worktrees
+
+
+def http_origin(url):
+    try:
+        parts = urlsplit(url)
+        default_port = {"http": 80, "https": 443}.get(parts.scheme)
+        port = parts.port
+    except ValueError:
+        return None
+    if default_port is None or not parts.hostname or parts.username is not None:
+        return None
+    return parts.scheme, parts.hostname, default_port if port is None else port
+
+
+def cmd_dev_link(url):
+    origin = http_origin(url)
+    if origin is None:
+        die("dev-link needs an HTTP(S) origin")
+
+    matches = []
+    for app_dir in main_checkout_dirs():
+        for worktree in registered_worktrees(app_dir, detached_as_hash=True):
+            path = worktree["dir"]
+            marker = git(path, "rev-parse", "--path-format=absolute", "--git-path", "dev-url")
+            if marker is None:
+                die(f"cannot locate dev-url marker in {path}")
+            try:
+                with open(marker.removesuffix("\n"), encoding="utf-8") as handle:
+                    if http_origin(handle.read().strip()) != origin:
+                        continue
+                    mtime_ms = os.fstat(handle.fileno()).st_mtime_ns // 1_000_000
+            except FileNotFoundError:
+                continue
+            matches.append({
+                "dir": path,
+                "repo": os.path.basename(app_dir),
+                "branch": worktree["branch"],
+                "lastSeenMs": mtime_ms,
+            })
+    return sorted(matches, key=lambda match: -match["lastSeenMs"])
 
 
 def titleize(name):
@@ -312,8 +363,12 @@ def main(argv):
         if not args:
             die("scripts needs a checkout directory")
         result = cmd_scripts(os.path.abspath(os.path.expanduser(args[0])))
+    elif command == "dev-link":
+        if len(args) != 1:
+            die("dev-link needs an HTTP(S) origin")
+        result = cmd_dev_link(args[0])
     else:
-        die(f"unknown command {command}. Try: apps, worktrees <dir>, scripts <dir>")
+        die(f"unknown command {command}. Try: apps, worktrees <dir>, scripts <dir>, dev-link <origin>")
 
     print(json.dumps(result))
     return 0

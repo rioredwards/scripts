@@ -3,11 +3,13 @@
 set -eu
 root="$(cd "$(dirname "$0")/.." && pwd)"
 python3 - "$root/dev-scan" <<'PY'
-import json, pathlib, subprocess, sys, tempfile
+import json, os, pathlib, subprocess, sys, tempfile
 scan = sys.argv[1]
 with tempfile.TemporaryDirectory() as tmp:
     root = pathlib.Path(tmp).resolve()
-    repo, remote, work = (root / p for p in ('repo', 'remote', 'work tree'))
+    dev = root / 'dev'
+    dev.mkdir()
+    repo, remote, work = dev / 'repo', root / 'remote', root / 'work tree\nwith quote"'
     def git(path, *args):
         return subprocess.check_output(['git', '-C', str(path), *args], stderr=subprocess.DEVNULL, text=True).strip()
     subprocess.run(['git', 'init', '--bare', '-q', str(remote)], check=True)
@@ -50,5 +52,22 @@ with tempfile.TemporaryDirectory() as tmp:
     unknown = row()
     assert unknown['ahead'] is None and unknown['unpushed'] is None
     assert unknown['ignored'] and unknown['locked'], 'missing base must retain preservation facts'
+    for checkout, url, mtime in (
+        (repo, 'https://host.test/start', 100),
+        (work, 'https://HOST.test:443/another/page', 200),
+    ):
+        marker = pathlib.Path(git(checkout, 'rev-parse', '--path-format=absolute', '--git-path', 'dev-url'))
+        marker.write_text(url + '\n')
+        os.utime(marker, (mtime, mtime))
+    def lookup(origin):
+        return json.loads(subprocess.check_output(
+            [sys.executable, scan, 'dev-link', origin], env={**os.environ, 'DEV_ROOT': str(dev)}, text=True
+        ))
+    assert lookup('https://host.test') == [
+        {'dir': str(work), 'repo': 'repo', 'branch': 'done', 'lastSeenMs': 200000},
+        {'dir': str(repo), 'repo': 'repo', 'branch': 'main', 'lastSeenMs': 100000},
+    ]
+    for origin in ('http://host.test:443', 'https://host.test:8447', 'https://host.test.example'):
+        assert lookup(origin) == []
 print('worktree facts: clean, ignored, locked, untracked, rename, unpushed, unmerged, unknown base passed')
 PY
