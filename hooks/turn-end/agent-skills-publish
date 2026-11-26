@@ -29,15 +29,60 @@ STATE="${AGENT_SKILLS_PUBLISH_STATE:-$HOME/.cache/agent-skills-publish}"
 LOG="$STATE/publish.log"
 
 codex_rollouts() { # rollout -> it plus every descendant subagent rollout from the last 2 days
-  local queue=("$1") id r
-  while [ ${#queue[@]} -gt 0 ]; do
-    r="${queue[0]}"; queue=("${queue[@]:1}"); printf '%s\n' "$r"
-    id="$(head -1 "$r" | jq -r '.payload.id // empty' 2>/dev/null)"
-    [ -n "$id" ] || continue
-    while IFS= read -r child; do queue+=("$child"); done < <(
-      find "$(dirname "$(dirname "$(dirname "$r")")")" -name 'rollout-*.jsonl' -mtime -2 2>/dev/null |
-        xargs grep -l -m1 "\"parent_thread_id\":\"$id\"" 2>/dev/null || true)
-  done
+  printf '%s\n' "$1"
+  python3 - "$1" 2>/dev/null <<'PY' || true
+import json
+import sys
+from collections import defaultdict, deque
+from pathlib import Path
+from time import time
+
+
+def metadata(path):
+    try:
+        with path.open("rb") as rollout:
+            record = json.loads(rollout.readline())
+        if record["type"] == "session_meta":
+            payload = record["payload"]
+            if isinstance(payload, dict):
+                return payload
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    return {}
+
+
+root = Path(sys.argv[1])
+root_id = metadata(root).get("id")
+if not isinstance(root_id, str) or not root_id:
+    sys.exit(0)
+
+children = defaultdict(list)
+cutoff = time() - 2 * 24 * 60 * 60
+for path in root.parent.parent.parent.rglob("rollout-*.jsonl"):
+    try:
+        if path == root or path.stat().st_mtime <= cutoff or not path.is_file():
+            continue
+    except OSError:
+        continue
+    payload = metadata(path)
+    try:
+        parent_id = payload["source"]["subagent"]["thread_spawn"]["parent_thread_id"]
+    except (KeyError, TypeError):
+        continue
+    if isinstance(parent_id, str) and parent_id:
+        children[parent_id].append((path, payload.get("id")))
+
+seen = {root}
+queue = deque([root_id])
+while queue:
+    for path, thread_id in children.pop(queue.popleft(), ()):
+        if path in seen:
+            continue
+        seen.add(path)
+        print(path)
+        if isinstance(thread_id, str) and thread_id:
+            queue.append(thread_id)
+PY
 }
 
 touched() { # agent transcript [checkout] -> checkout-relative paths its own tool calls wrote

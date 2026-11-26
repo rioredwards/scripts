@@ -25,28 +25,41 @@ cat >"$tmp/claude.jsonl" <<J
 J
 check "claude attribution" "$("$P" --touched claude "$tmp/claude.jsonl" | tr '\n' ' ')" "GOALS.md LEDGER.md mine.md "
 
-# Codex: apply_patch headers in the rollout and in a subagent rollout naming it as parent.
-mkdir -p "$tmp/codex/2026/11/16"
-cat >"$tmp/codex/2026/11/16/rollout-main.jsonl" <<J
+# Codex: apply_patch headers in the root, child and grandchild; only metadata establishes parentage.
+rollouts="$tmp/codex/2026/11"
+mkdir -p "$rollouts/16" "$rollouts/17"
+root_rollout="$rollouts/16/rollout-main.jsonl"
+cat >"$root_rollout" <<J
 {"type":"session_meta","payload":{"id":"main-1"}}
 {"type":"response_item","payload":{"name":"apply_patch","input":"*** Begin Patch\n*** Update File: $R/mine.md\n@@\n"}}
 J
-cat >"$tmp/codex/2026/11/16/rollout-child.jsonl" <<J
-{"type":"session_meta","payload":{"id":"child-1","parent_thread_id":"main-1"}}
+cat >"$rollouts/16/rollout-child.jsonl" <<J
+{"type":"session_meta","payload":{"id":"child-1","parent_thread_id":"main-1","source":{"subagent":{"thread_spawn":{"parent_thread_id":"main-1"}}}}}
 {"type":"response_item","payload":{"name":"exec","input":"tools.apply_patch(\"*** Begin Patch\\\\n*** Add File: $R/new.md\\\\n+x\")"}}
 J
-check "codex attribution with subagent" \
-  "$("$P" --touched codex "$tmp/codex/2026/11/16/rollout-main.jsonl" | tr '\n' ' ')" "mine.md new.md "
+cat >"$rollouts/17/rollout-grandchild.jsonl" <<J
+{"type":"session_meta","payload":{"id":"grandchild-1","parent_thread_id":"child-1","source":{"subagent":{"thread_spawn":{"parent_thread_id":"child-1"}}}}}
+{"type":"response_item","payload":{"name":"apply_patch","input":"*** Add File: $R/grandchild.md"}}
+J
+cat >"$rollouts/16/rollout-unrelated.jsonl" <<J
+{"type":"session_meta","payload":{"id":"unrelated-1","source":"cli"}}
+{"type":"event_msg","payload":{"parent_thread_id":"main-1"}}
+{"type":"response_item","payload":{"name":"apply_patch","input":"*** Update File: $R/theirs.md"}}
+J
+check "codex attribution follows descendant metadata" \
+  "$("$P" --touched codex "$root_rollout" | tr '\n' ' ')" "grandchild.md mine.md new.md "
 
 # Publish: only this turn's dirty files commit; another session's staged file stays staged.
 printf 'a2\n' >>"$R/mine.md"; printf 'b2\n' >>"$R/theirs.md"; git -C "$R" add theirs.md
-"$P" claude abcdef123456 "$tmp/claude.jsonl"; check "publish exit" "$?" "0"
-check "commit has only mine" "$(git -C "$R" show --name-only --format= HEAD | tr '\n' ' ')" "mine.md "
+printf 'child\n' >"$R/new.md"; printf 'grandchild\n' >"$R/grandchild.md"
+"$P" codex main-1 "$root_rollout"; check "publish exit" "$?" "0"
+check "commit contains only the root and descendant edits" \
+  "$(git -C "$R" show --name-only --format= HEAD | tr '\n' ' ')" "grandchild.md mine.md new.md "
 check "pushed" "$(git -C "$R" rev-parse HEAD)" "$(git -C "$tmp/remote.git" rev-parse HEAD)"
 check "theirs still staged" "$(git -C "$R" status --porcelain theirs.md)" "M  theirs.md"
 check "marker at head" "$(cat "$tmp/state/published-head")" "$(git -C "$R" rev-parse HEAD)"
 before="$(git -C "$R" rev-parse HEAD)"
-"$P" claude abcdef123456 "$tmp/claude.jsonl"; check "rerun is a no-op" "$(git -C "$R" rev-parse HEAD)" "$before"
+"$P" codex main-1 "$root_rollout"; check "rerun is a no-op" "$(git -C "$R" rev-parse HEAD)" "$before"
 
 # Worktree session (HOOK_CWD in a linked worktree): commits there and lands on origin, other
 # uncommitted files stay put, main checkout fast-forwards. A second transcript (a subagent's
