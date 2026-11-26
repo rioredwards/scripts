@@ -91,4 +91,31 @@ HOOK_CWD="$D" "$P" claude de7ac4ed "$tmp/det.jsonl"; check "detached worktree fa
 check "detached: edit uncommitted" "$(git -C "$D" status --porcelain det.md)" "?? det.md"
 check "detached: remote unchanged" "$(git -C "$tmp/remote.git" rev-parse HEAD)" "$before"
 check "detached: failure logged" "$(grep -c 'detached HEAD' "$tmp/state/publish.log")" "1"
+
+# A peer changes the same line as an unrelated dirty skill. The first push must
+# fail without rebasing, disturbing the unrelated edit, or advancing origin.
+git clone -q "$tmp/remote.git" "$tmp/peer" || exit 1
+printf 'b\npeer edit\n' >"$tmp/peer/theirs.md"
+git -C "$tmp/peer" -c user.email=t@t -c user.name=t commit -qam "edit unrelated skill" || exit 1
+git -C "$tmp/peer" push -q origin HEAD || exit 1
+peer_head="$(git -C "$tmp/peer" rev-parse HEAD)"
+before="$(git -C "$R" rev-parse HEAD)"
+printf 'b\nstaged local edit\n' >"$R/theirs.md"
+git -C "$R" add theirs.md || exit 1
+printf 'unstaged local edit\n' >>"$R/theirs.md"
+dirty_contents="$(git -C "$R" hash-object theirs.md)"
+staged_contents="$(git -C "$R" rev-parse :theirs.md)"
+printf 'publish this edit\n' >>"$R/mine.md"
+LC_ALL=C HOOK_CWD="$R" "$P" claude re7ec7ed "$tmp/claude.jsonl"
+check "rejected push fails" "$?" "1"
+check "rejection logged" "$(grep -c '\[rejected\]' "$tmp/state/publish.log")" "1"
+check "publish failure logged" "$(grep -Fc 'FAIL git push failed. The publish commit remains local.' "$tmp/state/publish.log")" "1"
+check "local commit keeps its original parent" "$(git -C "$R" rev-parse HEAD^)" "$before"
+check "local commit has only mine" "$(git -C "$R" show --name-only --format= HEAD | tr '\n' ' ')" "mine.md "
+check "only the original unrelated edit is dirty" "$(git -C "$R" status --porcelain)" "MM theirs.md"
+check "unrelated working file is byte-for-byte unchanged" "$(git -C "$R" hash-object theirs.md)" "$dirty_contents"
+check "unrelated staged contents are unchanged" "$(git -C "$R" rev-parse :theirs.md)" "$staged_contents"
+check "no autostash was left" "$(git -C "$R" stash list)" ""
+check "remote still at peer commit" "$(git -C "$tmp/remote.git" rev-parse HEAD)" "$peer_head"
+check "marker did not advance" "$(cat "$tmp/state/published-head")" "$before"
 exit $fail

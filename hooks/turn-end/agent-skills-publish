@@ -155,14 +155,13 @@ publish() { # checkout files -> 1. re-attribute under the lock, 2. bump, validat
     -m "Auto-published at turn end by agent-skills-publish." -- "${files[@]}" >>"$LOG" 2>&1 ||
     fail "git commit"
   if [ "$root" != "$REPO" ]; then
-    # Exit 5 is a rejected push (origin moved after land's fetch): land again once,
-    # as the main-checkout path pulls and pushes again. Anything else needs a person.
+    # Exit 5 is a rejected push (origin moved after land's fetch): land again once.
+    # Anything else needs a person.
     "${SCRIPTS:-$HOME/scripts}/land" --autostash >>"$LOG" 2>&1 || code=$?
     if [ "$code" = 5 ]; then code=0; "${SCRIPTS:-$HOME/scripts}/land" --autostash >>"$LOG" 2>&1 || code=$?; fi
     [ "$code" = 0 ] || fail "land from $root (exit $code, see land in $LOG); the commit waits on its branch"
-  elif ! git push -q >>"$LOG" 2>&1; then
-    git pull -q --rebase --autostash >>"$LOG" 2>&1 || fail "pull --rebase before push"
-    git push -q >>"$LOG" 2>&1 || fail "git push"
+  else
+    git push -q >>"$LOG" 2>&1 || fail "git push failed. The publish commit remains local."
   fi
 }
 
