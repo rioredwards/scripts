@@ -111,6 +111,40 @@ class SharedHooks(unittest.TestCase):
             marker.unlink(missing_ok=True)
             stamp.unlink(missing_ok=True)
 
+    def test_loop_reminders_isolate_sessions_in_one_checkout(self):
+        with tempfile.TemporaryDirectory() as checkout:
+            subprocess.run(['git', 'init', '-q', checkout], check=True, timeout=15)
+            stale = 'unrelated:prototype'
+            (Path(checkout) / '.git' / 'claude-loop-plan').write_text(stale)
+            sessions = {phase: f'loop-isolation-{os.getpid()}-{phase}'
+                        for phase in ('plan', 'validate')}
+            for phase, sid in sessions.items():
+                marker = Path('/tmp') / f'claude-loop-phase-{sid}'
+                stamp = Path('/tmp') / f'claude-loop-remind-{sid}'
+                self.addCleanup(marker.unlink, missing_ok=True)
+                self.addCleanup(stamp.unlink, missing_ok=True)
+                marker.write_text(phase)
+
+            for phase, sid in sessions.items():
+                with self.subTest(phase=phase):
+                    payload = {'session_id': sid, 'cwd': checkout}
+
+                    r = self.run_hook('loop-reminder.sh', payload, LOOP_REMINDER_INTERVAL_SECS='300')
+                    self.assertEqual(r.returncode, 0, r.stderr)
+                    context = json.loads(r.stdout)['hookSpecificOutput']['additionalContext']
+                    self.assertIn(f'last phase skill loaded: {phase}.', context)
+                    self.assertNotIn(stale, context)
+                    r = self.run_hook('loop-reminder.sh', payload, LOOP_REMINDER_INTERVAL_SECS='300')
+                    self.assertEqual(r.stdout, '')
+
+                    r = self.run_hook('compact-reanchor.sh', payload)
+                    self.assertEqual(r.returncode, 0, r.stderr)
+                    self.assertIn(f'Last phase skill loaded: {phase}.', r.stdout)
+                    self.assertNotIn(stale, r.stdout)
+                    for phrase in ('checkpoint with Rio', 'attention: away', 'plan of record',
+                                   'current chat', 'route, scope, and timebox'):
+                        self.assertIn(phrase, r.stdout)
+
     def test_compaction_asks_for_a_scope_checkpoint(self):
         """Compaction only happens deep into long work, so it is the trigger for Rio's
         scope check-in. Delegates report to an agent, not Rio, so they stay quiet."""

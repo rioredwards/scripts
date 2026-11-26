@@ -32,19 +32,12 @@ case "$PHASE" in
   ''|complete|retro) exit 0 ;;
 esac
 
-# Declared composition (phases + routes) from $GIT_DIR/claude-loop-plan, if the loop wrote one.
-CWD="$(printf '%s' "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)"
-COMP=""
-if [ -n "$CWD" ]; then
-  GD="$(git -C "$CWD" rev-parse --absolute-git-dir 2>/dev/null)" || GD=""
-  [ -n "$GD" ] && [ -r "$GD/claude-loop-plan" ] && COMP="$(head -c 400 "$GD/claude-loop-plan" 2>/dev/null)"
-fi
-
 cat <<EOF
-🚨 Context was just compacted mid-core:loop. Last phase skill loaded: ${PHASE}.${COMP:+ Declared composition: ${COMP}. Hold the declared depth; re-route only with a stated reason.}
+🚨 Context was just compacted mid-core:loop. Last phase skill loaded: ${PHASE}.
 The loop protocol likely got lost in the summary, re-anchor before continuing:
 1. Reload core:loop (Claude: Skill tool; Codex: read SKILL.md).
 2. Load each phase's skill before phase work or delegation.
-3. Re-read the issue (plan of record) per the loop's re-entry steps.
+3. Reopen the plan of record per the loop's re-entry steps (issue or current chat).
+   Recover and hold the agreed route, scope, and timebox.
 EOF
 exit 0
