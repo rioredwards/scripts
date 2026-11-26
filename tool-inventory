@@ -73,6 +73,8 @@ git-quicklog.sh | syntax
 git-sync | syntax
 icloud-wait-uploaded | syntax
 install-git-hooks.sh | syntax
+land | syntax
+macbook-deals | syntax
 maintenance-doctor.sh | syntax
 narration-context | syntax
 narration-spoken | syntax
