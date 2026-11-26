@@ -50,6 +50,34 @@ class Trial(unittest.TestCase):
         transcript.write_text(json.dumps({'type':'session_meta','payload':{'source':{'subagent':{'thread_spawn':{'parent_thread_id':'root'}}}}})+'\n')
         for _ in range(21): self.assertIsNone(self.call(payload=dict(self.payload,transcript_path=str(transcript))))
         self.assertEqual(self.call('status')['sessions'],{})
+    def fire_with(self, extra):
+        result = None
+        for _ in range(20): result = self.call(payload=dict(self.payload,**extra))
+        return result
+    def test_automated_turns_are_skipped_but_rio_turns_count(self):
+        self.enable()
+        def lines(*rows): return ''.join(json.dumps(r)+'\n' for r in rows)
+        def claude(text): return {'type':'user','message':{'role':'user','content':text}}
+        def codex(trigger): return {'type':'event_msg','payload':{'type':'task_started','turn_attribution':{'turn_trigger':trigger}}}
+        tool = {'type':'user','message':{'role':'user','content':[{'type':'tool_result','content':'x'}]}}
+        def transcript(name, *rows):
+            t = self.home/name; t.write_text(lines(*rows)); return str(t)
+        mem = self.home/'.codex/memories'; mem.mkdir(parents=True)
+        skipped = {
+            'claude scheduled': dict(transcript_path=transcript('a.jsonl', claude('<scheduled-task name="x">\nrun'), tool, claude('This session is being continued from a previous conversation'), tool)),
+            'claude scheduled prompt': dict(prompt='<scheduled-task name="x">'),
+            'codex automation': dict(transcript_path=transcript('b.jsonl', codex('composer'), codex('automation_cron_scheduled'))),
+            'codex heartbeat': dict(transcript_path=transcript('c.jsonl', codex('automation_heartbeat_scheduled'))),
+            'codex automation prompt': dict(prompt='Automation: nightly\nAutomation ID: x'),
+            'memory job': dict(cwd=str(mem)),
+        }
+        for name, extra in skipped.items():
+            for _ in range(21): self.assertIsNone(self.call(payload=dict(self.payload,**extra)), name)
+        self.assertEqual(self.call('status')['sessions'],{})
+        counted = dict(transcript_path=transcript('d.jsonl', claude('<scheduled-task name="x">'), claude('fix the bug please'), tool))
+        counted2 = dict(transcript_path=transcript('e.jsonl', codex('automation_heartbeat_scheduled'), codex('composer')))
+        for sid, extra in (('r1',counted), ('r2',counted2)):
+            self.assertIsNotNone(self.fire_with(dict(extra,session_id=sid)))
     def test_bound_and_disable(self):
         self.enable()
         for i in range(70): self.call(payload=dict(self.payload,session_id=str(i)))

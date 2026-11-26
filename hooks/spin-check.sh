@@ -14,6 +14,50 @@ root = pathlib.Path.home()/'.local/state'
 path = root/'spin-check-trial.json'
 args = sys.argv[1:]
 now = int(time.time())
+
+def reverse_lines(file, limit=64<<20):
+    # Newest lines first, reading blocks from the end so long transcripts stay cheap.
+    with open(file,'rb') as f:
+        pos = f.seek(0,2); tail = b''; read = 0
+        while pos > 0 and read < limit:
+            step = min(1<<18,pos); pos -= step; read += step
+            f.seek(pos)
+            parts = (f.read(step)+tail).split(b'\n')
+            tail = parts[0]
+            for line in reversed(parts[1:]):
+                if line.strip(): yield line
+        if pos == 0 and tail.strip(): yield tail
+def is_automated(payload):
+    # Scheduled tasks, Codex automations and Codex memory jobs are not Rio's turns. Judged per turn.
+    cwd = os.path.realpath(payload.get('cwd') or '')
+    memories = os.path.realpath(str(pathlib.Path.home()/'.codex/memories'))
+    if cwd == memories or cwd.startswith(memories+os.sep):
+        return True
+    prompt = (payload.get('prompt') or '').lstrip()
+    if prompt.startswith(('<scheduled-task','<heartbeat>','Automation:')):
+        return True
+    tp = payload.get('transcript_path')
+    if not tp or not os.path.isfile(tp):
+        return False
+    for raw in reverse_lines(tp):
+        if b'task_started' not in raw and b'"user"' not in raw:
+            continue  # cheap prefilter: most lines are neither
+        d = json.loads(raw)
+        body = d.get('payload') if isinstance(d.get('payload'),dict) else {}
+        if body.get('type') == 'task_started':
+            # Codex: the newest turn's trigger says who started it (composer = Rio).
+            return str((body.get('turn_attribution') or {}).get('turn_trigger','')).startswith('automation')
+        if d.get('type') == 'user' and isinstance(d.get('message'),dict):
+            content = d['message'].get('content')
+            if isinstance(content,list):
+                content = ''.join(b.get('text','') for b in content if isinstance(b,dict) and b.get('type')=='text')
+            if not isinstance(content,str) or not content.strip():
+                continue  # tool results
+            content = content.lstrip()
+            if d.get('isMeta') or content.startswith(('<task-notification','<system-reminder','This session is being continued')):
+                continue
+            return content.startswith('<scheduled-task')
+    return False
 if not args and not path.exists():
     sys.exit(0)
 root.mkdir(parents=True, exist_ok=True)
@@ -56,6 +100,8 @@ with (root/'spin-check-trial.lock').open('a') as lock:
             sid = payload.get('session_id')
             event = payload.get('hook_event_name')
             if not sid or event not in ('PostToolUse','UserPromptSubmit'):
+                sys.exit(0)
+            if is_automated(payload):
                 sys.exit(0)
             session = state['sessions'].setdefault(sid,dict(count=0,last_fire=0,pending=None))
             session['touched'] = now
