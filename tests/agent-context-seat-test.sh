@@ -68,8 +68,25 @@ check "ssh down: last error line"    "Could not check MacBook Air (ssh: connect 
 out="$(PATH="$stub:$PATH" STUB_SSH=silent SEAT_REMOTE_ONLINE=true SEAT_LOCAL_IDLE=600 "$seat")"
 check "ssh silent fail: not phone"   "Could not check MacBook Air (ssh exited 1 with no output)" "$out"
 
+out="$(SEAT_HOST=rios-macbook-air SEAT_LOCAL_IDLE=4 SEAT_REMOTE_IDLE=90 "$seat")"
+check "both Macs: MacBook takeable"  "Rio is typing here, but the Mac Mini, his main screen, is also in use (input 1m ago), so this MacBook is an agent workstation: open windows and drive the pointer here" "$out"
+
+out="$(SEAT_HOST=rios-macbook-air SEAT_LOCAL_IDLE=4 SEAT_REMOTE_IDLE=3600 "$seat")"
+check "MacBook only: here"           "Seat: MacBook Air. Rio is typing here, GUI side effects land on his screen." "$out"
+check "MacBook only: no takeover"    "!workstation" "$out"
+
+out="$(SEAT_HOST=rios-macbook-air SEAT_LOCAL_IDLE=4 SEAT_REMOTE_ERR="ssh: timed out" "$seat")"
+check "Mini unreachable: loud, no takeover" "Could not check whether the Mac Mini (his main screen) is also in use (ssh: timed out), so do not take over" "$out"
+
+out="$(SEAT_LOCAL_IDLE=4 SEAT_REMOTE_IDLE=3 "$seat")"
+check "typing on Mini: no takeover"  "!workstation" "$out"
+
 out="$(SEAT_HOST=rios-macbook-air SEAT_LOCAL_IDLE=600 SEAT_REMOTE_IDLE=2 "$seat")"
-check "from MacBook: Mini named"     "Seat: Mac Mini" "$out"
+check "at Mini, MacBook beside: workstation" "Seat: Mac Mini. Rio is at the Mac Mini, his main screen; this MacBook beside it had input 10m ago, so this MacBook is an agent workstation" "$out"
+
+out="$(SEAT_HOST=rios-macbook-air SEAT_LOCAL_IDLE=3600 SEAT_REMOTE_IDLE=2 "$seat")"
+check "at Mini, MacBook unused: not him" "Seat: Mac Mini. Rio is typing on the Mac Mini, not this Mac" "$out"
+check "at Mini, MacBook unused: no workstation" "!workstation" "$out"
 
 out="$(SEAT_LOCAL_IDLE=4 "$seat" --machine)"
 check "--machine: Machine line"      "Machine: Mac Mini" "$out"

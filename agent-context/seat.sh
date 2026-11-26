@@ -18,12 +18,18 @@
 #
 # Other Mac unreachable and offline on Tailscale = asleep, so not him either.
 #
+# Both Macs in use (one now, the other within BOTH_WINDOW): the Mini is his
+# main screen and the MacBook is an agent workstation, to spread RAM and give
+# agents a screen he can watch (Rio, 2026-11-26). Typing on the MacBook
+# therefore also asks the Mini; typing on the Mini needs no SSH.
+#
 # Test seams: SEAT_HOST, SEAT_LOCAL_IDLE, SEAT_REMOTE_IDLE, SEAT_REMOTE_ERR,
 # SEAT_REMOTE_ONLINE.
 
 set -euo pipefail
 
 THRESHOLD=60 # seconds of idle after which Rio is not at that Mac
+BOTH_WINDOW=1200 # the other Mac used within this (its display-sleep time) = on both Macs
 
 mode="${1:-}"
 case "$mode" in ''|--machine|--hook) ;; *) echo "seat.sh: unknown flag: $mode" >&2; exit 1 ;; esac
@@ -60,24 +66,38 @@ Screen Sharing. Do not hang silently or build workarounds."
 # (a tie goes to the other Mac, where the input started).
 shared=${SEAT_SCREEN_SHARED:-$(netstat -an -p tcp | awk '$4 ~ /[.]5900$/ && $6 == "ESTABLISHED" { f = 1 } END { print f ? 1 : 0 }')}
 
-here="Seat: $machine. Rio is typing here, GUI side effects land on his screen."
-if [ "$local_idle" -lt "$THRESHOLD" ] && [ "$shared" = 0 ]; then
-  seat=$here
-else
+# Sets remote_idle (seconds) or remote_err for the other Mac.
+query_other() {
   remote_idle=${SEAT_REMOTE_IDLE:-}
   remote_err=${SEAT_REMOTE_ERR:-}
-  if [ -z "$remote_idle" ] && [ -z "$remote_err" ]; then
-    # MACBOOK_NO_WAKE: the Mini's ssh config runs macbook-wake before connecting,
-    # which probes for 5s and waits up to 30s on a sleeping MacBook (past the hook
-    # timeout). A sleeping MacBook should read as Unknown, not be woken per prompt.
-    if out=$(MACBOOK_NO_WAKE=1 ssh -n -o BatchMode=yes -o ConnectTimeout=2 "$other_ssh" "$ioreg_cmd" 2>&1); then
-      remote_idle=$(idle_from_ioreg "$out" 2>&1) || { remote_err=$remote_idle; remote_idle=""; }
-    else
-      rc=$?
-      remote_err=${out##*$'\n'}
-      remote_err=${remote_err:-ssh exited $rc with no output}
+  [ -z "$remote_idle$remote_err" ] || return 0
+  local out rc
+  # MACBOOK_NO_WAKE: the Mini's ssh config runs macbook-wake before connecting,
+  # which probes for 5s and waits up to 30s on a sleeping MacBook (past the hook
+  # timeout). A sleeping MacBook should read as Unknown, not be woken per prompt.
+  if out=$(MACBOOK_NO_WAKE=1 ssh -n -o BatchMode=yes -o ConnectTimeout=2 "$other_ssh" "$ioreg_cmd" 2>&1); then
+    remote_idle=$(idle_from_ioreg "$out" 2>&1) || { remote_err=$remote_idle; remote_idle=""; }
+  else
+    rc=$?
+    remote_err=${out##*$'\n'}
+    remote_err=${remote_err:-ssh exited $rc with no output}
+  fi
+}
+
+here="Seat: $machine. Rio is typing here, GUI side effects land on his screen."
+workstation="so this MacBook is an agent workstation: open windows and drive the pointer here."
+if [ "$local_idle" -lt "$THRESHOLD" ] && [ "$shared" = 0 ]; then
+  seat=$here
+  if [ "$machine" = "MacBook Air" ]; then
+    query_other
+    if [ -n "$remote_err" ]; then
+      seat="$here Could not check whether the Mac Mini (his main screen) is also in use ($remote_err), so do not take over this screen."
+    elif [ "$remote_idle" -lt "$BOTH_WINDOW" ]; then
+      seat="Seat: MacBook Air. Rio is typing here, but the Mac Mini, his main screen, is also in use (input $((remote_idle / 60))m ago), $workstation"
     fi
   fi
+else
+  query_other
   if [ -n "$remote_err" ]; then
     online=${SEAT_REMOTE_ONLINE:-$(/Applications/Tailscale.app/Contents/MacOS/Tailscale status --json \
       | jq -r --arg h "$other_ts." '.Peer[] | select(.DNSName | startswith($h)) | .Online')}
@@ -95,6 +115,8 @@ skimmable, links tappable. $gui_warning"
   elif [ -n "$remote_err" ]; then
     seat="Seat: Unknown. Could not check $other ($remote_err), so Rio may be \
 there or on his phone. $machine has had no input for $((local_idle / 60))m. $gui_warning"
+  elif [ "$remote_idle" -lt "$THRESHOLD" ] && [ "$machine" = "MacBook Air" ] && [ "$local_idle" -lt "$BOTH_WINDOW" ]; then
+    seat="Seat: Mac Mini. Rio is at the Mac Mini, his main screen; this MacBook beside it had input $((local_idle / 60))m ago, $workstation"
   elif [ "$remote_idle" -lt "$THRESHOLD" ]; then
     seat="Seat: $other. Rio is typing on the $other, not this Mac. $gui_warning"
   else
