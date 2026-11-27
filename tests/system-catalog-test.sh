@@ -54,7 +54,7 @@ def automation(id, status, rrule, created_h_ago=24 * 30, kind="cron"):
 
 
 STATE_DB = os.path.join(H, ".codex/state_5.sqlite")
-UNFINISHED = set()
+UNFINISHED = {}  # (automation, hours ago) -> (last event, rollout age in seconds)
 
 
 def make_db(runs, last_runs=()):
@@ -72,9 +72,10 @@ def make_db(runs, last_runs=()):
         db.execute("INSERT INTO automation_runs VALUES (?,?,?,?,?)", (tid, aid, status, NOW_MS - int(h_ago * HOUR), NOW_MS - int(h_ago * HOUR)))
         rollout = os.path.join(W, "rollouts/%s.jsonl" % tid)
         os.makedirs(os.path.dirname(rollout), exist_ok=True)
-        end = '{"type":"event_msg","payload":{"type":"turn_aborted"}}\n' if (aid, h_ago) in UNFINISHED else '{"type":"event_msg","payload":{"type":"task_complete"}}\n'
+        event, age = UNFINISHED.get((aid, h_ago), ("task_complete", 60))
         with open(rollout, "w") as rf:
-            rf.write('{"type":"session_meta"}\n' + end)
+            rf.write('{"type":"session_meta"}\n' + ('{"type":"event_msg","payload":{"type":"%s"}}\n' % event if event else ""))
+        os.utime(rollout, (NOW_MS // 1000 - age, NOW_MS // 1000 - age))
         st.execute("INSERT INTO threads VALUES (?,?)", (tid, rollout))
     for aid, h_ago in last_runs:
         db.execute("INSERT INTO automations VALUES (?,?)", (aid, NOW_MS - int(h_ago * HOUR)))
@@ -94,10 +95,14 @@ automation("a-weekly", "ACTIVE", weekly_mon)
 automation("a-paused-stale", "PAUSED", daily)
 automation("a-abort", "ACTIVE", daily)
 automation("a-abort-old", "ACTIVE", daily)
+automation("a-running", "ACTIVE", daily)
+automation("a-stuck", "ACTIVE", daily)
 RUNS = [("a-ok", "ARCHIVED", 60), ("a-ok", "PENDING_REVIEW", 10), ("a-stale", "PENDING_REVIEW", 96), ("a-fail", "PENDING_REVIEW", 40),
         ("a-fail", "FAILED", 10), ("a-weekly", "PENDING_REVIEW", 120), ("a-paused-stale", "PENDING_REVIEW", 500),
-        ("a-abort", "PENDING_REVIEW", 40), ("a-abort", "PENDING_REVIEW", 12), ("a-abort-old", "PENDING_REVIEW", 40), ("a-abort-old", "PENDING_REVIEW", 12)]
-UNFINISHED.update([("a-abort", 12), ("a-abort-old", 40), ("a-paused-stale", 500)])
+        ("a-abort", "PENDING_REVIEW", 40), ("a-abort", "PENDING_REVIEW", 12), ("a-abort-old", "PENDING_REVIEW", 40), ("a-abort-old", "PENDING_REVIEW", 12),
+        ("a-running", "PENDING_REVIEW", 0.1), ("a-stuck", "PENDING_REVIEW", 2)]
+UNFINISHED.update({("a-abort", 12): ("turn_aborted", 60), ("a-abort-old", 40): ("turn_aborted", 60), ("a-paused-stale", 500): ("turn_aborted", 60),
+                   ("a-running", 0.1): (None, 120), ("a-stuck", 2): (None, 3600)})
 make_db(RUNS, [("a-hb", 0.5)])
 put("Library/Logs/tool-check/2026-11-18.log", "Tool check: old (h) 2026-11-18 03:20:00\n\n[BROKE] tool good - exit 9\n")
 put("Library/Logs/tool-check/2026-11-19.log", "\n".join([
@@ -146,7 +151,9 @@ check(nj("a-fail")["health"] == "failing" and "FAILED" in nj("a-fail")["reason"]
 check(nj("a-hb")["health"] == "ok", "heartbeat run is read from automations.last_run_at")
 check(nj("a-weekly")["health"] == "ok", "weekly job 5 days after its run is still inside the window")
 check(nj("a-paused-stale")["health"] == "not checked" and "paused" in nj("a-paused-stale")["reason"], "paused job with a stale run is paused, not failing")
-check(nj("a-abort")["health"] == "failing" and "did not finish" in nj("a-abort")["reason"], "latest run with no task_complete is failing")
+check(nj("a-abort")["health"] == "failing" and "did not finish" in nj("a-abort")["reason"], "latest run with turn_aborted is failing")
+check(nj("a-running")["health"] == "not checked" and "running now" in nj("a-running")["reason"], "unfinished run with a recently written rollout is running now, not failing")
+check(nj("a-stuck")["health"] == "failing" and "never finished" in nj("a-stuck")["reason"], "unfinished run with a stale rollout is failing")
 check(nj("a-abort-old")["health"] == "ok", "an older unfinished run does not matter once the latest finished")
 check(nj("a-paused-stale")["health"] == "not checked" and "paused" in nj("a-paused-stale")["reason"], "paused job's rollout is never read")
 check("no run record" in nj("a-hb")["reason"], "heartbeat with no automation_runs row says its ok is unverified for finishing")
