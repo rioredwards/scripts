@@ -598,6 +598,16 @@
       },
       "do": "deny",
       "text": "BLOCKED: This session is unattended (attention: away), so you may not change the grumbo knobs or the attention knob, acknowledge for Rio, override the gate's inputs, or use a `RIO_*_OK=1` approval prefix (hard rule 3, the referee: his budget limits and the 5-day switch are only his to change; hard rule 1 for the approvals that guard the outside world). Only Rio's own typed instruction does those. Stop at the limit and log a `pm_inbox.py add grumbo status` line. This is an automated gate, not a denial from Rio."
+    },
+    {
+      "id": "grumbo-gate-taps-are-rios",
+      "on": "tool",
+      "match": {
+        "tool": "^(Bash|Monitor|exec_command|shell)$",
+        "input": "(?:(?:^|[\\n;&|(){}`]|\\$\\(|\\b(?:then|do)\\b|-[a-z]*c\\s+[\"']|\\bssh\\s+(?:-\\S+\\s+)*\\S+\\s+[\"']?)\\s*)(?![^\\n;&|]*\\bGRUMBO_GATE_STATE=[\"']?(?![^\\s'\\\"]*\\.local/state)[^\\s'\\\"])(?:(?:env|command|exec|time|nohup|sudo)\\s+|[A-Za-z_][A-Za-z0-9_]*=(?:\\\"[^\\\"]*\\\"|'[^']*'|\\S*)\\s+)*(?:(?:\\S*python3?|bash|sh|zsh)\\s+(?:-[A-Za-z]+\\s+)*)?[\"']?(?:\\S*grumbo-gate|\\$\\{?[A-Za-z_][A-Za-z0-9_]*\\}?)[\"']?(?:\\s+--?[\\w-]+(?:=\\S+|\\s+(?!(?:ack|answer)\\b)(?:\\\"[^\\\"]*\\\"|'[^']*'|[^-\\s]\\S*))?)*\\s+(?:ack|answer)(?=[\\s;&|)'\\\"]|$)"
+      },
+      "do": "deny",
+      "text": "BLOCKED: `grumbo-gate ack` (the Seen tap that restarts the 5-day switch) and `grumbo-gate answer` (Keep or Undo on a trial) are Rio's own taps on Rio's Day, so an agent shell may not run them against real state, in any mode (hard rule 3, the referee: the 5-day switch and the judging are only his to apply). Skip it and log one `pm_inbox.py add grumbo ask` line. `status`, `start`, `end`, `lists` and `answers` stay open, and a test may point the gate at temporary state with GRUMBO_GATE_STATE=<path outside ~/.local/state>. This is an automated gate, not a denial from Rio."
     }
   ]
 }

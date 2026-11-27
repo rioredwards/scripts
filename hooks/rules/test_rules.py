@@ -1144,6 +1144,28 @@ class RulesTests(unittest.TestCase):
             with self.subTest(allowed=command):
                 self.assertFalse(self.denied("Bash", {"command": command}))
 
+    def test_agents_cannot_record_rios_taps(self):
+        # `grumbo-gate ack` / `answer` are Rio's taps (hard rule 3): blocked in every attention mode against real state.
+        g = "~/dev/agent-skills/plugins/utils/skills/grumbo/scripts/grumbo-gate"
+        blocked = ("grumbo-gate ack", "grumbo-gate ack --by rio", "grumbo-gate answer --id L-1 --keep", "grumbo-gate --by rio ack",
+                   g + " ack", "./grumbo-gate answer", "cd x && ../scripts/grumbo-gate ack", "python3 " + g + " ack",
+                   "sh -c 'grumbo-gate ack'", "bash -c \"grumbo-gate answer --keep\"", "G=" + g + "; $G ack", "G=" + g + "; python3 \"$G\" answer",
+                   "GRUMBO_GATE_NOW=2026-01-01 grumbo-gate ack", "GRUMBO_GATE_STATE=$HOME/.local/state/grumbo/gate.json grumbo-gate ack",
+                   "ssh macbook 'grumbo-gate ack'", "echo hi | grumbo-gate ack --by \"Rio R\"", "true\ngrumbo-gate ack")
+        for command in blocked:
+            for attention in ("foreground", "background", "away"):
+                with self.subTest(blocked=command, attention=attention):
+                    self.assertTrue(self.denied("Bash", {"command": command}, attention=attention))
+        allowed = ("grumbo-gate status", "grumbo-gate status --json", "grumbo-gate start --pct 5 --resets 2026-01-01T00:00:00Z", "grumbo-gate end",
+                   "grumbo-gate lists", "grumbo-gate answers", "grumbo-gate answers --done", "python3 " + g + " answers --done", "$G answers --done",
+                   "grumbo-gate experiment --change 'ack the answer' --expected a --check b --result c --kept --commit e",
+                   "grep -n ack " + g, "cat " + g, "echo grumbo-gate ack", "git commit -m 'grumbo-gate ack and answer docs'",
+                   "git log --grep='grumbo-gate ack'", "rg 'grumbo-gate answer' plugins", "GRUMBO_GATE_STATE=/tmp/t/gate.json grumbo-gate ack",
+                   "GRUMBO_GATE_STATE=\"$DIR/gate.json\" grumbo-gate answer --keep", "sh -c 'GRUMBO_GATE_STATE=/tmp/t/g.json grumbo-gate ack'")
+        for command in allowed:
+            with self.subTest(allowed=command):
+                self.assertFalse(self.denied("Bash", {"command": command}, attention="foreground"))
+
     def test_unattended_no_force_push(self):
         for command in ("git push --force", "git push -f origin main", "git push origin +main", "git push --force-with-lease",
                         "git -C ~/dev/x push -uf origin main", "cd x && git push origin main --force"):
