@@ -19,6 +19,17 @@ PROD_GUARD_NOTE = """cat > /tmp/note.md <<'EOF'
 EOF"""
 
 
+# Real files the grumbo-unattended-protected-files rules guard, relative to $HOME.
+PROTECTED_FILES = ("dev/agent-skills/DENY_LIST.md", "dev/agent-skills/GOALS.md",
+                   "dev/agent-skills/plugins/utils/skills/grumbo/scripts/grumbo-gate",
+                   "dev/agent-skills/plugins/utils/skills/grumbo/tests/grumbo-gate.sh",
+                   "scripts/hooks/rules/rules.json", "scripts/agent-knobs.json", "dev/project-manager/HARD_RULES.md")
+
+
+def missing_files(home, rel_paths):
+    return [home / p for p in rel_paths if not (home / p).is_file()]
+
+
 class RulesTests(unittest.TestCase):
     def run_hook(self, kind, payload, agent="claude", delegate=False, attention="foreground", **extra_env):
         env = dict(os.environ, AGENT_RULES_FILE=str(ROOT / "rules.json"), AGENT_ATTENTION=attention, **extra_env)
@@ -1060,15 +1071,23 @@ class RulesTests(unittest.TestCase):
             for name, data in misses:
                 with self.subTest(agent=agent, miss=data):
                     self.assertNotIn("Global rules file", self.run_hook("tool", {"tool_name": name, "tool_input": data}, agent).stdout)
-    # --- grumbo: unattended (attention=away) runs; see NEVER_LIST.md in agent-skills ---
+    # --- grumbo: unattended (attention=away) runs; see DENY_LIST.md in agent-skills ---
 
     def denied(self, tool, tool_input, attention="away"):
         out = self.run_hook("tool", {"tool_name": tool, "tool_input": tool_input}, attention=attention).stdout
         return bool(out) and json.loads(out)["hookSpecificOutput"]["permissionDecision"] == "deny"
 
+    def test_protected_files_exist(self):
+        # A rename or move would silently drop a path pattern's protection: fail loudly instead.
+        home = Path.home()
+        self.assertEqual(missing_files(home, PROTECTED_FILES), [])
+        with self.subTest("a missing file is reported"):
+            self.assertEqual(missing_files(home, PROTECTED_FILES + ("dev/agent-skills/NO_SUCH_FILE.md",)),
+                             [home / "dev/agent-skills/NO_SUCH_FILE.md"])
+
     def test_unattended_cannot_edit_protected_files(self):
         home = "/Users/x"
-        protected = ("/dev/agent-skills/NEVER_LIST.md", "/dev/agent-skills/GOALS.md", "/dev/agent-skills.wt/GOALS.md",
+        protected = ("/dev/agent-skills/DENY_LIST.md", "/dev/agent-skills/GOALS.md", "/dev/agent-skills.wt/GOALS.md",
                      "/scripts/hooks/rules/rules.json", "/scripts/hooks/turn-end/dispatch",
                      "/scripts/agent-knobs.json", "/.config/agent-hooks/local.sh",
                      "/.local/state/grumbo/gate.json", "/dev/agent-skills/plugins/utils/skills/grumbo/scripts/grumbo-gate",
@@ -1084,13 +1103,13 @@ class RulesTests(unittest.TestCase):
                      "/dev/agent-skills/plugins/utils/skills/grumbo/SKILL.md", "/dev/project-manager/GARDEN.md",
                      "/dev/other/GOALS.md"):
             with self.subTest(allowed=path):
-                self.assertFalse(self.denied("Edit", {"file_path": home + path, "new_string": "GOALS.md NEVER_LIST.md"}))
+                self.assertFalse(self.denied("Edit", {"file_path": home + path, "new_string": "GOALS.md DENY_LIST.md"}))
         for attention in ("foreground", "background"):
             with self.subTest(attention=attention):
                 self.assertFalse(self.denied("Write", {"file_path": home + protected[0], "content": "x"}, attention=attention))
 
     def test_unattended_shell_cannot_write_protected_files(self):
-        for command in ("echo x >> NEVER_LIST.md", "sed -i '' s/a/b/ GOALS.md", "cp /tmp/r.json ~/scripts/hooks/rules/rules.json",
+        for command in ("echo x >> DENY_LIST.md", "sed -i '' s/a/b/ GOALS.md", "cp /tmp/r.json ~/scripts/hooks/rules/rules.json",
                         "python3 -c \"open('GOALS.md','w').write('')\"", "trash ~/.local/state/grumbo/gate.json",
                         "git checkout -- GOALS.md", "mv x plugins/utils/skills/grumbo/scripts/grumbo-gate",
                         "echo off > ~/.config/agent-hooks/local.sh", "tee ~/dev/project-manager/HARD_RULES.md < /tmp/x"):

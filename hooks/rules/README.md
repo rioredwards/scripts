@@ -177,8 +177,8 @@ later, MCP sheet tools. Also blocks a call that reads a Raw tab and writes anoth
 ## Unattended grumbo runs
 
 Four `grumbo-unattended-*` deny rules apply only while the session knob `attention` is `away`
-(the grumbo gate sets it on `grumbo-gate start`). They enforce the gaps in `NEVER_LIST.md`
-(agent-skills root): force-push; edits by file tools or shell to the never-list, `GOALS.md`, this
+(the grumbo gate sets it on `grumbo-gate start`). They enforce the gaps in
+`DENY_LIST.md` (agent-skills root): force-push; edits by file tools or shell to it, `GOALS.md`, this
 directory and `hooks/`, the knob files, the gate script and its state, project-manager
 `HARD_RULES.md`; and changing the grumbo or attention knobs, `grumbo-gate ack`, `GRUMBO_GATE_*`
 overrides or a `RIO_*_OK=` prefix. Merge, Slack and production rules above apply always and are
