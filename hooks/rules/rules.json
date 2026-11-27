@@ -584,13 +584,34 @@
       "text": "BLOCKED: This session is unattended (attention: away), so no force-push (hard rule 2, what can't be undone: it deletes history git cannot restore). Pull and rebase or merge instead, push normally, or log a `pm_inbox.py add grumbo ask` line. This is an automated gate, not a denial from Rio."
     },
     {
-      "id": "sealed-grumbo-cases",
+      "id": "sealed-grumbo-cases-shell",
       "on": "tool",
       "match": {
-        "content": "grumbo-cases/hidden"
+        "tool": "^(Bash|Monitor|exec_command|shell)$",
+        "input": "(?:(^|[;&|({`\\n]|\\$\\(|(do|then|else|exec|time|sudo|command|xargs)[[:space:]])[[:space:]]*(cat|ls|ll|find|fd|grep|egrep|fgrep|rg|ag|head|tail|less|more|bat|cp|mv|rm|trash|rsync|tar|zip|tree|du|wc|stat|file|strings|xxd|od|sed|awk|jq|open|cd|pushd|python3?|node|ruby|perl|touch|tee|ln|source|sort|diff)[[:space:]][^\\n]*(state/grumbo-c|state/grumbo[*?\\[]|state/[^[:space:]\"\\x27]*[*?\\[]|[/[:space:]\"\\x27=]grumbo-cases/|\\$\\{?GRUMBO_CASES))|(?:(state/grumbo-c|state/grumbo[*?\\[]|state/[^[:space:]\"\\x27]*[*?\\[]|[/[:space:]\"\\x27=]grumbo-cases/|\\$\\{?GRUMBO_CASES)[^\\n]*(^|[;&|({`\\n]|\\$\\(|(do|then|else|exec|time|sudo|command|xargs)[[:space:]])[[:space:]]*(cat|ls|ll|find|fd|grep|egrep|fgrep|rg|ag|head|tail|less|more|bat|cp|mv|rm|trash|rsync|tar|zip|tree|du|wc|stat|file|strings|xxd|od|sed|awk|jq|open|cd|pushd|python3?|node|ruby|perl|touch|tee|ln|source|sort|diff)([[:space:]]|$))"
       },
       "do": "deny",
-      "text": "BLOCKED: these are grumbo's sealed test cases (agent-skills grumbo ref/cases.md). Agents never read, list, copy or edit them, so they stay a fair check. Use `grumbo-cases hidden-check`, which prints counts only. Only Rio moves cases into the sealed set (`grumbo-cases hidden-apply`)."
+      "text": "BLOCKED: agents reach grumbo's case bank only through `grumbo-cases` (agent-skills grumbo ref/cases.md): `list`, `add`, `hidden-check`, `judge-check`, `measure` and `trim` never print a sealed case, so they stay a fair check. Direct reads of the bank folder by path, variable or glob can reach sealed cases. Only Rio moves cases into the sealed set (`grumbo-cases hidden-apply`). Writing about the path in a commit message, note or edit is fine."
+    },
+    {
+      "id": "sealed-grumbo-cases-files",
+      "on": "tool",
+      "match": {
+        "tool": "^(Read|Grep|Edit|MultiEdit|Write|NotebookEdit)$",
+        "content": "\"(file_path|notebook_path|path)\":\"[^\"]*(state/grumbo-c|state/grumbo[*?\\[]|state/[^\"]*[*?\\[]|/grumbo-cases/)"
+      },
+      "do": "deny",
+      "text": "BLOCKED: agents reach grumbo's case bank only through `grumbo-cases` (agent-skills grumbo ref/cases.md): `list`, `add`, `hidden-check`, `judge-check`, `measure` and `trim` never print a sealed case, so they stay a fair check. Direct reads of the bank folder by path, variable or glob can reach sealed cases. Only Rio moves cases into the sealed set (`grumbo-cases hidden-apply`). Writing about the path in a commit message, note or edit is fine."
+    },
+    {
+      "id": "sealed-grumbo-cases-glob",
+      "on": "tool",
+      "match": {
+        "tool": "^Glob$",
+        "content": "\"(pattern|path)\":\"[^\"]*(state/grumbo-c|state/grumbo[*?\\[]|state/[^\"]*[*?\\[]|/grumbo-cases/)"
+      },
+      "do": "deny",
+      "text": "BLOCKED: agents reach grumbo's case bank only through `grumbo-cases` (agent-skills grumbo ref/cases.md): `list`, `add`, `hidden-check`, `judge-check`, `measure` and `trim` never print a sealed case, so they stay a fair check. Direct reads of the bank folder by path, variable or glob can reach sealed cases. Only Rio moves cases into the sealed set (`grumbo-cases hidden-apply`). Writing about the path in a commit message, note or edit is fine."
     },
     {
       "id": "grumbo-unattended-no-self-unlock",

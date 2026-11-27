@@ -42,17 +42,49 @@ class RulesTests(unittest.TestCase):
             input=json.dumps(payload), text=True, capture_output=True, env=env,
         )
 
-    def test_sealed_grumbo_cases_stay_unread(self):
-        bank = "$HOME/.local/state/grumbo-cases/"
-        for tool, inp in (("Bash", {"command": "ls " + bank + "hidden"}),
-                          ("Bash", {"command": "cat " + bank + "hidden-waiting/c-1/prompt.txt"}),
-                          ("Read", {"file_path": "/Users/x/.local/state/grumbo-cases/hidden/c-1/correction.txt"}),
-                          ("Grep", {"pattern": "x", "path": bank + "hidden"})):
+    def test_grumbo_case_bank_only_through_the_tool(self):
+        bank = "$HOME/.local/state/grumbo-cases"
+        denied = (
+            ("Bash", {"command": "ls " + bank + "/hidden"}),
+            ("Bash", {"command": "cat " + bank + "/hidden-waiting/c-1/prompt.txt"}),
+            ("Bash", {"command": "find " + bank + " -name prompt.txt"}),
+            ("Bash", {"command": "grep -r plain " + bank}),
+            ("Bash", {"command": "grep -r plain ~/.local/state/grumbo-cases/"}),
+            ("Bash", {"command": "cat ~/.local/state/grumbo-c*/hid*/*/correction.txt"}),
+            ("Bash", {"command": "cat ~/.local/state/*/hidden/*/prompt.txt"}),
+            ("Bash", {"command": "cat $GRUMBO_CASES/hidden/c-1/prompt.txt"}),
+            ("Bash", {"command": "ls ${GRUMBO_CASES}"}),
+            ("Bash", {"command": "cd ~/.local/state/grumbo-cases && ls"}),
+            ("Bash", {"command": "for f in " + bank + "/*/*; do cat $f; done"}),
+            ("Bash", {"command": "echo x | xargs cat " + bank + "/hidden/c-1/prompt.txt"}),
+            ("Read", {"file_path": "/Users/x/.local/state/grumbo-cases/hidden/c-1/correction.txt"}),
+            ("Read", {"file_path": "/Users/x/.local/state/grumbo-cases/judge-check.json"}),
+            ("Grep", {"pattern": "x", "path": "/Users/x/.local/state/grumbo-cases"}),
+            ("Glob", {"pattern": "/Users/x/.local/state/grumbo-cases/**/*.txt"}),
+            ("Glob", {"pattern": "*", "path": "/Users/x/.local/state/grumbo-cases/hidden"}),
+            ("Edit", {"file_path": "/Users/x/.local/state/grumbo-cases/index.json", "old_string": "a", "new_string": "b"}),
+        )
+        for tool, inp in denied:
             with self.subTest(blocked=inp):
                 self.assertIn('"deny"', self.run_hook("tool", {"tool_name": tool, "tool_input": inp}).stdout)
-        for cmd in ("grumbo-cases hidden-check", "ls " + bank + "open", "grumbo-cases list"):
-            with self.subTest(allowed=cmd):
-                out = self.run_hook("tool", {"tool_name": "Bash", "tool_input": {"command": cmd}}).stdout
+        allowed = (
+            ("Bash", {"command": "grumbo-cases hidden-check"}),
+            ("Bash", {"command": "grumbo-cases list --complaint L-0071"}),
+            ("Bash", {"command": "GRUMBO_CASES=/tmp/scratch/bank grumbo-cases measure --days 7"}),
+            ("Bash", {"command": "ls /tmp/scratch/bank/open"}),
+            ("Bash", {"command": "git commit -m 'cases live in " + bank + ", outside every repo'"}),
+            ("Bash", {"command": "git commit -m 'grumbo-cases: the bank at ~/.local/state/grumbo-cases/ is guarded' -- ref/cases.md"}),
+            ("Bash", {"command": "echo 'the bank is $GRUMBO_CASES/hidden' >> /tmp/notes.md"}),
+            ("Bash", {"command": "cat <<'EOF' > /tmp/n.md\nBank: ~/.local/state/grumbo-cases/\nEOF"}),
+            ("Edit", {"file_path": "/repo/ref/cases.md", "old_string": "a",
+                      "new_string": "Bank: $HOME/.local/state/grumbo-cases/hidden stays unread"}),
+            ("Write", {"file_path": "/repo/notes.md", "content": "see /Users/x/.local/state/grumbo-cases/hidden"}),
+            ("Read", {"file_path": "/Users/x/dev/agent-skills/plugins/utils/skills/grumbo/scripts/grumbo-cases"}),
+            ("Grep", {"pattern": "grumbo-cases/hidden", "path": "/Users/x/dev/agent-skills"}),
+        )
+        for tool, inp in allowed:
+            with self.subTest(allowed=inp):
+                out = self.run_hook("tool", {"tool_name": tool, "tool_input": inp}).stdout
                 self.assertNotIn('"deny"', out)
 
     def test_agents_never_send_slack(self):
