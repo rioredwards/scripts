@@ -320,7 +320,7 @@
         "tool": "^Bash$",
         "input": "(^|[;&|(\\n`{]|\\$\\()[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*((sudo[[:space:]]+(-[^[:space:]]+[[:space:]]+([^-[:space:];&|][^[:space:];&|]*[[:space:]]+)?)*)|((command|builtin|exec|nohup|time)[[:space:]]+(-[clp]+[[:space:]]+)*))*(ssh[[:space:]]+(-[oplJFiE][[:space:]]+[^[:space:]]+[[:space:]]+|-[^[:space:]]+[[:space:]]+)*[^-[:space:];&|][^[:space:];&|]*[[:space:]]+(--[[:space:]]+)?['\\\"]?)?((sudo[[:space:]]+(-[^[:space:]]+[[:space:]]+([^-[:space:];&|][^[:space:];&|]*[[:space:]]+)?)*)|((command|builtin|exec|nohup|time)[[:space:]]+(-[clp]+[[:space:]]+)*))*(launchctl[[:space:]]+(print|export)([[:space:]]|$)|(\\\\?([^[:space:];&|'\\\"]*/)?(print)?env([[:space:]]+(-u[[:space:]]*[^[:space:]]+|-[^[:space:]]+))*|export([[:space:]]+-p)?|set|(declare|typeset)([[:space:]]+-[A-Za-z]+)*)[[:space:]]*($|\\n|[;&|)}`'\\\"]|[0-9]?>))"
       },
-      "unless": "(grep[[:space:]]+-c|wc[[:space:]]+-|\\|[[:space:]]*(grep|awk|cut|sed|rg)[^|]*(-c\\b|count))",
+      "unless": "\\|[[:space:]]*(grep[[:space:]]+((-[A-Za-z]*c[A-Za-z]*|--count)[[:space:]]+)+[^|;&\\n]*|wc[[:space:]]+-[lcwm]+[[:space:]]*)($|[;&)\\n])",
       "do": "deny",
       "text": "Blocked: this command dumps the whole environment, and Rio's API keys have leaked into agent transcripts twice that way. Never print an environment wholesale. Ask for the one thing you need instead: `launchctl getenv NAME`, `printenv NAME`, or `keyfor NAME`. If you only need a count or a yes/no, pipe through `grep -c` or test the exit status, and never echo a secret value."
     },

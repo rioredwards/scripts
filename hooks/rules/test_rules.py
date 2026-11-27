@@ -856,6 +856,8 @@ class RulesTests(unittest.TestCase):
             "exec env", "time env", "env -0", "env -u FOO", "printenv -0", "sudo -u root env",
             "ssh mini -- env", "export", "export -p", "set", "set | grep KEY", "declare -x",
             "typeset -x", "launchctl export",
+            # A count elsewhere in the command once exempted a real dump (grumbo, 2026-11-27).
+            "env; wc -l x", "env | grep -i account", "set | grep -i account", "env | grep KEY | wc",
         ]
         allowed = [
             "env FOO=bar cmd", "/usr/bin/env bash", "printenv HOME", "env -i FOO=1 sh x",
