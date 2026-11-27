@@ -11,6 +11,8 @@ window its schedule implies); other kinds are "not checked". An unreadable sourc
 exits 1 and leaves the old file untouched. Daily 03:40 via launchd com.rioredwards.system-catalog.
 Test env: SYSTEM_CATALOG_HOME (for ~), SYSTEM_CATALOG_SKILLS, SYSTEM_CATALOG_PM2_JSON (a file),
 SYSTEM_CATALOG_NOW (epoch seconds).
+A nightly job's latest run also counts as failing when its rollout file (found via ~/.codex/state_5.sqlite)
+has no task_complete event: the run started but did not finish.
 """
 import argparse, datetime, glob, json, os, plistlib, re, sqlite3, subprocess, sys, time
 
@@ -24,9 +26,9 @@ def p(*parts):
 def tilde(path):
     return path.replace(HOME, "~", 1)
 
-def entry(name, kind, where, trigger="", goal="", health=UNCHECKED, reason="no check yet"):
+def entry(name, kind, where, trigger="", goal="", health=UNCHECKED, reason="no check yet", keep_reason=False):
     return {"name": name, "kind": kind, "where": tilde(where), "trigger": trigger, "goal": goal.strip(),
-            "health": health, "reason": "" if health == OK else reason, "lastAudited": ""}
+            "health": health, "reason": reason if health != OK or keep_reason else "", "lastAudited": ""}
 
 def read_json(path):
     with open(path, encoding="utf-8") as f:
@@ -185,6 +187,8 @@ def period_ms(rrule, name):
     r = dict(kv.split("=", 1) for kv in re.sub(r"^RRULE:", "", rrule).split(";") if "=" in kv)
     n = int(r.get("INTERVAL", 1))
     freq = r.get("FREQ")
+    if freq != "WEEKLY" and "BYDAY" in r and set(r["BYDAY"].split(",")) != set(DAYS):
+        raise SystemExit("ERROR: automation %s: cannot size the window for %s limited to days (%r)" % (name, freq, rrule))
     if freq == "MINUTELY":
         return n * 60000
     if freq == "HOURLY":
@@ -197,21 +201,40 @@ def period_ms(rrule, name):
         return (gap if len(days) > 1 and n == 1 else 7 * n) * 86400000
     raise SystemExit("ERROR: automation %s: cannot read schedule %r" % (name, rrule))
 
+def run_finished(thread_id):
+    """True when the run's rollout file holds a task_complete event. Missing database, thread or file is an error."""
+    path = p(".codex/state_5.sqlite")
+    if not os.path.isfile(path):
+        raise SystemExit("ERROR: Codex state database missing: " + tilde(path))
+    try:
+        db = sqlite3.connect("file:%s?mode=ro" % path, uri=True)
+        row = db.execute("SELECT rollout_path FROM threads WHERE id = ?", (thread_id,)).fetchone()
+        db.close()
+    except sqlite3.Error as e:
+        raise SystemExit("ERROR: %s: %s" % (tilde(path), e))
+    if not row:
+        raise SystemExit("ERROR: %s: no thread %s for an automation run" % (tilde(path), thread_id))
+    try:
+        with open(row[0], encoding="utf-8", errors="replace") as f:
+            return any('"type":"task_complete"' in line for line in f)
+    except OSError as e:
+        raise SystemExit("ERROR: rollout of run %s unreadable: %s" % (thread_id, e))
+
 def codex_runs():
-    """-> ({automation id: (latest run ms, status)}, {automation id: last_run_at ms}) from Codex's database, read-only."""
+    """-> ({automation id: (latest run ms, status, thread id)}, {automation id: last_run_at ms}) from Codex's database, read-only."""
     path = p(".codex/sqlite/codex.db")
     if not os.path.isfile(path):
         raise SystemExit("ERROR: Codex database missing: " + tilde(path))
     try:
         db = sqlite3.connect("file:%s?mode=ro" % path, uri=True)
         runs = {}
-        for aid, status, at in db.execute("SELECT automation_id, status, created_at FROM automation_runs ORDER BY created_at"):
-            runs[aid] = (at, status)  # ascending, so the last row is the latest
+        for aid, status, at, tid in db.execute("SELECT automation_id, status, created_at, thread_id FROM automation_runs ORDER BY created_at"):
+            runs[aid] = (at, status, tid)  # ascending, so the last row is the latest
         last = {i: at for i, at in db.execute("SELECT id, last_run_at FROM automations WHERE last_run_at IS NOT NULL")}
         db.close()
     except sqlite3.Error as e:
         raise SystemExit("ERROR: %s: %s" % (tilde(path), e))
-    for aid, (_, status) in runs.items():
+    for aid, (_, status, _) in runs.items():
         if status not in RUN_STATES and not re.search(r"FAIL|ERROR", status):
             raise SystemExit("ERROR: automation_runs: unknown status %r for %s; teach system-catalog what it means" % (status, aid))
     return runs, last
@@ -229,20 +252,24 @@ def nightly_jobs():
             why = "Codex %s: paused, not failing" % kv["status"]
         else:
             window = period_ms(rrule, aid) * 3 // 2  # one missed beat of slack
-            at, status = runs.get(aid, (0, ""))
+            at, status, tid = runs.get(aid, (0, "", ""))
             at = max(at, last.get(aid, 0))
             ago = (now - at) // 3600000
             if re.search(r"FAIL|ERROR", status) and at == runs[aid][0]:
                 h, why = FAIL, "latest run %s (%dh ago)" % (status, ago)
+            elif tid and not run_finished(tid):
+                h, why = FAIL, "last run started but did not finish (%dh ago)" % ago
             elif at and now - at <= window:
                 h = OK
+                if not tid:
+                    why = "ok by last_run_at only: no run record, so whether it finished is unchecked"
             elif at:
                 h, why = FAIL, "has not run when it should have: last run %dh ago, expected within %dh" % (ago, window // 3600000)
             elif now - int(kv["created_at"]) > window:
                 h, why = FAIL, "has not run when it should have: no run on record, expected within %dh" % (window // 3600000)
             else:
                 why = "new: first run not due yet"
-        out.append(entry(name, "nightly job", f, rrule, kv.get("prompt", "")[:140], h, why))
+        out.append(entry(name, "nightly job", f, rrule, kv.get("prompt", "")[:140], h, why, keep_reason=True))
     return out
 
 def build():

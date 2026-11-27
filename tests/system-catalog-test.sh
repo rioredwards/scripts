@@ -53,19 +53,34 @@ def automation(id, status, rrule, created_h_ago=24 * 30, kind="cron"):
         % (id, kind, id, status, rrule, NOW_MS - created_h_ago * HOUR))
 
 
+STATE_DB = os.path.join(H, ".codex/state_5.sqlite")
+UNFINISHED = set()
+
+
 def make_db(runs, last_runs=()):
     os.makedirs(os.path.dirname(CODEX_DB), exist_ok=True)
-    if os.path.exists(CODEX_DB):
-        os.remove(CODEX_DB)
+    for path in (CODEX_DB, STATE_DB):
+        if os.path.exists(path):
+            os.remove(path)
     db = sqlite3.connect(CODEX_DB)
     db.execute("CREATE TABLE automation_runs (thread_id TEXT PRIMARY KEY, automation_id TEXT NOT NULL, status TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)")
     db.execute("CREATE TABLE automations (id TEXT PRIMARY KEY, last_run_at INTEGER)")
+    st = sqlite3.connect(STATE_DB)
+    st.execute("CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT NOT NULL)")
     for i, (aid, status, h_ago) in enumerate(runs):
-        db.execute("INSERT INTO automation_runs VALUES (?,?,?,?,?)", ("th%d" % i, aid, status, NOW_MS - int(h_ago * HOUR), NOW_MS - int(h_ago * HOUR)))
+        tid = "th%d" % i
+        db.execute("INSERT INTO automation_runs VALUES (?,?,?,?,?)", (tid, aid, status, NOW_MS - int(h_ago * HOUR), NOW_MS - int(h_ago * HOUR)))
+        rollout = os.path.join(W, "rollouts/%s.jsonl" % tid)
+        os.makedirs(os.path.dirname(rollout), exist_ok=True)
+        end = '{"type":"event_msg","payload":{"type":"turn_aborted"}}\n' if (aid, h_ago) in UNFINISHED else '{"type":"event_msg","payload":{"type":"task_complete"}}\n'
+        with open(rollout, "w") as rf:
+            rf.write('{"type":"session_meta"}\n' + end)
+        st.execute("INSERT INTO threads VALUES (?,?)", (tid, rollout))
     for aid, h_ago in last_runs:
         db.execute("INSERT INTO automations VALUES (?,?)", (aid, NOW_MS - int(h_ago * HOUR)))
-    db.commit()
-    db.close()
+    for c in (db, st):
+        c.commit()
+        c.close()
 
 
 daily, hourly, weekly_mon = "RRULE:FREQ=DAILY;BYHOUR=3;BYMINUTE=0", "RRULE:FREQ=HOURLY;BYMINUTE=0", "RRULE:FREQ=WEEKLY;BYDAY=MO;BYHOUR=9"
@@ -77,8 +92,12 @@ automation("a-fail", "ACTIVE", daily)
 automation("a-hb", "ACTIVE", hourly, kind="heartbeat")
 automation("a-weekly", "ACTIVE", weekly_mon)
 automation("a-paused-stale", "PAUSED", daily)
+automation("a-abort", "ACTIVE", daily)
+automation("a-abort-old", "ACTIVE", daily)
 RUNS = [("a-ok", "ARCHIVED", 60), ("a-ok", "PENDING_REVIEW", 10), ("a-stale", "PENDING_REVIEW", 96), ("a-fail", "PENDING_REVIEW", 40),
-        ("a-fail", "FAILED", 10), ("a-weekly", "PENDING_REVIEW", 120), ("a-paused-stale", "PENDING_REVIEW", 500)]
+        ("a-fail", "FAILED", 10), ("a-weekly", "PENDING_REVIEW", 120), ("a-paused-stale", "PENDING_REVIEW", 500),
+        ("a-abort", "PENDING_REVIEW", 40), ("a-abort", "PENDING_REVIEW", 12), ("a-abort-old", "PENDING_REVIEW", 40), ("a-abort-old", "PENDING_REVIEW", 12)]
+UNFINISHED.update([("a-abort", 12), ("a-abort-old", 40), ("a-paused-stale", 500)])
 make_db(RUNS, [("a-hb", 0.5)])
 put("Library/Logs/tool-check/2026-11-18.log", "Tool check: old (h) 2026-11-18 03:20:00\n\n[BROKE] tool good - exit 9\n")
 put("Library/Logs/tool-check/2026-11-19.log", "\n".join([
@@ -127,6 +146,10 @@ check(nj("a-fail")["health"] == "failing" and "FAILED" in nj("a-fail")["reason"]
 check(nj("a-hb")["health"] == "ok", "heartbeat run is read from automations.last_run_at")
 check(nj("a-weekly")["health"] == "ok", "weekly job 5 days after its run is still inside the window")
 check(nj("a-paused-stale")["health"] == "not checked" and "paused" in nj("a-paused-stale")["reason"], "paused job with a stale run is paused, not failing")
+check(nj("a-abort")["health"] == "failing" and "did not finish" in nj("a-abort")["reason"], "latest run with no task_complete is failing")
+check(nj("a-abort-old")["health"] == "ok", "an older unfinished run does not matter once the latest finished")
+check(nj("a-paused-stale")["health"] == "not checked" and "paused" in nj("a-paused-stale")["reason"], "paused job's rollout is never read")
+check("no run record" in nj("a-hb")["reason"], "heartbeat with no automation_runs row says its ok is unverified for finishing")
 check(not any("no check yet" in e["reason"] for e in cat["entries"] if e["kind"] == "nightly job"), "no nightly job says no check yet")
 check(by[("pm2 process", "up")]["health"] == "ok" and by[("pm2 process", "down")]["health"] == "failing", "pm2 health")
 check(cat["sources"]["toolCheck"]["at"].startswith("2026-11-19T03:22:15"), "tool-check run time recorded")
@@ -146,6 +169,20 @@ check((r := run()).returncode != 0 and "automation_runs" in r.stderr and open(OU
 make_db(RUNS + [("a-ok", "WEIRD_NEW_STATE", 1)], [("a-hb", 0.5)])
 check((r := run()).returncode != 0 and "WEIRD_NEW_STATE" in r.stderr and open(OUT).read() == first, "unknown run status fails loudly")
 make_db(RUNS, [("a-hb", 0.5)])
+hold = STATE_DB + ".held"
+os.rename(STATE_DB, hold)
+check((r := run()).returncode != 0 and "state_5.sqlite" in r.stderr and open(OUT).read() == first, "missing state database fails loudly")
+os.rename(hold, STATE_DB)
+st = sqlite3.connect(STATE_DB); st.execute("DELETE FROM threads WHERE id='th1'"); st.commit(); st.close()
+check((r := run()).returncode != 0 and "th1" in r.stderr and open(OUT).read() == first, "run without a thread row fails loudly")
+make_db(RUNS, [("a-hb", 0.5)])
+os.rename(os.path.join(W, "rollouts/th1.jsonl"), os.path.join(W, "rollouts/th1.held"))
+check((r := run()).returncode != 0 and "th1" in r.stderr and open(OUT).read() == first, "missing rollout file fails loudly")
+make_db(RUNS, [("a-hb", 0.5)])
+for bad in ("RRULE:FREQ=DAILY;BYDAY=MO,TU", "RRULE:FREQ=HOURLY;BYDAY=MO,TU,WE,TH,FR"):
+    automation("a-badshape", "ACTIVE", bad)
+    check((r := run()).returncode != 0 and "a-badshape" in r.stderr and open(OUT).read() == first, "schedule the window rule cannot handle fails loudly: " + bad)
+os.remove(os.path.join(H, ".codex/automations/a-badshape/automation.toml"))
 for bad, err in (("[BROKE] launchd job launchctl - list failed", "match no catalog entry"), ("[BROKE] tool check inventory - check crashed", "unrecognized")):
     put("Library/Logs/tool-check/2026-11-19.log", "Tool check: (h) 2026-11-19 03:22:15\n\n%s\n" % bad)
     check((r := run()).returncode != 0 and err in r.stderr and open(OUT).read() == first, "fails loudly, old file kept: " + bad)
