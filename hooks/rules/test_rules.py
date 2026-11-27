@@ -1126,7 +1126,12 @@ class RulesTests(unittest.TestCase):
                         "git checkout -- GOALS.md", "mv x plugins/utils/skills/grumbo/scripts/grumbo-gate",
                         "echo off > ~/.config/agent-hooks/local.sh", "tee ~/dev/project-manager/HARD_RULES.md < /tmp/x",
                         "echo x >> plugins/utils/skills/grumbo/ref/judge.md", "sed -i '' s/a/b/ plugins/utils/skills/grumbo/ref/judge.md",
-                        "git checkout -- plugins/utils/skills/grumbo/ref/judge.md"):
+                        "git checkout -- plugins/utils/skills/grumbo/ref/judge.md",
+                        "git -C ~/dev/agent-skills checkout -- GOALS.md", "git -C '/a b' restore HARD_RULES.md",
+                        "git --git-dir=a/.git --work-tree=a restore GOALS.md", "git --git-dir a/.git checkout HEAD -- GOALS.md",
+                        "git -c core.x=y reset --hard GOALS.md", "git --no-pager -C x rm GOALS.md", "git -C x mv GOALS.md y",
+                        "git -C x apply fix.patch GOALS.md", "git -C x stash pop GOALS.md", "git -c a=b -C x stash apply GOALS.md",
+                        "cd x && /usr/bin/git -C y checkout -- plugins/utils/skills/grumbo/ref/judge.md"):
             with self.subTest(blocked=command):
                 self.assertTrue(self.denied("Bash", {"command": command}))
                 self.assertFalse(self.denied("Bash", {"command": command}, attention="foreground"))
@@ -1134,7 +1139,8 @@ class RulesTests(unittest.TestCase):
                         "plugins/utils/skills/grumbo/scripts/check-ledger.sh --coverage", "grumbo-gate status",
                         "grumbo-gate experiment --change a --expected b --check c --result d --kept --commit e",
                         "bash plugins/utils/skills/grumbo/tests/grumbo-gate.sh", "sed -i '' s/a/b/ LEDGER.md",
-                        "cp a b", "cat plugins/utils/skills/grumbo/ref/judge.md", "git add plugins/utils/skills/grumbo/ref/ledger-format.md && git commit -m 'edit grumbo/ref/judge.md notes'"):
+                        "cp a b", "git -C ~/dev/x log -- GOALS.md", "git --git-dir=a --work-tree=b diff GOALS.md", "git -c a=b show HEAD:GOALS.md",
+                        "git -C x status GOALS.md", "git -C x commit -m 'update GOALS.md'", "git -C x add GOALS.md", "cat plugins/utils/skills/grumbo/ref/judge.md", "git add plugins/utils/skills/grumbo/ref/ledger-format.md && git commit -m 'edit grumbo/ref/judge.md notes'"):
             with self.subTest(allowed=command):
                 self.assertFalse(self.denied("Bash", {"command": command}))
 
