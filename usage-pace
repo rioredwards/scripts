@@ -23,7 +23,14 @@ if [ "${1:-}" = record ]; then
     echo "usage-pace: usage: usage-pace record <used %> <resets_at epoch>" >&2; exit 2
   fi
   mkdir -p "${cache%/*}"
-  printf '{"pct":%s,"resets_at":%s,"at":%s}\n' "$2" "$3" "$now" > "$cache.$$"
+  # Idle sessions re-record their last-seen, lower figure. Usage only rises within a week,
+  # so for the same reset the highest reading wins.
+  pct=$2
+  if [ -f "$cache" ]; then
+    pct=$(jq -r --argjson p "$2" --argjson r "$3" \
+      'if ((.resets_at - $r) | fabs) < 3600 and .pct > $p then .pct else $p end' "$cache")
+  fi
+  printf '{"pct":%s,"resets_at":%s,"at":%s}\n' "$pct" "$3" "$now" > "$cache.$$"
   mv "$cache.$$" "$cache"
   exit 0
 fi

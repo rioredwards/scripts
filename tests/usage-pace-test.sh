@@ -24,6 +24,13 @@ want "frugal near cap" "$(pace 91 $((day / 2)))" "frugal"
 want "early week" "$(pace 10 $((day * 7 - 3600)))" "on pace for 70%"
 want "fraction pct" "$(pace 12.6 $((day * 7 / 2)))" "week 12% used"
 
+# an idle session's older, lower reading for the same week never lowers the figure
+r=$(($(date +%s) + day * 3))
+"$p" record 46 $r; "$p" record 13 $r
+want "highest wins" "$("$p")" "week 46% used"
+"$p" record 5 $((r + day * 7))
+want "new week resets" "$("$p")" "week 5% used"
+
 # no reading, a stale one, or last week's: fail with the reason
 rm "$cache"
 "$p" 2>"$tmp/err" && fail "no cache passed"
