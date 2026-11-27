@@ -190,6 +190,93 @@ check("log pruning leaves other files alone", (e.logs / "launchd.log").exists())
 check("log names the repos", "== " + str(e.dev / "alpha") in (e.logs / logs[-1]).read_text())
 e.done()
 
+# --- stale projects (I-007): one ask, once per project, read-only, silent when none -------------------
+import datetime
+
+
+def dated(days):
+    return (datetime.datetime.now() - datetime.timedelta(days=days, hours=1)).strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def commit(path, days):
+    when = dated(days)
+    subprocess.run(["git", "-C", str(path), "-c", "user.email=t@e.com", "-c", "user.name=T", "commit", "-q", "--allow-empty", "-m", "x"],
+                   check=True, capture_output=True, env={**os.environ, "GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when})
+
+
+def old_repo(env, rel, days, later_days=None):
+    path = env.dev / rel
+    env.repo(path, 0)
+    commit(path, days)
+    if later_days is not None:
+        commit(path, later_days)
+    return path
+
+
+def stale_asks(env):
+    return [l for l in env.inbox_text().splitlines() if "untouched" in l]
+
+
+def clear_inbox(env):
+    for f in env.inbox.glob("*.md"):
+        f.unlink()
+
+
+e = Env()
+state_file = e.tmp / "home/.local/state/dev-sweep/stale-flagged.json"
+e.run()  # only fresh repos: nothing stale
+check("fresh repos: silent, no state file", stale_asks(e) == [] and not state_file.exists(), e.inbox_text())
+old_repo(e, "ancient", 200)
+old_repo(e, "mid", 70)
+old_repo(e, "edge", 59)  # under 60 days: not flagged
+old_repo(e, "revived", 300, later_days=1)  # old history, but a recent commit
+dry = e.run("--dry-run")
+check("dry run prints the ask and writes no inbox or state",
+      "inbox (dry run, not written): Projects untouched 60+ days: ancient (200d), mid (70d). Review for cleanup?" in dry.stdout
+      and not state_file.exists() and stale_asks(e) == [], dry.stdout)
+snapshot = lambda: {str(p): p.stat().st_mtime for p in (e.dev / "ancient").rglob("*") if p.is_file()}
+before = snapshot()
+e.run()
+asks = stale_asks(e)
+check("one ask line, oldest first, edge and revived left out",
+      len(asks) == 1 and asks[0].startswith("- ask: Projects untouched 60+ days: ancient (200d), mid (70d). Review for cleanup? | yes: ")
+      and "nothing changes until you approve" in asks[0] and "edge" not in asks[0] and "revived" not in asks[0], str(asks))
+check("inbox file passes the real format check", subprocess.run([sys.executable, str(e.pm), "check"], capture_output=True, text=True).returncode == 0)
+check("the flagged repo is untouched", before == snapshot())
+e.run(); e.run()
+check("same projects are never flagged twice", len(stale_asks(e)) == 1, e.inbox_text())
+clear_inbox(e)
+old_repo(e, "third", 90)
+e.run()
+asks = stale_asks(e)
+check("a later run flags only the newly stale one", len(asks) == 1 and "third (90d)" in asks[0] and "ancient" not in asks[0], str(asks))
+commit(e.dev / "mid", 0)  # touched after being flagged
+clear_inbox(e)
+e.run()
+check("a touched project is not re-flagged", stale_asks(e) == [], e.inbox_text())
+shutil.rmtree(e.dev / "third")
+e.run()
+state = state_file.read_text()
+check("repos that are gone drop out of the state file", "third" not in state and "ancient" in state, state)
+e.done()
+
+e = Env()
+for name in ("a1", "a2", "a3", "a4", "a5"):
+    old_repo(e, name, 100)
+e.run()
+check("many stale: still one line, three named, rest counted",
+      len(stale_asks(e)) == 1 and "and 2 more." in stale_asks(e)[0] and stale_asks(e)[0].count("(100d)") == 3, str(stale_asks(e)))
+e.done()
+
+e = Env()
+old_repo(e, "ancient", 200)
+(e.tmp / "home/.local/state/dev-sweep").mkdir(parents=True)
+(e.tmp / "home/.local/state/dev-sweep/stale-flagged.json").write_text("{not json")
+out = e.run()
+check("corrupt state fails loud: exit 1, error in log, failure line, no stale ask",
+      out.returncode == 1 and "stale pass failed" in out.stdout and "Stale-project check failed" in e.inbox_text() and stale_asks(e) == [], out.stdout + e.inbox_text())
+e.done()
+
 if failures:
     print("dev-sweep-all FAILED:\n  " + "\n  ".join(failures))
     sys.exit(1)

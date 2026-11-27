@@ -18,6 +18,14 @@ remain registered, or when the repo's sweep failed: dev-sweep exited 2 (fatal) o
 If an unread inbox file already has a sweep line for that repo, no second line
 is written (the old one is kept, not replaced).
 
+Stale projects (idea I-007): the same run also reads every discovered repo's newest commit on any
+branch. A repo whose newest commit is STALE_DAYS (60) old or more is "untouched". New ones go to the PM
+inbox as ONE ask line per run (oldest first, three named, the rest counted) offering a cleanup review;
+nothing is ever deleted, archived, moved or changed. Silent when none is new. A repo is flagged once:
+$HOME/.local/state/dev-sweep/stale-flagged.json holds repo -> newest-commit time when flagged, so it
+is mentioned again only after a new commit and another 60 idle days. Repos that are gone drop out of
+that file. A dry run prints the line and writes no state.
+
 Log: one file per run in $DEV_SWEEP_LOG_DIR (default $HOME/Library/Logs/dev-sweep),
 sweep-<timestamp>[-dry].log, newest 14 kept.
 
@@ -49,6 +57,8 @@ HOME = os.path.expanduser("~")
 MAX_REMAINING = 15
 KEEP_LOGS = 14
 SOURCE = "dev-sweep"
+STALE_DAYS = 60
+SHOWN = 3
 
 
 class SetupError(Exception):
@@ -179,6 +189,75 @@ def write_inbox(script, name, message, dry, log):
     return out.returncode == 0
 
 
+def newest_commit(repo):
+    """Epoch of the newest commit on any branch, or None for a repo with no commits yet."""
+    refs = subprocess.run(["git", "-C", repo, "for-each-ref", "--count=1", "refs/heads", "refs/remotes"],
+                          capture_output=True, text=True)
+    if refs.returncode:
+        raise RuntimeError(f"git for-each-ref failed: {refs.stderr.strip()}")
+    if not refs.stdout.strip():
+        return None
+    out = subprocess.run(["git", "-C", repo, "log", "--all", "-1", "--format=%ct"], capture_output=True, text=True)
+    if out.returncode or not out.stdout.strip().isdigit():
+        raise RuntimeError(f"git log failed: {out.stderr.strip() or out.stdout.strip()}")
+    return int(out.stdout.strip())
+
+
+def stale_state_path():
+    return os.path.join(HOME, ".local", "state", "dev-sweep", "stale-flagged.json")
+
+
+def read_stale_state(path):
+    if not os.path.exists(path):
+        return {}
+    with open(path, encoding="utf-8") as handle:
+        state = json.load(handle)  # a corrupt file raises: fail loud, never guess
+    if not isinstance(state, dict) or not all(isinstance(v, int) for v in state.values()):
+        raise RuntimeError(f"{path} is not a repo -> epoch map")
+    return state
+
+
+def stale_pass(repos, dry, script, log, days=STALE_DAYS, now=None):
+    """Flag repos untouched for `days`, once each, as one inbox ask. Read-only on every repo."""
+    now = now if now is not None else datetime.datetime.now().timestamp()
+    path = stale_state_path()
+    state = read_stale_state(path)
+    stale, seen = [], {}
+    for repo in repos:
+        newest = newest_commit(repo)
+        if newest is None:
+            continue
+        real = os.path.realpath(repo)
+        seen[real] = newest
+        age = int((now - newest) // 86400)
+        if age >= days and state.get(real) != newest:
+            stale.append((age, repo, real, newest))
+    stale.sort(key=lambda row: (-row[0], row[1]))
+    log.append(f"stale pass: {len(repos)} repos, {len(stale)} newly untouched {days}+ days")
+    kept = {real: when for real, when in state.items() if real in seen}  # gone repos drop out
+    if stale:
+        shown = ", ".join(f"{os.path.basename(repo)} ({age}d)" for age, repo, _, _ in stale[:SHOWN])
+        more = f", and {len(stale) - SHOWN} more" if len(stale) > SHOWN else ""
+        question = f"Projects untouched {days}+ days: {shown}{more}. Review for cleanup?"
+        yes = ("an agent checks each for uncommitted work, unpushed branches and a remote, then proposes archive or "
+               "keep; nothing changes until you approve")
+        link = stale[0][1].replace(HOME, "~", 1)
+        if dry:
+            log.append(f"inbox (dry run, not written): {question}")
+            return True
+        out = subprocess.run([sys.executable, script, "add", SOURCE, "ask", question, yes, link], capture_output=True, text=True)
+        log.append(f"inbox: {out.stdout.strip() or out.stderr.strip()}")
+        if out.returncode:
+            return False
+        for _, _, real, newest in stale:
+            kept[real] = newest
+    if not dry and kept != state:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(kept, handle, indent=1, sort_keys=True)
+    return True
+
+
 def prune_logs(directory):
     runs = sorted(n for n in os.listdir(directory) if n.startswith("sweep-") and n.endswith(".log"))
     for old in runs[:-KEEP_LOGS]:
@@ -233,6 +312,15 @@ def main(argv):
                 ok = False
         healthy = healthy and ok
         lines += log
+    try:
+        healthy = stale_pass(repos, dry, script, lines) and healthy
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
+        lines.append(f"error: stale pass failed: {error!r}")
+        healthy = False
+        try:
+            write_inbox(script, "stale-check", f"Stale-project check failed: {one_line(repr(error))}", dry, lines)
+        except (OSError, subprocess.SubprocessError) as write_error:
+            lines.append(f"inbox: write failed: {write_error}")
     lines.append("result: " + ("ok" if healthy else "FAILED (see errors above)"))
     text = "\n".join(lines) + "\n"
     with open(logfile, "w", encoding="utf-8") as handle:
