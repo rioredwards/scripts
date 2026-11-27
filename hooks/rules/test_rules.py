@@ -20,7 +20,7 @@ EOF"""
 
 
 # Real files the grumbo-unattended-protected-files rules guard, relative to $HOME.
-PROTECTED_FILES = ("dev/agent-skills/HARD_RULES.md", "dev/agent-skills/GOALS.md",
+PROTECTED_FILES = ("dev/agent-skills/HARD_RULES.md", "dev/agent-skills/plugins/utils/skills/grumbo/ref/judge.md", "dev/agent-skills/GOALS.md",
                    "dev/agent-skills/plugins/utils/skills/grumbo/scripts/grumbo-gate",
                    "dev/agent-skills/plugins/utils/skills/grumbo/tests/grumbo-gate.sh",
                    "scripts/hooks/rules/rules.json", "scripts/agent-knobs.json", "dev/project-manager/HARD_RULES.md")
@@ -1103,7 +1103,7 @@ class RulesTests(unittest.TestCase):
                      "/scripts/agent-knobs.json", "/.config/agent-hooks/local.sh",
                      "/.local/state/grumbo/gate.json", "/dev/agent-skills/plugins/utils/skills/grumbo/scripts/grumbo-gate",
                      "/dev/agent-skills/plugins/utils/skills/grumbo/tests/grumbo-gate.sh",
-                     "/dev/project-manager/HARD_RULES.md")
+                     "/dev/project-manager/HARD_RULES.md", "/dev/agent-skills/plugins/utils/skills/grumbo/ref/judge.md")
         for tool in ("Edit", "Write", "MultiEdit"):
             for path in protected:
                 with self.subTest(tool=tool, path=path):
@@ -1112,6 +1112,7 @@ class RulesTests(unittest.TestCase):
             self.assertTrue(self.denied("apply_patch", {"input": "*** Update File: " + home + protected[0] + "\n+x"}))
         for path in ("/dev/agent-skills/LEDGER.md", "/dev/agent-skills/EXPERIMENTS.md",
                      "/dev/agent-skills/plugins/utils/skills/grumbo/SKILL.md", "/dev/project-manager/GARDEN.md",
+                     "/dev/agent-skills/plugins/utils/skills/grumbo/ref/ledger-format.md",
                      "/dev/other/GOALS.md"):
             with self.subTest(allowed=path):
                 self.assertFalse(self.denied("Edit", {"file_path": home + path, "new_string": "GOALS.md HARD_RULES.md"}))
@@ -1123,7 +1124,9 @@ class RulesTests(unittest.TestCase):
         for command in ("echo x >> HARD_RULES.md", "echo x >> ~/dev/agent-skills/HARD_RULES.md", "echo x >> DENY_LIST.md", "sed -i '' s/a/b/ GOALS.md", "cp /tmp/r.json ~/scripts/hooks/rules/rules.json",
                         "python3 -c \"open('GOALS.md','w').write('')\"", "trash ~/.local/state/grumbo/gate.json",
                         "git checkout -- GOALS.md", "mv x plugins/utils/skills/grumbo/scripts/grumbo-gate",
-                        "echo off > ~/.config/agent-hooks/local.sh", "tee ~/dev/project-manager/HARD_RULES.md < /tmp/x"):
+                        "echo off > ~/.config/agent-hooks/local.sh", "tee ~/dev/project-manager/HARD_RULES.md < /tmp/x",
+                        "echo x >> plugins/utils/skills/grumbo/ref/judge.md", "sed -i '' s/a/b/ plugins/utils/skills/grumbo/ref/judge.md",
+                        "git checkout -- plugins/utils/skills/grumbo/ref/judge.md"):
             with self.subTest(blocked=command):
                 self.assertTrue(self.denied("Bash", {"command": command}))
                 self.assertFalse(self.denied("Bash", {"command": command}, attention="foreground"))
@@ -1131,7 +1134,7 @@ class RulesTests(unittest.TestCase):
                         "plugins/utils/skills/grumbo/scripts/check-ledger.sh --coverage", "grumbo-gate status",
                         "grumbo-gate experiment --change a --expected b --check c --result d --kept --commit e",
                         "bash plugins/utils/skills/grumbo/tests/grumbo-gate.sh", "sed -i '' s/a/b/ LEDGER.md",
-                        "cp a b"):
+                        "cp a b", "cat plugins/utils/skills/grumbo/ref/judge.md", "git add plugins/utils/skills/grumbo/ref/ledger-format.md && git commit -m 'edit grumbo/ref/judge.md notes'"):
             with self.subTest(allowed=command):
                 self.assertFalse(self.denied("Bash", {"command": command}))
 
