@@ -18,8 +18,8 @@ remain registered, or when the repo's sweep failed: dev-sweep exited 2 (fatal) o
 If an unread inbox file already has a sweep line for that repo, no second line
 is written (the old one is kept, not replaced).
 
-Stale projects (idea I-007): the same run also reads every discovered repo's newest commit on any
-branch. A repo whose newest commit is STALE_DAYS (60) old or more is "untouched". New ones go to the PM
+Stale projects (idea I-007): the same run also reads every discovered repo's last touch: the newer of its newest commit on any
+branch and its newest changed or untracked (not ignored) working file. A repo whose last touch is STALE_DAYS (60) old or more is "untouched". New ones go to the PM
 inbox as ONE ask line per run (oldest first, three named, the rest counted) offering a cleanup review;
 nothing is ever deleted, archived, moved or changed. Silent when none is new. A repo is flagged once:
 $HOME/.local/state/dev-sweep/stale-flagged.json holds repo -> newest-commit time when flagged, so it
@@ -203,6 +203,37 @@ def newest_commit(repo):
     return int(out.stdout.strip())
 
 
+def newest_working_change(repo):
+    """Epoch of the newest changed or untracked, non-ignored file in the working tree, or None."""
+    out = subprocess.run(["git", "-C", repo, "status", "--porcelain=v1", "-z", "--untracked-files=all"],
+                         capture_output=True, text=True)
+    if out.returncode:
+        raise RuntimeError(f"git status failed: {out.stderr.strip()}")
+    newest, parts = None, out.stdout.split("\0")
+    skip_next = False
+    for entry in parts:
+        if skip_next:  # the old name after a rename or copy
+            skip_next = False
+            continue
+        if len(entry) < 4:
+            continue
+        if entry[0] in "RC" or entry[1] in "RC":
+            skip_next = True
+        try:
+            when = int(os.lstat(os.path.join(repo, entry[3:])).st_mtime)
+        except FileNotFoundError:
+            continue  # a deleted file has no time; the delete itself is not dated
+        newest = when if newest is None else max(newest, when)
+    return newest
+
+
+def last_touch(repo):
+    """Newer of the newest commit on any branch and the newest uncommitted working file; None if neither."""
+    commit, work = newest_commit(repo), newest_working_change(repo)
+    times = [t for t in (commit, work) if t is not None]
+    return max(times) if times else None
+
+
 def stale_state_path():
     return os.path.join(HOME, ".local", "state", "dev-sweep", "stale-flagged.json")
 
@@ -224,7 +255,7 @@ def stale_pass(repos, dry, script, log, days=STALE_DAYS, now=None):
     state = read_stale_state(path)
     stale, seen = [], {}
     for repo in repos:
-        newest = newest_commit(repo)
+        newest = last_touch(repo)
         if newest is None:
             continue
         real = os.path.realpath(repo)

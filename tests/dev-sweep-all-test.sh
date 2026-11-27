@@ -6,7 +6,7 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 real_inbox="$HOME/dev/project-manager/scripts/pm_inbox.py"
 [ -f "$real_inbox" ] || { echo "dev-sweep-all-test: $real_inbox missing" >&2; exit 1; }
 python3 - "$root/dev-sweep-all" "$real_inbox" <<'PY'
-import json, os, pathlib, shutil, subprocess, sys, tempfile
+import json, os, pathlib, shutil, subprocess, sys, tempfile, time
 
 wrapper, real_inbox = sys.argv[1], sys.argv[2]
 passed, failures = 0, []
@@ -258,6 +258,33 @@ shutil.rmtree(e.dev / "third")
 e.run()
 state = state_file.read_text()
 check("repos that are gone drop out of the state file", "third" not in state and "ancient" in state, state)
+e.done()
+
+e = Env()
+dirty = old_repo(e, "dirty", 200)
+(dirty / "wip.txt").write_text("new work")  # never committed, written now
+tracked = old_repo(e, "edited", 200)
+(tracked / "f.txt").write_text("a")
+subprocess.run(["git", "-C", str(tracked), "add", "f.txt"], check=True, capture_output=True)
+commit(tracked, 200)
+(tracked / "f.txt").write_text("b")  # tracked file modified now
+ignored = old_repo(e, "ignoring", 200)
+(ignored / ".gitignore").write_text("junk/\n")
+subprocess.run(["git", "-C", str(ignored), "add", ".gitignore"], check=True, capture_output=True)
+commit(ignored, 200)
+os.utime(ignored / ".gitignore", (time.time() - 200 * 86400,) * 2)
+(ignored / "junk").mkdir()
+(ignored / "junk" / "cache").write_text("x")  # ignored and new: does not count
+oldfile = old_repo(e, "oldwip", 200)
+(oldfile / "wip.txt").write_text("old work")
+os.utime(oldfile / "wip.txt", (time.time() - 100 * 86400,) * 2)  # uncommitted but 100 days old
+old_repo(e, "plain", 200)
+e.run()
+a = stale_asks(e)
+check("uncommitted, untracked or modified recent work is not untouched",
+      len(a) == 1 and "dirty" not in a[0] and "edited" not in a[0], str(a))
+check("ignored files do not count; an old uncommitted file ages from its own time",
+      "ignoring (" in a[0] and "oldwip (100d)" in a[0] and "plain (" in a[0], str(a))
 e.done()
 
 e = Env()
