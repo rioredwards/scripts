@@ -1060,6 +1060,82 @@ class RulesTests(unittest.TestCase):
             for name, data in misses:
                 with self.subTest(agent=agent, miss=data):
                     self.assertNotIn("Global rules file", self.run_hook("tool", {"tool_name": name, "tool_input": data}, agent).stdout)
+    # --- grumbo: unattended (attention=away) runs; see NEVER_LIST.md in agent-skills ---
+
+    def denied(self, tool, tool_input, attention="away"):
+        out = self.run_hook("tool", {"tool_name": tool, "tool_input": tool_input}, attention=attention).stdout
+        return bool(out) and json.loads(out)["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+    def test_unattended_cannot_edit_protected_files(self):
+        home = "/Users/x"
+        protected = ("/dev/agent-skills/NEVER_LIST.md", "/dev/agent-skills/GOALS.md", "/dev/agent-skills.wt/GOALS.md",
+                     "/scripts/hooks/rules/rules.json", "/scripts/hooks/turn-end/dispatch",
+                     "/scripts/agent-knobs.json", "/.config/agent-hooks/local.sh",
+                     "/.local/state/grumbo/gate.json", "/dev/agent-skills/plugins/utils/skills/grumbo/scripts/grumbo-gate",
+                     "/dev/agent-skills/plugins/utils/skills/grumbo/tests/grumbo-gate.sh",
+                     "/dev/project-manager/HARD_RULES.md")
+        for tool in ("Edit", "Write", "MultiEdit"):
+            for path in protected:
+                with self.subTest(tool=tool, path=path):
+                    self.assertTrue(self.denied(tool, {"file_path": home + path, "content": "x"}))
+        with self.subTest("apply_patch"):
+            self.assertTrue(self.denied("apply_patch", {"input": "*** Update File: " + home + protected[0] + "\n+x"}))
+        for path in ("/dev/agent-skills/LEDGER.md", "/dev/agent-skills/EXPERIMENTS.md",
+                     "/dev/agent-skills/plugins/utils/skills/grumbo/SKILL.md", "/dev/project-manager/GARDEN.md",
+                     "/dev/other/GOALS.md"):
+            with self.subTest(allowed=path):
+                self.assertFalse(self.denied("Edit", {"file_path": home + path, "new_string": "GOALS.md NEVER_LIST.md"}))
+        for attention in ("foreground", "background"):
+            with self.subTest(attention=attention):
+                self.assertFalse(self.denied("Write", {"file_path": home + protected[0], "content": "x"}, attention=attention))
+
+    def test_unattended_shell_cannot_write_protected_files(self):
+        for command in ("echo x >> NEVER_LIST.md", "sed -i '' s/a/b/ GOALS.md", "cp /tmp/r.json ~/scripts/hooks/rules/rules.json",
+                        "python3 -c \"open('GOALS.md','w').write('')\"", "trash ~/.local/state/grumbo/gate.json",
+                        "git checkout -- GOALS.md", "mv x plugins/utils/skills/grumbo/scripts/grumbo-gate",
+                        "echo off > ~/.config/agent-hooks/local.sh", "tee ~/dev/project-manager/HARD_RULES.md < /tmp/x"):
+            with self.subTest(blocked=command):
+                self.assertTrue(self.denied("Bash", {"command": command}))
+                self.assertFalse(self.denied("Bash", {"command": command}, attention="foreground"))
+        for command in ("cat GOALS.md", "rg gate GOALS.md >/dev/null", "git add LEDGER.md GOALS.md && git commit -m 'update GOALS.md'",
+                        "plugins/utils/skills/grumbo/scripts/check-ledger.sh --coverage", "grumbo-gate status",
+                        "grumbo-gate experiment --change a --expected b --check c --result d --kept --commit e",
+                        "bash plugins/utils/skills/grumbo/tests/grumbo-gate.sh", "sed -i '' s/a/b/ LEDGER.md",
+                        "cp a b"):
+            with self.subTest(allowed=command):
+                self.assertFalse(self.denied("Bash", {"command": command}))
+
+    def test_unattended_no_force_push(self):
+        for command in ("git push --force", "git push -f origin main", "git push origin +main", "git push --force-with-lease",
+                        "git -C ~/dev/x push -uf origin main", "cd x && git push origin main --force"):
+            with self.subTest(blocked=command):
+                self.assertTrue(self.denied("Bash", {"command": command}))
+                self.assertFalse(self.denied("Bash", {"command": command}, attention="foreground"))
+        for command in ("git push", "git push origin main", "git push -u origin feature-f", "git pull --ff-only && git push origin main",
+                        "git log --oneline | grep force"):
+            with self.subTest(allowed=command):
+                self.assertFalse(self.denied("Bash", {"command": command}))
+
+    def test_unattended_cannot_unlock_itself(self):
+        for command in ("agent-toggle grumbo-ceiling 100", "agent-toggle --session abc attention foreground", "agent-toggle grumbo off",
+                        "AGENT_ATTENTION=foreground ls", "grumbo-gate ack", "GRUMBO_GATE_NOW=2026-01-01T00:00:00Z grumbo-gate status",
+                        "RIO_MERGE_OK=1 gh pr merge 5"):
+            with self.subTest(blocked=command):
+                self.assertTrue(self.denied("Bash", {"command": command}))
+        with self.subTest("attended sessions keep using the knobs"):
+            self.assertFalse(self.denied("Bash", {"command": "agent-toggle grumbo-ceiling 100"}, attention="foreground"))
+        for command in ("agent-toggle night", "agent-toggle", "grumbo-gate status --json", "grumbo-gate start --pct 5 --resets x",
+                        "grumbo-gate checkpoint --pct 5 --resets x", "grumbo-gate end"):
+            with self.subTest(allowed=command):
+                self.assertFalse(self.denied("Bash", {"command": command}))
+
+    def test_unattended_keeps_the_existing_deny_rules(self):  # reused, not duplicated: they have no `when`
+        for tool, tool_input in (("Bash", {"command": "gh pr merge 5"}),
+                                 ("mcp__3711da19-ec58-4c28-a15b-10831ef9a620__slack_send_message", {"text": "hi"}),
+                                 ("Bash", {"command": "psql postgres://u@ep-x." + "neon.tech/db"})):
+            with self.subTest(tool=tool):
+                self.assertTrue(self.denied(tool, tool_input))
+
 
 def run_parallel():
     """Each case spawns real hook processes (~950 in all, ~40 ms each) and shares no state, so run

@@ -38,6 +38,16 @@
       "doc": "nightly implementer override; auto follows night",
       "options": { "auto": "Follow night.", "off": "Implementer exits at once.", "low": "Opens 1 PR.", "normal": "Opens 2 PRs.", "high": "Opens 4 PRs." } },
 
+    { "name": "grumbo", "key": "AGENT_GRUMBO", "kind": "value", "default": "on", "label": "grumbo",
+      "doc": "nightly self-improvement runs (the gate: grumbo-gate)",
+      "options": { "on": "Grumbo runs may evolve the system, inside the other limits.", "off": "Grumbo stops at the gate; health checks and status lines still run." } },
+    { "name": "grumbo-ceiling", "key": "AGENT_GRUMBO_CEILING", "kind": "value", "default": "75", "label": "grumbo ceiling",
+      "doc": "stop when the 5-hour usage is at or over this percent; N or N_until_YYYY-MM-DD (back to 75 after that date)" },
+    { "name": "grumbo-share", "key": "AGENT_GRUMBO_SHARE", "kind": "value", "default": "25", "label": "grumbo share",
+      "doc": "most percent of one 5-hour window grumbo may spend per day; N or N_until_YYYY-MM-DD" },
+    { "name": "grumbo-halt-days", "key": "AGENT_GRUMBO_HALT_DAYS", "kind": "value", "default": "5", "label": "grumbo halt days",
+      "doc": "halt evolving when Rio has not acknowledged for more than this many days; N or N_until_YYYY-MM-DD" },
+
     { "name": "reply-cap", "aliases": ["words"], "key": "AGENT_REPLY_MAX_WORDS", "kind": "value", "session": true, "default": "200", "label": "💬 cap",
       "doc": "prose-word ceiling on a reply",
       "options": { "off": "", "100": "", "200": "", "300": "" } },
