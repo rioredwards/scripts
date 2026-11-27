@@ -115,3 +115,4 @@ codex | [20s] codex --version
 claude | [20s] claude --version
 
 clipboard-snippets | syntax
+security-alerts | syntax

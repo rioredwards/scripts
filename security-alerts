@@ -1,0 +1,66 @@
+#!/usr/bin/env python3
+"""security-alerts: open Dependabot alerts per repo, read-only, for the Grumbo card on Rio's Day.
+
+  security-alerts [--json]     counts by severity for every repo in REPOS
+
+Reads only (`gh api -X GET`); never changes a repo, its settings or its alerts. Prints one JSON
+object: {as_of, red, repos: [{repo, critical, high, medium, low, total}]}. `red` is true when any
+repo has a critical alert.
+Exit: 0 read, 2 could not read (gh missing or failed, or an answer that is not a list of alerts).
+It never prints a partial or zero count in place of a failure: the card shows the error instead.
+Test hooks: SECURITY_ALERTS_GH (a stand-in for gh), SECURITY_ALERTS_REPOS (comma list), SECURITY_ALERTS_NOW.
+"""
+import datetime as dt
+import json
+import os
+import shutil
+import subprocess
+import sys
+
+# Tracer: one repo. Widen once Rio has seen it.
+REPOS = ["straightaway-cocktails/straightaway-next"]
+LEVELS = ("critical", "high", "medium", "low")
+
+
+def fail(msg):
+    print(f"security-alerts: {msg}", file=sys.stderr)
+    sys.exit(2)
+
+
+def count(repo, gh):
+    cmd = [gh, "api", "-X", "GET", f"repos/{repo}/dependabot/alerts", "-f", "state=open", "-f", "per_page=100", "--paginate", "--slurp"]
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        fail(f"could not run gh for {repo}: {e}")
+    if p.returncode != 0:
+        fail(f"gh could not read the alerts for {repo}: {(p.stderr or p.stdout).strip()[:300]}")
+    try:
+        pages = json.loads(p.stdout)
+    except ValueError as e:
+        fail(f"gh answer for {repo} is not JSON: {e}")
+    if not isinstance(pages, list) or not all(isinstance(pg, list) for pg in pages):
+        fail(f"gh answer for {repo} is not a list of alert pages")
+    n = dict.fromkeys(LEVELS, 0)
+    for alert in (a for pg in pages for a in pg):
+        sev = (alert.get("security_advisory") or {}).get("severity") if isinstance(alert, dict) else None
+        if sev not in n:
+            fail(f"an alert in {repo} has an unknown severity: {sev!r}")
+        n[sev] += 1
+    return {"repo": repo, **n, "total": sum(n.values())}
+
+
+def main():
+    if any(a not in ("--json",) for a in sys.argv[1:]):
+        fail("usage: security-alerts [--json]")
+    # ssh sessions get a bare PATH without Homebrew (the MacBook reads this over ssh)
+    gh = os.environ.get("SECURITY_ALERTS_GH") or shutil.which("gh") or "/opt/homebrew/bin/gh"
+    repos = [r for r in os.environ.get("SECURITY_ALERTS_REPOS", ",".join(REPOS)).split(",") if r]
+    if not repos:
+        fail("no repos to read")
+    rows = [count(r, gh) for r in repos]
+    now = os.environ.get("SECURITY_ALERTS_NOW") or dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    print(json.dumps({"as_of": now, "red": any(r["critical"] > 0 for r in rows), "repos": rows}))
+
+
+main()
