@@ -6,12 +6,12 @@ root="$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)"
 work="$(mktemp -d)" || exit 1
 trap 'rm -rf "$work"' EXIT
 SC="$root/system-catalog" W="$work" /usr/bin/python3 - <<'PY'
-import json, os, plistlib, subprocess, sys
+import json, os, plistlib, sqlite3, subprocess, sys
 
 W, SC = os.environ["W"], os.environ["SC"]
 H = os.path.join(W, "home")
 env = dict(os.environ, SYSTEM_CATALOG_HOME=H, SYSTEM_CATALOG_SKILLS=os.path.join(H, "dev/agent-skills"),
-           SYSTEM_CATALOG_PM2_JSON=os.path.join(W, "pm2.json"))
+           SYSTEM_CATALOG_PM2_JSON=os.path.join(W, "pm2.json"), SYSTEM_CATALOG_NOW="1795777229")
 OUT = os.path.join(W, "out/catalog.json")
 
 
@@ -42,7 +42,44 @@ put("Library/Application Support/Claude/claude-code-sessions/a/b/scheduled-tasks
     {"id": "t-off", "cronExpression": "0 2 * * *", "enabled": False}]}))
 put("Library/Application Support/Claude/claude-code-sessions/c/d/scheduled-tasks.json", json.dumps({"scheduledTasks": [{"id": "t-on", "enabled": True}]}))
 put("task/SKILL.md", "---\nname: t-on\ndescription: Do the nightly thing.\n---\n")
-put(".codex/automations/nj/automation.toml", 'name = "Nightly job"\nstatus = "PAUSED"\nrrule = "RRULE:FREQ=DAILY"\nprompt = "Look around."\n')
+put(".codex/automations/nj/automation.toml", 'id = "nj"\nname = "Nightly job"\nstatus = "PAUSED"\nrrule = "RRULE:FREQ=DAILY"\nprompt = "Look around."\n')
+NOW_MS = 1795777229 * 1000
+HOUR = 3600 * 1000
+CODEX_DB = os.path.join(H, ".codex/sqlite/codex.db")
+
+
+def automation(id, status, rrule, created_h_ago=24 * 30, kind="cron"):
+    put(".codex/automations/%s/automation.toml" % id, 'version = 1\nid = "%s"\nkind = "%s"\nname = "Job %s"\nprompt = "p"\nstatus = "%s"\nrrule = "%s"\ncreated_at = %d\n'
+        % (id, kind, id, status, rrule, NOW_MS - created_h_ago * HOUR))
+
+
+def make_db(runs, last_runs=()):
+    os.makedirs(os.path.dirname(CODEX_DB), exist_ok=True)
+    if os.path.exists(CODEX_DB):
+        os.remove(CODEX_DB)
+    db = sqlite3.connect(CODEX_DB)
+    db.execute("CREATE TABLE automation_runs (thread_id TEXT PRIMARY KEY, automation_id TEXT NOT NULL, status TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)")
+    db.execute("CREATE TABLE automations (id TEXT PRIMARY KEY, last_run_at INTEGER)")
+    for i, (aid, status, h_ago) in enumerate(runs):
+        db.execute("INSERT INTO automation_runs VALUES (?,?,?,?,?)", ("th%d" % i, aid, status, NOW_MS - int(h_ago * HOUR), NOW_MS - int(h_ago * HOUR)))
+    for aid, h_ago in last_runs:
+        db.execute("INSERT INTO automations VALUES (?,?)", (aid, NOW_MS - int(h_ago * HOUR)))
+    db.commit()
+    db.close()
+
+
+daily, hourly, weekly_mon = "RRULE:FREQ=DAILY;BYHOUR=3;BYMINUTE=0", "RRULE:FREQ=HOURLY;BYMINUTE=0", "RRULE:FREQ=WEEKLY;BYDAY=MO;BYHOUR=9"
+automation("a-ok", "ACTIVE", daily)
+automation("a-stale", "ACTIVE", daily)
+automation("a-never", "ACTIVE", daily)
+automation("a-new", "ACTIVE", daily, created_h_ago=1)
+automation("a-fail", "ACTIVE", daily)
+automation("a-hb", "ACTIVE", hourly, kind="heartbeat")
+automation("a-weekly", "ACTIVE", weekly_mon)
+automation("a-paused-stale", "PAUSED", daily)
+RUNS = [("a-ok", "ARCHIVED", 60), ("a-ok", "PENDING_REVIEW", 10), ("a-stale", "PENDING_REVIEW", 96), ("a-fail", "PENDING_REVIEW", 40),
+        ("a-fail", "FAILED", 10), ("a-weekly", "PENDING_REVIEW", 120), ("a-paused-stale", "PENDING_REVIEW", 500)]
+make_db(RUNS, [("a-hb", 0.5)])
 put("Library/Logs/tool-check/2026-11-18.log", "Tool check: old (h) 2026-11-18 03:20:00\n\n[BROKE] tool good - exit 9\n")
 put("Library/Logs/tool-check/2026-11-19.log", "\n".join([
     "Tool check: 3 ok, 1 broke, 1 skipped (host) 2026-11-19 03:22:15", "",
@@ -80,7 +117,17 @@ check(("tool", "notes.txt") not in by and ("tool", "tool-one") in by, "only exec
 check(by[("launchd job", "nightly")]["trigger"] == "daily 03:40" and by[("launchd job", "nightly")]["health"] == "ok", "launchd trigger and health")
 check(by[("scheduled task", "t-on")]["health"] == "ok" and by[("scheduled task", "t-on")]["goal"] == "Do the nightly thing.", "task health and goal; duplicate id once")
 check(by[("scheduled task", "t-off")]["reason"] == "disabled", "disabled task is not checked")
-check(by[("nightly job", "Nightly job")]["health"] == "not checked" and "PAUSED" in by[("nightly job", "Nightly job")]["reason"], "nightly job status")
+check(by[("nightly job", "Nightly job")]["health"] == "not checked" and "paused" in by[("nightly job", "Nightly job")]["reason"], "paused nightly job is shown as paused, not failing")
+nj = lambda i: by[("nightly job", "Job " + i)]
+check(nj("a-ok")["health"] == "ok", "latest run inside the window is ok")
+check(nj("a-stale")["health"] == "failing" and "has not run" in nj("a-stale")["reason"], "last run outside the window: has not run when it should have")
+check(nj("a-never")["health"] == "failing" and "has not run" in nj("a-never")["reason"], "old job that never ran is failing, not fine")
+check(nj("a-new")["health"] == "not checked" and "not due" in nj("a-new")["reason"], "brand-new job with no run yet is not failing")
+check(nj("a-fail")["health"] == "failing" and "FAILED" in nj("a-fail")["reason"], "latest run failed beats an older ok run")
+check(nj("a-hb")["health"] == "ok", "heartbeat run is read from automations.last_run_at")
+check(nj("a-weekly")["health"] == "ok", "weekly job 5 days after its run is still inside the window")
+check(nj("a-paused-stale")["health"] == "not checked" and "paused" in nj("a-paused-stale")["reason"], "paused job with a stale run is paused, not failing")
+check(not any("no check yet" in e["reason"] for e in cat["entries"] if e["kind"] == "nightly job"), "no nightly job says no check yet")
 check(by[("pm2 process", "up")]["health"] == "ok" and by[("pm2 process", "down")]["health"] == "failing", "pm2 health")
 check(cat["sources"]["toolCheck"]["at"].startswith("2026-11-19T03:22:15"), "tool-check run time recorded")
 check(all(e["lastAudited"] == "" and e["health"] in ("ok", "failing", "not checked") for e in cat["entries"]), "entry fields")
@@ -90,6 +137,15 @@ first = open(OUT).read()
 run()
 check(len(open(OUT).read()) == len(first), "second run overwrites, no growth")
 first = open(OUT).read()
+hold = CODEX_DB + ".held"
+os.rename(CODEX_DB, hold)
+check((r := run()).returncode != 0 and "codex.db" in r.stderr and open(OUT).read() == first, "missing codex database fails loudly, old file kept")
+os.rename(hold, CODEX_DB)
+db = sqlite3.connect(CODEX_DB); db.execute("DROP TABLE automation_runs"); db.commit(); db.close()
+check((r := run()).returncode != 0 and "automation_runs" in r.stderr and open(OUT).read() == first, "missing table fails loudly, old file kept")
+make_db(RUNS + [("a-ok", "WEIRD_NEW_STATE", 1)], [("a-hb", 0.5)])
+check((r := run()).returncode != 0 and "WEIRD_NEW_STATE" in r.stderr and open(OUT).read() == first, "unknown run status fails loudly")
+make_db(RUNS, [("a-hb", 0.5)])
 for bad, err in (("[BROKE] launchd job launchctl - list failed", "match no catalog entry"), ("[BROKE] tool check inventory - check crashed", "unrecognized")):
     put("Library/Logs/tool-check/2026-11-19.log", "Tool check: (h) 2026-11-19 03:22:15\n\n%s\n" % bad)
     check((r := run()).returncode != 0 and err in r.stderr and open(OUT).read() == first, "fails loudly, old file kept: " + bad)

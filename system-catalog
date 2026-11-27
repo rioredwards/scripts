@@ -6,11 +6,13 @@
 
 Entry: name, kind, where, trigger, goal (may be empty), health (ok | failing | not checked), reason,
 lastAudited (empty until the nightly audit exists). Health comes from tool-check's latest log (tools,
-launchd jobs, scheduled tasks) and `pm2 jlist`; other kinds are "not checked". An unreadable source
+launchd jobs, scheduled tasks), `pm2 jlist`, and ~/.codex/sqlite/codex.db (nightly jobs: latest run vs the
+window its schedule implies); other kinds are "not checked". An unreadable source
 exits 1 and leaves the old file untouched. Daily 03:40 via launchd com.rioredwards.system-catalog.
-Test env: SYSTEM_CATALOG_HOME (for ~), SYSTEM_CATALOG_SKILLS, SYSTEM_CATALOG_PM2_JSON (a file).
+Test env: SYSTEM_CATALOG_HOME (for ~), SYSTEM_CATALOG_SKILLS, SYSTEM_CATALOG_PM2_JSON (a file),
+SYSTEM_CATALOG_NOW (epoch seconds).
 """
-import argparse, datetime, glob, json, os, plistlib, re, subprocess, sys, time
+import argparse, datetime, glob, json, os, plistlib, re, sqlite3, subprocess, sys, time
 
 HOME = os.environ.get("SYSTEM_CATALOG_HOME") or os.path.expanduser("~")
 SKILLS = os.environ.get("SYSTEM_CATALOG_SKILLS") or os.path.join(HOME, "dev/agent-skills")
@@ -174,12 +176,73 @@ def scheduled_tasks(health):
             out.append(entry(t["id"], "scheduled task", skill or f, trig, goal, h, why))
     return out
 
+# Codex's automation_runs.status is the inbox review state, not an outcome: a row means the run launched.
+RUN_STATES = {"PENDING_REVIEW", "ARCHIVED"}
+DAYS = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"]
+
+def period_ms(rrule, name):
+    """Longest expected gap between two runs, from the job's RRULE. Unknown schedules are an error."""
+    r = dict(kv.split("=", 1) for kv in re.sub(r"^RRULE:", "", rrule).split(";") if "=" in kv)
+    n = int(r.get("INTERVAL", 1))
+    freq = r.get("FREQ")
+    if freq == "MINUTELY":
+        return n * 60000
+    if freq == "HOURLY":
+        return n * 3600000
+    if freq == "DAILY":
+        return n * 86400000
+    if freq == "WEEKLY":
+        days = sorted(DAYS.index(d) for d in r["BYDAY"].split(",")) if "BYDAY" in r else []
+        gap = max((b - a) % 7 or 7 for a, b in zip(days, days[1:] + days[:1])) if len(days) > 1 else 7
+        return (gap if len(days) > 1 and n == 1 else 7 * n) * 86400000
+    raise SystemExit("ERROR: automation %s: cannot read schedule %r" % (name, rrule))
+
+def codex_runs():
+    """-> ({automation id: (latest run ms, status)}, {automation id: last_run_at ms}) from Codex's database, read-only."""
+    path = p(".codex/sqlite/codex.db")
+    if not os.path.isfile(path):
+        raise SystemExit("ERROR: Codex database missing: " + tilde(path))
+    try:
+        db = sqlite3.connect("file:%s?mode=ro" % path, uri=True)
+        runs = {}
+        for aid, status, at in db.execute("SELECT automation_id, status, created_at FROM automation_runs ORDER BY created_at"):
+            runs[aid] = (at, status)  # ascending, so the last row is the latest
+        last = {i: at for i, at in db.execute("SELECT id, last_run_at FROM automations WHERE last_run_at IS NOT NULL")}
+        db.close()
+    except sqlite3.Error as e:
+        raise SystemExit("ERROR: %s: %s" % (tilde(path), e))
+    for aid, (_, status) in runs.items():
+        if status not in RUN_STATES and not re.search(r"FAIL|ERROR", status):
+            raise SystemExit("ERROR: automation_runs: unknown status %r for %s; teach system-catalog what it means" % (status, aid))
+    return runs, last
+
 def nightly_jobs():
+    now = int(os.environ.get("SYSTEM_CATALOG_NOW") or time.time()) * 1000
+    runs, last = codex_runs()
     out = []
     for f in sorted(glob.glob(p(".codex/automations/*/automation.toml"))):
-        kv = dict(re.findall(r'^(\w+)\s*=\s*"(.*)"\s*$', open(f, encoding="utf-8").read(), re.M))
-        out.append(entry(kv.get("name") or os.path.basename(os.path.dirname(f)), "nightly job", f, kv.get("rrule", "unknown"),
-                         kv.get("prompt", "")[:140], reason="Codex %s; no check yet" % kv.get("status", "status unknown")))
+        kv = {k: a or b for k, a, b in re.findall(r'^(\w+)\s*=\s*(?:"(.*)"|(\d+))\s*$', open(f, encoding="utf-8").read(), re.M)}
+        name = kv.get("name") or os.path.basename(os.path.dirname(f))
+        aid, rrule = kv["id"], kv["rrule"]
+        h, why = UNCHECKED, ""
+        if kv["status"] != "ACTIVE":
+            why = "Codex %s: paused, not failing" % kv["status"]
+        else:
+            window = period_ms(rrule, aid) * 3 // 2  # one missed beat of slack
+            at, status = runs.get(aid, (0, ""))
+            at = max(at, last.get(aid, 0))
+            ago = (now - at) // 3600000
+            if re.search(r"FAIL|ERROR", status) and at == runs[aid][0]:
+                h, why = FAIL, "latest run %s (%dh ago)" % (status, ago)
+            elif at and now - at <= window:
+                h = OK
+            elif at:
+                h, why = FAIL, "has not run when it should have: last run %dh ago, expected within %dh" % (ago, window // 3600000)
+            elif now - int(kv["created_at"]) > window:
+                h, why = FAIL, "has not run when it should have: no run on record, expected within %dh" % (window // 3600000)
+            else:
+                why = "new: first run not due yet"
+        out.append(entry(name, "nightly job", f, rrule, kv.get("prompt", "")[:140], h, why))
     return out
 
 def build():
