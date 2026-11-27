@@ -8,8 +8,8 @@
 # Only the system-band mod and the CLI statusline see rate limits; both call
 # `record` on refresh. Hooks get no usage data, so they read the cache.
 # Pace = used % / share of the week elapsed (at least one day, so an early
-# reading is not over-read). frugal: pace 100%+ or 90%+ used. generous: pace
-# under 75%, tokens would go unspent. normal otherwise.
+# reading is not over-read). generous: pace under 75%, tokens would go unspent.
+# normal otherwise. Never frugal: Rio has spare resets, only he picks frugal.
 # No reading, one older than 6h, or one from before the reset: exit 1, why on stderr.
 set -euo pipefail
 
@@ -44,7 +44,7 @@ jq -r --argjson now "$now" --argjson week "$week" --argjson stale "$stale_after"
     else
       ([($week - (.resets_at - $now)) / $week, 1 / 7] | max) as $elapsed
       | (.pct / $elapsed) as $pace
-      | (if $pace >= 100 or .pct >= 90 then "frugal" elif $pace < 75 then "generous" else "normal" end) as $level
+      | (if $pace < 75 then "generous" else "normal" end) as $level
       | "\($level)\tweek \(.pct | floor)% used, \((.resets_at - $now) / 8640 | round / 10) days to reset, on pace for \($pace | round)%"
     end
 ' "$cache" | {

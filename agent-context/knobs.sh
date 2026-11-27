@@ -10,8 +10,8 @@
 # Values come through the same loader the enforcing hooks use; AGENT_SESSION_ID
 # (from the hook payload) selects this session's layer. Meanings come from
 # agent-knobs.json, so the band, the CLI and the agent read one source.
-# tokens=auto resolves from weekly Claude usage pace (usage-pace); Codex
-# sessions keep plain auto, Claude's limits are not theirs.
+# tokens=auto resolves from weekly Claude usage pace (usage-pace) to generous
+# or normal, never frugal; Codex sessions keep plain auto, Claude's limits are not theirs.
 
 set -euo pipefail
 

@@ -52,7 +52,7 @@ want "session cap" "$out" "Reply cap: 100"
 "$root/usage-pace" record 25 $(($(date +%s) + 302400))
 [ -z "$(hook s1)" ] || fail "pace numbers alone re-injected"
 "$root/usage-pace" record 60 $(($(date +%s) + 302400))
-want "new level" "$(hook s1)" "tokens: auto → frugal"
+want "new level" "$(hook s1)" "tokens: auto → normal"
 
 # another session keeps the machine values
 want "other session" "$(hook s2)" "attention: foreground"

@@ -1,6 +1,6 @@
 #!/bin/sh
-# usage-pace: weekly Claude usage -> frugal | normal | generous, with why
-# (agent-skills#51). Throwaway HOME so the real cache is untouched.
+# usage-pace: weekly Claude usage -> generous | normal, with why (agent-skills#51).
+# Never frugal: only Rio picks that. Throwaway HOME so the real cache is untouched.
 set -eu
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -18,8 +18,8 @@ pace() { "$p" record "$1" $(($(date +%s) + $2)) && "$p"; }
 
 want "generous" "$(pace 20 $((day * 7 / 2)))" "$(printf 'generous\tweek 20%% used, 3.5 days to reset, on pace for 40%%')"
 want "normal" "$(pace 45 $((day * 7 / 2)))" "$(printf 'normal\t')"
-want "frugal on pace" "$(pace 60 $((day * 7 / 2)))" "frugal"
-want "frugal near cap" "$(pace 91 $((day / 2)))" "frugal"
+want "over pace stays normal" "$(pace 60 $((day * 7 / 2)))" "$(printf 'normal\t')"
+want "near cap stays normal" "$(pace 91 $((day / 2)))" "$(printf 'normal\t')"
 # the first day counts as a full day, so an early reading is not over-read
 want "early week" "$(pace 10 $((day * 7 - 3600)))" "on pace for 70%"
 want "fraction pct" "$(pace 12.6 $((day * 7 / 2)))" "week 12% used"
