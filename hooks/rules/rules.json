@@ -137,7 +137,7 @@
         "content": "\"(file_path|notebook_path)\":\"[^\"]*((^|[^[:alnum:]_.-])(agent-skills|\\.dotfiles)/|hooks/rules/|\\.agents/AGENTS\\.md)"
       },
       "do": "remind",
-      "text": "You are editing Rio's agentic system (skills, ledger, hooks, agent rules, dotfiles). All system changes go through the `utils:system` skill, invoke it FIRST if you haven't since this session started or was last compacted (compaction drops its rules): it records intent in LEDGER.md, finds prior art, and owns publish + verify across both Macs."
+      "text": "You are editing Rio's agentic system (skills, ledger, hooks, agent rules, dotfiles). All system changes go through the `utils:grumbo` skill, invoke it FIRST if you haven't since this session started or was last compacted (compaction drops its rules): it records intent in LEDGER.md, finds prior art, and owns publish + verify across both Macs."
     },
     {
       "id": "system-changes-via-skill-bash",
@@ -147,7 +147,7 @@
         "input": "(?s)^(?=.*((^|[^[:alnum:]_.-])agent-skills/|(^|[^[:alnum:]_.-])\\.dotfiles([/;&[:space:]]|$)|hooks/rules([/;&[:space:]]|$)|\\.agents/AGENTS\\.md)).*(<<|>>|sed[[:space:]]+-i|mv[[:space:]]|ln[[:space:]]|jq[^|;&]*>|(echo|printf)[^|>;&]*>(?![[:space:]]*/dev/null([^[:alnum:]_./-]|$)))"
       },
       "do": "remind",
-      "text": "This shell command writes into Rio's agentic system (skills, ledger, hooks, agent rules, dotfiles). All system changes go through the `utils:system` skill, invoke it FIRST if you haven't since this session started or was last compacted (compaction drops its rules)."
+      "text": "This shell command writes into Rio's agentic system (skills, ledger, hooks, agent rules, dotfiles). All system changes go through the `utils:grumbo` skill, invoke it FIRST if you haven't since this session started or was last compacted (compaction drops its rules)."
     },
     {
       "id": "global-rules-placement",
@@ -157,7 +157,7 @@
         "content": "(\"file_path\":\"|\\*\\*\\* (Update|Add) File: )/(Users|home)/[^/\"\\s]+/(\\.dotfiles/)?\\.(agents/AGENTS|claude/CLAUDE|codex/AGENTS)\\.md"
       },
       "do": "remind",
-      "text": "Global rules file: last resort, most rules belong elsewhere. Pick the layer first (utils:system ref/implementation-routes.md): pattern trigger -> hook; one workflow -> that skill; one repo -> its AGENTS.md; unperceivable or late in long work -> hook-injected. Only judgment every task needs goes here, merged into an existing line (1,600-word cap)."
+      "text": "Global rules file: last resort, most rules belong elsewhere. Pick the layer first (utils:grumbo ref/implementation-routes.md): pattern trigger -> hook; one workflow -> that skill; one repo -> its AGENTS.md; unperceivable or late in long work -> hook-injected. Only judgment every task needs goes here, merged into an existing line (1,600-word cap)."
     },
     {
       "id": "no-editing-plugin-snapshots",

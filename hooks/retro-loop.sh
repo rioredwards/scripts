@@ -13,7 +13,7 @@
 # would never fire. Tool calls against the repo are the one clock that keeps
 # ticking. Non-git cwd → skip. Counter resets on fire.
 #
-# Harvest path: `utils:system` triage sweeps transcripts for `[retro-loop]:` via
+# Harvest path: `utils:grumbo` triage sweeps transcripts for `[retro-loop]:` via
 # sesh and feeds findings into ledger triage.
 #
 # Settings follow the agent-hooks convention (profile in

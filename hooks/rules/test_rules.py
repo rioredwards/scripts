@@ -399,15 +399,15 @@ class RulesTests(unittest.TestCase):
             "echo x > /dev/null; ls ~/scripts/hooks/rules/",
         ]
         writes = [
-            ("echo x > ~/dev/agent-skills/LEDGER.md", "utils:system"),
-            ("printf x > ~/scripts/hooks/rules/rules.json 2>/dev/null", "utils:system"),
+            ("echo x > ~/dev/agent-skills/LEDGER.md", "utils:grumbo"),
+            ("printf x > ~/scripts/hooks/rules/rules.json 2>/dev/null", "utils:grumbo"),
             ("echo " + home + "dev > notes.txt", "hardcoded home"),
-            ("echo x >/dev/null_other; cat ~/dev/agent-skills/f", "utils:system"),
+            ("echo x >/dev/null_other; cat ~/dev/agent-skills/f", "utils:grumbo"),
         ]
         for cmd in reads:
             with self.subTest(read=cmd):
                 out = self.run_hook("tool", {"tool_name": "Bash", "tool_input": {"command": cmd}}).stdout
-                self.assertNotIn("utils:system", out)
+                self.assertNotIn("utils:grumbo", out)
                 self.assertNotIn("hardcoded home", out)
         for cmd, expected in writes:
             with self.subTest(write=cmd):
@@ -878,10 +878,10 @@ class RulesTests(unittest.TestCase):
         for cmd in cmds:
             with self.subTest(cmd=cmd):
                 out = self.run_hook("tool", {"tool_name": "Bash", "tool_input": {"command": cmd}})
-                self.assertNotIn("utils:system", out.stdout)
+                self.assertNotIn("utils:grumbo", out.stdout)
         real = "cat > ~/dev/agent-skills/x.md <<EOF\nhi\nEOF"
         out = self.run_hook("tool", {"tool_name": "Bash", "tool_input": {"command": real}})
-        self.assertIn("utils:system", out.stdout)
+        self.assertIn("utils:grumbo", out.stdout)
 
     def test_piped_pytest_only_blocks_full_runs(self):
         """A piped full suite is denied; a piped single test file is a focused run."""
@@ -958,7 +958,7 @@ class RulesTests(unittest.TestCase):
                 self.assertNotIn("not your audit log", out.stdout)
 
     def test_system_edits_route_to_system_skill(self):
-        """Edit/Write into Rio's system files get the utils:system nudge; other paths do not."""
+        """Edit/Write into Rio's system files get the utils:grumbo nudge; other paths do not."""
         hit = [
             ("Edit", {"file_path": "/Users/x/dev/agent-skills/LEDGER.md", "old_string": "a", "new_string": "b"}),
             ("Write", {"file_path": "/Users/x/.dotfiles/.agents/AGENTS.md", "content": "hi"}),
@@ -974,11 +974,11 @@ class RulesTests(unittest.TestCase):
         for tool, inp in hit:
             with self.subTest(hit=inp):
                 out = self.run_hook("tool", {"tool_name": tool, "tool_input": inp})
-                self.assertIn("utils:system", out.stdout)
+                self.assertIn("utils:grumbo", out.stdout)
         for tool, inp in miss:
             with self.subTest(miss=inp):
                 out = self.run_hook("tool", {"tool_name": tool, "tool_input": inp})
-                self.assertNotIn("utils:system", out.stdout)
+                self.assertNotIn("utils:grumbo", out.stdout)
 
     def test_dotfiles_shell_writes_route_to_system_skill(self):
         """Shell writes into ~/.dotfiles (incl. symlinks) get the nudge; reads do not."""
@@ -995,11 +995,11 @@ class RulesTests(unittest.TestCase):
         for cmd in hit:
             with self.subTest(hit=cmd):
                 out = self.run_hook("tool", {"tool_name": "Bash", "tool_input": {"command": cmd}})
-                self.assertIn("utils:system", out.stdout)
+                self.assertIn("utils:grumbo", out.stdout)
         for cmd in miss:
             with self.subTest(miss=cmd):
                 out = self.run_hook("tool", {"tool_name": "Bash", "tool_input": {"command": cmd}})
-                self.assertNotIn("utils:system", out.stdout)
+                self.assertNotIn("utils:grumbo", out.stdout)
 
     def test_subagent_skill_line(self):
         """Subagent briefs must say which skill to load (or none); web lookups are exempt."""
