@@ -23,7 +23,8 @@ EOF"""
 PROTECTED_FILES = ("dev/agent-skills/HARD_RULES.md", "dev/agent-skills/plugins/utils/skills/grumbo/ref/judge.md", "dev/agent-skills/GOALS.md",
                    "dev/agent-skills/plugins/utils/skills/grumbo/scripts/grumbo-gate",
                    "dev/agent-skills/plugins/utils/skills/grumbo/tests/grumbo-gate.sh",
-                   "scripts/hooks/rules/rules.json", "scripts/agent-knobs.json", "dev/project-manager/HARD_RULES.md")
+                   "scripts/hooks/rules/rules.json", "scripts/agent-knobs.json", "dev/project-manager/HARD_RULES.md",
+                   "dev/project-manager/GARDEN.md")
 
 
 def missing_files(home, rel_paths):
@@ -1105,7 +1106,8 @@ class RulesTests(unittest.TestCase):
                      "/scripts/agent-knobs.json", "/.config/agent-hooks/local.sh",
                      "/.local/state/grumbo/gate.json", "/dev/agent-skills/plugins/utils/skills/grumbo/scripts/grumbo-gate",
                      "/dev/agent-skills/plugins/utils/skills/grumbo/tests/grumbo-gate.sh",
-                     "/dev/project-manager/HARD_RULES.md", "/dev/agent-skills/plugins/utils/skills/grumbo/ref/judge.md")
+                     "/dev/project-manager/HARD_RULES.md", "/dev/agent-skills/plugins/utils/skills/grumbo/ref/judge.md",
+                     "/dev/project-manager/GARDEN.md")
         for tool in ("Edit", "Write", "MultiEdit"):
             for path in protected:
                 with self.subTest(tool=tool, path=path):
@@ -1113,7 +1115,7 @@ class RulesTests(unittest.TestCase):
         with self.subTest("apply_patch"):
             self.assertTrue(self.denied("apply_patch", {"input": "*** Update File: " + home + protected[0] + "\n+x"}))
         for path in ("/dev/agent-skills/LEDGER.md", "/dev/agent-skills/EXPERIMENTS.md",
-                     "/dev/agent-skills/plugins/utils/skills/grumbo/SKILL.md", "/dev/project-manager/GARDEN.md",
+                     "/dev/agent-skills/plugins/utils/skills/grumbo/SKILL.md", "/dev/project-manager/PLAYBOOK.md",
                      "/dev/agent-skills/plugins/utils/skills/grumbo/ref/ledger-format.md",
                      "/dev/other/GOALS.md"):
             with self.subTest(allowed=path):
@@ -1128,6 +1130,7 @@ class RulesTests(unittest.TestCase):
                         "git checkout -- GOALS.md", "mv x plugins/utils/skills/grumbo/scripts/grumbo-gate",
                         "echo off > ~/.config/agent-hooks/local.sh", "tee ~/dev/project-manager/HARD_RULES.md < /tmp/x",
                         "echo x >> plugins/utils/skills/grumbo/ref/judge.md", "sed -i '' s/a/b/ plugins/utils/skills/grumbo/ref/judge.md",
+                        "sed -i '' s/a/b/ ~/dev/project-manager/GARDEN.md", "echo x >> GARDEN.md",
                         "git checkout -- plugins/utils/skills/grumbo/ref/judge.md",
                         "git -C ~/dev/agent-skills checkout -- GOALS.md", "git -C '/a b' restore HARD_RULES.md",
                         "git --git-dir=a/.git --work-tree=a restore GOALS.md", "git --git-dir a/.git checkout HEAD -- GOALS.md",
