@@ -5,6 +5,8 @@ set -euo pipefail
 
 CURSOR_BUNDLE_ID="com.todesktop.230313mzl4w4u92"
 
+command -v duti >/dev/null || { echo "duti not found: brew install duti" >&2; exit 1; }
+
 EXTENSIONS=(
   # code
   js jsx ts tsx mjs cjs py go rb php rs java kt lua c h cpp cc hpp m mm swift gd scm
@@ -28,5 +30,6 @@ done
 ok=$(( ${#EXTENSIONS[@]} - ${#failed[@]} ))
 echo "Set $ok/${#EXTENSIONS[@]} extensions to open in Cursor ($CURSOR_BUNDLE_ID)."
 if (( ${#failed[@]} > 0 )); then
-  echo "Failed: ${failed[*]}"
+  echo "Failed: ${failed[*]}" >&2
+  exit 1
 fi
