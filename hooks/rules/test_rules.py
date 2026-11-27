@@ -20,7 +20,7 @@ EOF"""
 
 
 # Real files the grumbo-unattended-protected-files rules guard, relative to $HOME.
-PROTECTED_FILES = ("dev/agent-skills/DENY_LIST.md", "dev/agent-skills/GOALS.md",
+PROTECTED_FILES = ("dev/agent-skills/HARD_RULES.md", "dev/agent-skills/GOALS.md",
                    "dev/agent-skills/plugins/utils/skills/grumbo/scripts/grumbo-gate",
                    "dev/agent-skills/plugins/utils/skills/grumbo/tests/grumbo-gate.sh",
                    "scripts/hooks/rules/rules.json", "scripts/agent-knobs.json", "dev/project-manager/HARD_RULES.md")
@@ -1071,7 +1071,7 @@ class RulesTests(unittest.TestCase):
             for name, data in misses:
                 with self.subTest(agent=agent, miss=data):
                     self.assertNotIn("Global rules file", self.run_hook("tool", {"tool_name": name, "tool_input": data}, agent).stdout)
-    # --- grumbo: unattended (attention=away) runs; see DENY_LIST.md in agent-skills ---
+    # --- grumbo: unattended (attention=away) runs; see HARD_RULES.md in agent-skills ---
 
     def denied(self, tool, tool_input, attention="away"):
         out = self.run_hook("tool", {"tool_name": tool, "tool_input": tool_input}, attention=attention).stdout
@@ -1085,9 +1085,20 @@ class RulesTests(unittest.TestCase):
             self.assertEqual(missing_files(home, PROTECTED_FILES + ("dev/agent-skills/NO_SUCH_FILE.md",)),
                              [home / "dev/agent-skills/NO_SUCH_FILE.md"])
 
+    def test_unattended_messages_cite_hard_rules_by_number(self):
+        # The deny list is gone: every message names the matching approved hard rule, in plain words.
+        want = {"grumbo-unattended-protected-files": "hard rule 3", "grumbo-unattended-protected-files-bash": "hard rule 3",
+                "grumbo-unattended-no-force-push": "hard rule 2", "grumbo-unattended-no-self-unlock": "hard rule 3"}
+        rules = {r["id"]: r for r in json.load(open(Path(__file__).parent / "rules.json"))["rules"]}
+        for rid, phrase in want.items():
+            with self.subTest(rule=rid):
+                self.assertNotIn("DENY_LIST", rules[rid]["text"])
+                self.assertNotIn("deny list", rules[rid]["text"])
+                self.assertIn(phrase, rules[rid]["text"])
+
     def test_unattended_cannot_edit_protected_files(self):
         home = "/Users/x"
-        protected = ("/dev/agent-skills/DENY_LIST.md", "/dev/agent-skills/GOALS.md", "/dev/agent-skills.wt/GOALS.md",
+        protected = ("/dev/agent-skills/HARD_RULES.md", "/dev/agent-skills/DENY_LIST.md", "/dev/agent-skills/GOALS.md", "/dev/agent-skills.wt/GOALS.md",
                      "/scripts/hooks/rules/rules.json", "/scripts/hooks/turn-end/dispatch",
                      "/scripts/agent-knobs.json", "/.config/agent-hooks/local.sh",
                      "/.local/state/grumbo/gate.json", "/dev/agent-skills/plugins/utils/skills/grumbo/scripts/grumbo-gate",
@@ -1103,13 +1114,13 @@ class RulesTests(unittest.TestCase):
                      "/dev/agent-skills/plugins/utils/skills/grumbo/SKILL.md", "/dev/project-manager/GARDEN.md",
                      "/dev/other/GOALS.md"):
             with self.subTest(allowed=path):
-                self.assertFalse(self.denied("Edit", {"file_path": home + path, "new_string": "GOALS.md DENY_LIST.md"}))
+                self.assertFalse(self.denied("Edit", {"file_path": home + path, "new_string": "GOALS.md HARD_RULES.md"}))
         for attention in ("foreground", "background"):
             with self.subTest(attention=attention):
                 self.assertFalse(self.denied("Write", {"file_path": home + protected[0], "content": "x"}, attention=attention))
 
     def test_unattended_shell_cannot_write_protected_files(self):
-        for command in ("echo x >> DENY_LIST.md", "sed -i '' s/a/b/ GOALS.md", "cp /tmp/r.json ~/scripts/hooks/rules/rules.json",
+        for command in ("echo x >> HARD_RULES.md", "echo x >> ~/dev/agent-skills/HARD_RULES.md", "echo x >> DENY_LIST.md", "sed -i '' s/a/b/ GOALS.md", "cp /tmp/r.json ~/scripts/hooks/rules/rules.json",
                         "python3 -c \"open('GOALS.md','w').write('')\"", "trash ~/.local/state/grumbo/gate.json",
                         "git checkout -- GOALS.md", "mv x plugins/utils/skills/grumbo/scripts/grumbo-gate",
                         "echo off > ~/.config/agent-hooks/local.sh", "tee ~/dev/project-manager/HARD_RULES.md < /tmp/x"):
