@@ -584,6 +584,15 @@
       "text": "BLOCKED: This session is unattended (attention: away), so no force-push (hard rule 2, what can't be undone: it deletes history git cannot restore). Pull and rebase or merge instead, push normally, or log a `pm_inbox.py add grumbo ask` line. This is an automated gate, not a denial from Rio."
     },
     {
+      "id": "sealed-grumbo-cases",
+      "on": "tool",
+      "match": {
+        "content": "grumbo-cases/hidden"
+      },
+      "do": "deny",
+      "text": "BLOCKED: these are grumbo's sealed test cases (agent-skills grumbo ref/cases.md). Agents never read, list, copy or edit them, so they stay a fair check. Use `grumbo-cases hidden-check`, which prints counts only. Only Rio moves cases into the sealed set (`grumbo-cases hidden-apply`)."
+    },
+    {
       "id": "grumbo-unattended-no-self-unlock",
       "on": "tool",
       "when": {

@@ -42,6 +42,19 @@ class RulesTests(unittest.TestCase):
             input=json.dumps(payload), text=True, capture_output=True, env=env,
         )
 
+    def test_sealed_grumbo_cases_stay_unread(self):
+        bank = "$HOME/.local/state/grumbo-cases/"
+        for tool, inp in (("Bash", {"command": "ls " + bank + "hidden"}),
+                          ("Bash", {"command": "cat " + bank + "hidden-waiting/c-1/prompt.txt"}),
+                          ("Read", {"file_path": "/Users/x/.local/state/grumbo-cases/hidden/c-1/correction.txt"}),
+                          ("Grep", {"pattern": "x", "path": bank + "hidden"})):
+            with self.subTest(blocked=inp):
+                self.assertIn('"deny"', self.run_hook("tool", {"tool_name": tool, "tool_input": inp}).stdout)
+        for cmd in ("grumbo-cases hidden-check", "ls " + bank + "open", "grumbo-cases list"):
+            with self.subTest(allowed=cmd):
+                out = self.run_hook("tool", {"tool_name": "Bash", "tool_input": {"command": cmd}}).stdout
+                self.assertNotIn('"deny"', out)
+
     def test_agents_never_send_slack(self):
         prefix = "mcp__3711da19-ec58-4c28-a15b-10831ef9a620__"
         for tool in (prefix + "slack_send_message", prefix + "slack_schedule_message",
