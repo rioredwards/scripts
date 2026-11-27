@@ -195,6 +195,11 @@ publish() { # checkout files -> 1. re-attribute under the lock, 2. bump, validat
     files+=("$manifest")
     claude plugin validate "plugins/$plugin" --strict >>"$LOG" 2>&1 || fail "plugin $plugin failed validation"
   done
+  # Warn-only skill length check; lowers the baseline when a skill shrank (never blocks).
+  if [ -x plugins/utils/skills/grumbo/scripts/skill-size.sh ] && [ -f skill-size-baseline.tsv ]; then
+    plugins/utils/skills/grumbo/scripts/skill-size.sh >>"$LOG" 2>&1 || log "skill-size check errored (warn only)"
+    git diff --quiet -- skill-size-baseline.tsv || files+=(skill-size-baseline.tsv)
+  fi
   git add -- "${files[@]}" >>"$LOG" 2>&1 || fail "git add"
   git commit -q -m "publish: ${agent:-agent} turn ${session:0:8}" \
     -m "Auto-published at turn end by agent-skills-publish." -- "${files[@]}" >>"$LOG" 2>&1 ||

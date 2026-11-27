@@ -6,6 +6,7 @@ P="$(cd "$(dirname "$0")/.." && pwd)/hooks/turn-end/agent-skills-publish"
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 fail=0
 check() { if [ "$2" = "$3" ]; then echo "  ok: $1"; else echo "  FAIL: $1 (want '$3', got '$2')" >&2; fail=1; fi; }
+REAL_HOME="$HOME"
 export HOME="$tmp/home"; mkdir "$HOME" # a failing publish must not reach the real PM inbox
 
 git init -q --bare "$tmp/remote.git"
@@ -104,4 +105,27 @@ HOOK_CWD="$D" "$P" claude de7ac4ed "$tmp/det.jsonl"; check "detached worktree fa
 check "detached: edit uncommitted" "$(git -C "$D" status --porcelain det.md)" "?? det.md"
 check "detached: remote unchanged" "$(git -C "$tmp/remote.git" rev-parse HEAD)" "$before"
 check "detached: failure logged" "$(grep -c 'detached HEAD' "$tmp/state/publish.log")" "1"
+# Skill length check: a grown skill still publishes and its warning reaches the log; a shrunk one
+# lowers the baseline inside the publish commit. SKILL_SIZE_SCRIPT overrides the script source.
+SS="${SKILL_SIZE_SCRIPT:-$REAL_HOME/dev/agent-skills/plugins/utils/skills/grumbo/scripts/skill-size.sh}"
+[ -f "$SS" ] || { echo "  FAIL: skill-size.sh not found at $SS" >&2; exit 1; }
+SK=plugins/utils/skills/demo/SKILL.md
+mkdir -p "$R/plugins/utils/skills/demo" "$R/plugins/utils/skills/grumbo/scripts"
+cp "$SS" "$R/plugins/utils/skills/grumbo/scripts/skill-size.sh"
+seq 100 | sed 's/.*/w/' >"$R/$SK"
+git -C "$R" add -A; git -C "$R" commit -qm sk
+"$R/plugins/utils/skills/grumbo/scripts/skill-size.sh" --raise "$R"
+git -C "$R" add -A; git -C "$R" commit -qm base; git -C "$R" push -q origin HEAD
+printf '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"%s/%s"}}]}}\n' "$R" "$SK" >"$tmp/sk.jsonl"
+seq 150 | sed 's/.*/w/' >"$R/$SK"
+"$P" claude 5k111111 "$tmp/sk.jsonl"; check "grown skill: publish exit" "$?" "0"
+check "grown skill: committed" "$(git -C "$R" show --name-only --format= HEAD | tr '\n' ' ')" "$SK "
+check "grown skill: warning in log" "$(grep -c 'WARN .*demo/SKILL.md grew 100 -> 150' "$tmp/state/publish.log")" "1"
+check "grown skill: baseline not raised" "$(grep -c 'demo/SKILL.md.100$' "$R/skill-size-baseline.tsv")" "1"
+seq 60 | sed 's/.*/w/' >"$R/$SK"
+"$P" claude 5k222222 "$tmp/sk.jsonl"; check "shrunk skill: publish exit" "$?" "0"
+check "shrunk skill: baseline lowered in the same commit" \
+  "$(git -C "$R" show --name-only --format= HEAD | sort | tr '\n' ' ')" "$SK skill-size-baseline.tsv "
+check "shrunk skill: baseline value" "$(grep -c 'demo/SKILL.md.60$' "$R/skill-size-baseline.tsv")" "1"
+check "shrunk skill: pushed" "$(git -C "$R" rev-parse HEAD)" "$(git -C "$tmp/remote.git" rev-parse HEAD)"
 exit $fail
