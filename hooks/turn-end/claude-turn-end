@@ -33,4 +33,11 @@ if [ -n "$agent_id" ]; then
 fi
 export HOOK_AGENT HOOK_SESSION_ID HOOK_CWD HOOK_TRANSCRIPT_PATH
 
+# Statusline links segment: link-tracker writes /tmp/claude-links-<session> from the
+# reply. Rio's own turn only (a subagent's session id is not the one the statusline
+# reads). Advisory: a failure here must not stop narration.
+if [ -z "$agent_id" ]; then
+  printf '%s' "$payload" | bash "$scripts_root/hooks/link-tracker.sh" || true
+fi
+
 printf '%s' "$payload" | jq -r '.last_assistant_message // empty' | "$scripts_root/hooks/turn-end/dispatch"
