@@ -1,0 +1,29 @@
+#!/bin/bash
+# tool-check flags a com.rio* LaunchAgent that is installed but not loaded (it would never run,
+# so the nonzero-exit check alone never sees it). Disabled plists and loaded jobs stay quiet.
+set -euo pipefail
+here="$(cd "$(dirname "$0")/.." && pwd)"
+t="$(mktemp -d)"
+trap 'rm -rf "$t"' EXIT
+mkdir -p "$t/scripts/tests" "$t/tools" "$t/LaunchAgents" "$t/sessions/a/b"
+printf 'exit 0\n' > "$t/scripts/tests/run-all.sh"
+: > "$t/scripts/tool-inventory"
+printf '{"scheduledTasks": []}' > "$t/sessions/a/b/scheduled-tasks.json"
+printf -- '-\t0\tcom.rioredwards.good\n' > "$t/launchctl.txt"
+plist() { # label disabled
+  /usr/bin/python3 -c 'import plistlib,sys; d={"Label":sys.argv[1],"ProgramArguments":["/bin/true"]}
+if sys.argv[2]=="1": d["Disabled"]=True
+open(sys.argv[3],"wb").write(plistlib.dumps(d))' "$1" "$2" "$t/LaunchAgents/$1.plist"
+}
+plist com.rioredwards.good 0
+plist com.rioredwards.dead 0
+plist com.rioredwards.off 1
+out="$(TZ=UTC TOOL_CHECK_NOW=2026-10-14T12:00:00Z TOOL_CHECK_SCRIPTS="$t/scripts" TOOL_CHECK_TOOLS="$t/tools" \
+  TOOL_CHECK_LOGDIR="$t/logs" TOOL_CHECK_INBOX_DIR="$t/inbox" TOOL_CHECK_ASKS="$t/asks.md" \
+  TOOL_CHECK_TASKS_GLOB="$t/sessions/*/*/scheduled-tasks.json" TOOL_CHECK_PLISTS="$t/LaunchAgents" \
+  TOOL_CHECK_LAUNCHCTL_LIST="$t/launchctl.txt" "$here/tool-check" 2>&1 || true)"
+fail() { echo "tool-check-unloaded-test: FAIL: $1"; echo "$out"; exit 1; }
+grep -q 'BROKE launchd job dead: installed but not loaded' <<<"$out" || fail "unloaded job not flagged"
+grep -q 'launchd job good' <<<"$out" && grep 'launchd job good' <<<"$out" | grep -q BROKE && fail "loaded job flagged"
+grep 'launchd job off' <<<"$out" | grep -q BROKE && fail "disabled job flagged"
+echo "tool-check-unloaded-test: ok"

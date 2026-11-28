@@ -204,6 +204,22 @@ def launchd_checks():
         results.append(Result("launchd job", name, False, "last run exited %s" % status, cmd, logs))
     if not results:
         results.append(Result("launchd job", "launchd", False, "no com.rio* jobs in launchctl list (not in a login session?)"))
+        return results
+    # An installed job that is not loaded never runs, so it never exits nonzero: catch it here.
+    loaded = {line.split("\t")[2] for line in out.splitlines() if len(line.split("\t")) == 3}
+    for path in sorted(glob.glob(os.path.join(PLISTS, "com.rio*.plist"))):
+        try:
+            with open(path, "rb") as f:
+                plist = plistlib.load(f)
+        except (OSError, plistlib.InvalidFileException) as e:
+            results.append(Result("launchd job", os.path.basename(path), False, "plist unreadable: %s" % e))
+            continue
+        label = plist.get("Label") or os.path.basename(path)[:-len(".plist")]
+        if label in loaded or plist.get("Disabled"):
+            continue
+        name = re.sub(r"^com\.rio(redwards)?\.", "", label)
+        results.append(Result("launchd job", name, False, "installed but not loaded, so it never runs",
+                              "launchctl bootstrap gui/%d %s" % (os.getuid(), path)))
     return results
 
 
