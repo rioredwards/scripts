@@ -8,12 +8,12 @@
                         non-zero, and the launchd check flags that job on the next run.
 
 Checks: (1) every line of tool-inventory, (2) ~/tools/*/test.sh and tests/run-all.sh, (3) executables
-missing from the inventory, (4) com.rio* launchd jobs with a nonzero last exit, (5) enabled Claude
+missing from the inventory, (4) com.rio* launchd jobs with a nonzero last exit, or installed but not loaded and not disabled, (5) enabled Claude
 Desktop scheduled tasks that missed their latest cron slot or whose latest run recorded an error.
 Each check has a timeout (60s default); a hang counts as broken. Full log: ~/Library/Logs/tool-check/DATE.log.
 
 Test overrides (env): TOOL_CHECK_SCRIPTS, _TOOLS, _LOGDIR, _INBOX_DIR, _ASKS, _TASKS_GLOB,
-_LAUNCHCTL_LIST (file holding `launchctl list` output), _PLISTS (LaunchAgents dir), _NOW (ISO time).
+_LAUNCHCTL_LIST (file holding `launchctl list` output), _DISABLED (`launchctl print-disabled` output), _PLISTS (LaunchAgents dir), _NOW (ISO time).
 """
 import argparse
 import collections
@@ -207,6 +207,7 @@ def launchd_checks():
         return results
     # An installed job that is not loaded never runs, so it never exits nonzero: catch it here.
     loaded = {line.split("\t")[2] for line in out.splitlines() if len(line.split("\t")) == 3}
+    unloaded = []
     for path in sorted(glob.glob(os.path.join(PLISTS, "com.rio*.plist"))):
         try:
             with open(path, "rb") as f:
@@ -215,9 +216,24 @@ def launchd_checks():
             results.append(Result("launchd job", os.path.basename(path), False, "plist unreadable: %s" % e))
             continue
         label = plist.get("Label") or os.path.basename(path)[:-len(".plist")]
-        if label in loaded or plist.get("Disabled"):
-            continue
+        if label not in loaded:
+            unloaded.append((path, label, plist))
+    if not unloaded:
+        return results
+    dsrc = os.environ.get("TOOL_CHECK_DISABLED")
+    if dsrc:
+        drc, dout = 0, open(dsrc, encoding="utf-8").read()
+    else:
+        drc, dout, _ = run_cmd("launchctl print-disabled gui/%d" % os.getuid(), 20)
+    if drc != 0:
+        return results + [Result("launchd job", "launchctl", False, "launchctl print-disabled failed (exit %s)" % drc,
+                                 "launchctl print-disabled", tail(dout))]
+    disabled = set(re.findall(r'"([^"]+)" => (?:disabled|true)', dout))
+    for path, label, plist in unloaded:
         name = re.sub(r"^com\.rio(redwards)?\.", "", label)
+        if plist.get("Disabled") or label in disabled:
+            results.append(Result("launchd job", name, True, "turned off on purpose (launchctl disable)", skip=True))
+            continue
         results.append(Result("launchd job", name, False, "installed but not loaded, so it never runs",
                               "launchctl bootstrap gui/%d %s" % (os.getuid(), path)))
     return results
