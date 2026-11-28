@@ -33,6 +33,7 @@ dev-sweep-all | dev-sweep-all --help
 dev-up | dev-up --help
 grok-stt | grok-stt --help
 grok-tts | grok-tts -h
+grumbo-gate | grumbo-gate --help >/dev/null
 install-pr-review | install-pr-review --help
 keyfor | keyfor --list >/dev/null
 macbook-display-toggle | macbook-display-toggle --help
@@ -80,6 +81,7 @@ narration-context | syntax
 narration-spoken | syntax
 narration-title | syntax
 ocr-demo.sh | syntax
+open-tour-workspace.sh | syntax
 pm | syntax
 pm-daily | syntax
 process-text-for-speech | syntax
