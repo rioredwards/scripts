@@ -7,7 +7,8 @@ Usage: youtube-notes URL [NEW_OUTPUT_DIR]
        youtube-notes --version
 
 Extract timestamped captions and on-screen slide text using cue-kit.
-Prints the path to notes.md. Slide screenshots are saved alongside it.
+Prints the path to notes.md. The output folder also holds slide screenshots
+and metadata.json with video details, chapters, and up to 10 top comments.
 Uses a temporary output folder unless you provide a new folder path.
 EOF
 }
@@ -23,7 +24,7 @@ if [ "$#" -gt 2 ] || { [ "$1" = --version ] && [ "$#" -ne 1 ]; }; then
     exit 2
 fi
 
-for dependency in uvx ffmpeg ffprobe yt-dlp tesseract; do
+for dependency in uvx ffmpeg ffprobe yt-dlp tesseract jq; do
     if ! command -v "$dependency" >/dev/null 2>&1; then
         printf 'youtube-notes: missing %s\n' "$dependency" >&2
         exit 1
@@ -47,13 +48,29 @@ fi
 output_dir=$(cd "$output_dir" && pwd -P)
 
 cleanup() {
-    # cue-kit needs these intermediate files only while generating notes.
     rm -rf "$output_dir/download" "$output_dir/frames"
-    rm -f "$output_dir/notes.in-progress"
+    rm -f "$output_dir/notes.in-progress" "$output_dir/metadata.in-progress" "$output_dir/metadata.raw"
 }
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+
+printf '[youtube-notes] fetching video metadata and comments…\n' >&2
+yt-dlp --ignore-config --no-playlist --skip-download --write-comments --dump-json \
+    --extractor-args 'youtube:comment_sort=top;max_comments=10,10,0' \
+    "$1" > "$output_dir/metadata.raw"
+jq -es '
+    if length == 1 then .[0] else error("expected metadata for one video") end
+    | {
+        fetched_at: (now | todateiso8601),
+        title, channel, webpage_url, upload_date, duration, description,
+        chapters: (.chapters // []),
+        view_count, like_count,
+        comments: [(.comments // [])[] |
+            {id, author, text, like_count, timestamp, is_pinned, parent}]
+    }
+' "$output_dir/metadata.raw" > "$output_dir/metadata.in-progress"
+mv "$output_dir/metadata.in-progress" "$output_dir/metadata.json"
 
 uvx --from "$package" cue-kit "$1" --mode lecture-notes --ocr --no-whisper \
     --resolution 1920 --out-dir "$output_dir" > "$output_dir/notes.in-progress"
