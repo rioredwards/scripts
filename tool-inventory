@@ -53,6 +53,7 @@ tool-check | tool-check --help
 system-catalog | system-catalog --help
 usage-pace | sh "$HOME/scripts/tests/usage-pace-test.sh"
 validate-recent-projects.sh | validate-recent-projects.sh
+youtube-notes | youtube-notes --version
 
 # --- ~/scripts: parse-only (running them acts: commits, installs, sends, talks to the GUI, or calls an LLM)
 agent-budget | syntax

@@ -1,0 +1,61 @@
+#!/bin/sh
+set -eu
+
+usage() {
+    cat <<'EOF'
+Usage: youtube-notes URL [NEW_OUTPUT_DIR]
+       youtube-notes --version
+
+Extract timestamped captions and on-screen slide text using cue-kit.
+Prints the path to notes.md. Slide screenshots are saved alongside it.
+Uses a temporary output folder unless you provide a new folder path.
+EOF
+}
+
+case "${1:-}" in
+    -h|--help) usage; exit 0 ;;
+    --version|https://*|http://*) ;;
+    *) usage >&2; exit 2 ;;
+esac
+
+if [ "$#" -gt 2 ] || { [ "$1" = --version ] && [ "$#" -ne 1 ]; }; then
+    usage >&2
+    exit 2
+fi
+
+for dependency in uvx ffmpeg ffprobe yt-dlp tesseract; do
+    if ! command -v "$dependency" >/dev/null 2>&1; then
+        printf 'youtube-notes: missing %s\n' "$dependency" >&2
+        exit 1
+    fi
+done
+
+package='cue-kit[ocr]==0.3.0'
+if [ "$1" = --version ]; then
+    exec uvx --from "$package" cue-kit --version
+fi
+
+if [ "$#" -eq 2 ]; then
+    case "$2" in
+        /*) output_dir=$2 ;;
+        *) output_dir=$PWD/$2 ;;
+    esac
+    mkdir "$output_dir"
+else
+    output_dir=$(mktemp -d "${TMPDIR:-/tmp}/youtube-notes.XXXXXX")
+fi
+output_dir=$(cd "$output_dir" && pwd -P)
+
+cleanup() {
+    # cue-kit needs these intermediate files only while generating notes.
+    rm -rf "$output_dir/download" "$output_dir/frames"
+    rm -f "$output_dir/notes.in-progress"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+uvx --from "$package" cue-kit "$1" --mode lecture-notes --ocr --no-whisper \
+    --resolution 1920 --out-dir "$output_dir" > "$output_dir/notes.in-progress"
+mv "$output_dir/notes.in-progress" "$output_dir/notes.md"
+printf '%s\n' "$output_dir/notes.md"
